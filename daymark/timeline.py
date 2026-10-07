@@ -2,6 +2,7 @@
 
 import hashlib
 import tkinter as tk
+import tkinter.font as tkfont
 from datetime import datetime, time
 from tkinter import ttk
 
@@ -27,6 +28,7 @@ class Timeline(ttk.Frame):
         super().__init__(parent)
         self.store, self.on_select, self.on_edit = store, on_select, on_edit
         self.canvas = tk.Canvas(self, height=280, bg="white", highlightthickness=1, highlightbackground="#e5e5e5")
+        self.tick_font = tkfont.Font(self.canvas, family="Microsoft YaHei UI", size=9)
         self.canvas.grid(row=0, column=0, sticky="nsew")
         horizontal = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
         horizontal.grid(row=1, column=0, sticky="ew")
@@ -67,11 +69,15 @@ class Timeline(ttk.Frame):
         def x(moment):
             return 24 + (moment - origin).total_seconds() / 86400 * width
 
-        for hour in range(25):
-            xpos = 24 + hour / 24 * width
-            canvas.create_line(xpos, 43, xpos, bottom, fill="#e5e5e5")
-            if self.zoom > 1 or hour % 2 == 0:
-                canvas.create_text(xpos, 24, text=f"{hour:02d}:00", fill="#111111", font=("Microsoft YaHei UI", 9))
+        major, minor = self._tick_intervals(width)
+        for minute in range(0, 1441, minor):
+            xpos = 24 + minute / 1440 * width
+            is_major = minute % major == 0
+            canvas.create_line(xpos, 43, xpos, bottom if is_major else 49,
+                               fill="#e5e5e5" if is_major else "#bbbbbb", tags=("time-tick",))
+            if is_major:
+                canvas.create_text(xpos, 24, text=f"{minute // 60:02d}:{minute % 60:02d}",
+                                   fill="#111111", font=self.tick_font, tags=("time-label",))
         for lane_index, lane in enumerate(lanes):
             top = 50 + lane_index * 56
             for event, start, end in lane:
@@ -99,6 +105,14 @@ class Timeline(ttk.Frame):
             current = x(now)
             canvas.create_line(current, 42, current, bottom, fill="#c46d49", width=2, dash=(3, 3))
             canvas.create_polygon(current - 4, 39, current + 4, 39, current, 45, fill="#c46d49")
+
+    def _tick_intervals(self, width):
+        major = 120 if self.zoom == 1 else 60 if self.zoom < 2 else 30 if self.zoom < 3 else 15
+        # Narrow windows use a larger label interval to keep the times readable.
+        while width * major / 1440 < self.tick_font.measure("00:00") + 14:
+            major *= 2
+        minor = 60 if major >= 120 else 15 if major == 60 else 10 if major == 30 else 5
+        return major, minor
 
     def _event_at(self, pointer):
         xpos, ypos = self.canvas.canvasx(pointer.x), self.canvas.canvasy(pointer.y)

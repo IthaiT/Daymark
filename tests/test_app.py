@@ -81,21 +81,46 @@ class AppTests(unittest.TestCase):
         timeline = self.app.timeline
         canvas = timeline.canvas
         self.assertEqual(timeline.zoom, 1)
-        # The first and last grid lines mark midnight at each end of the day.
-        grid = [item for item in canvas.find_all() if canvas.type(item) == "line"][:25]
+        # The first and last time ticks mark midnight at each end of the day.
+        grid = canvas.find_withtag("time-tick")
         original_span = canvas.coords(grid[-1])[0] - canvas.coords(grid[0])[0]
         self.wheel(-120, state=0x4)
         self.assertEqual(timeline.zoom, 1)
         for _ in range(16):
             self.wheel(120, state=0x4)
         self.assertEqual(timeline.zoom, 4)
-        grid = [item for item in canvas.find_all() if canvas.type(item) == "line"][:25]
+        grid = canvas.find_withtag("time-tick")
         enlarged_span = canvas.coords(grid[-1])[0] - canvas.coords(grid[0])[0]
         self.assertAlmostEqual(enlarged_span, original_span * 4)
         for _ in range(16):
             self.wheel(-120, state=0x4)
         self.assertEqual(timeline.zoom, 1)
         self.assertAlmostEqual(canvas.xview()[0], 0, places=3)
+
+    def test_zoom_adds_minute_ticks_and_keeps_labels_readable(self):
+        timeline = self.app.timeline
+        canvas = timeline.canvas
+        for geometry in ("1100x740", "1360x900"):
+            with self.subTest(geometry=geometry):
+                self.app.geometry(geometry)
+                timeline.zoom = 1
+                timeline.draw()
+                self.app.update()
+                original_labels = len(canvas.find_withtag("time-label"))
+                original_ticks = len(canvas.find_withtag("time-tick"))
+                previous_count = original_labels
+                for _ in range(12):
+                    self.wheel(120, state=0x4)
+                    labels = canvas.find_withtag("time-label")
+                    self.assertGreaterEqual(len(labels), previous_count)
+                    previous_count = len(labels)
+                    for left, right in zip(labels, labels[1:]):
+                        self.assertLess(canvas.bbox(left)[2], canvas.bbox(right)[0])
+                texts = [canvas.itemcget(item, "text") for item in labels]
+                self.assertEqual((texts[0], texts[-1]), ("00:00", "24:00"))
+                self.assertTrue(any(not text.endswith(":00") for text in texts))
+                self.assertGreater(len(labels), original_labels)
+                self.assertGreater(len(canvas.find_withtag("time-tick")), original_ticks)
 
     def test_ctrl_wheel_keeps_pointer_time_and_event_selection(self):
         start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=12)
