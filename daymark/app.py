@@ -1,14 +1,14 @@
-"""The Daymark desktop application."""
+"""The Daymark desktop journal and direct tag-tree interactions."""
 
 import tkinter as tk
 from datetime import date, datetime, timedelta
 from tkinter import messagebox, ttk
 
-from .dialogs import EventDialog, ReassignDialog, TagChoice, TagDialog
+from .dialogs import EventDialog, ReassignDialog, TagDialog
 from .model import duration_text
-from .timeline import Timeline, tag_color
+from .timeline import Timeline
+from .widgets import DatePicker
 
-BG, INK, MUTED, GREEN = "#f4f2ed", "#243b33", "#78847c", "#356f64"
 FONT = "Microsoft YaHei UI"
 
 
@@ -16,20 +16,20 @@ class App(tk.Tk):
     def __init__(self, store):
         super().__init__()
         self.store = store
-        self.title("Daymark · 日迹")
-        self.configure(bg=BG)
+        self.title("Daymark")
+        self.configure(bg="white")
         width, height = min(1360, self.winfo_screenwidth() - 80), min(900, self.winfo_screenheight() - 64)
         xpos = max(0, (self.winfo_screenwidth() - width) // 2)
         ypos = max(0, (self.winfo_screenheight() - height - 40) // 2)
         self.geometry(f"{width}x{height}+{xpos}+{ypos}")
         self.minsize(1100, 740)
         self.day = date.today()
-        self.filter_tag = None
-        self.date_text = tk.StringVar(value=self.day.isoformat())
-        self.status = tk.StringVar(value="所有记录都留在这台电脑。")
-        self.timer_text = tk.StringVar()
-        self.summary_groups = {}
-        self._tick_count = 0
+        self._drag_source = None
+        self._drag_active = False
+        self._drop_target = None
+        self._drop_valid = False
+        self._drag_preview = None
+        self._expand_job = None
         self._configure_styles()
         self.columnconfigure(1, weight=1)
         self.rowconfigure(0, weight=1)
@@ -41,156 +41,109 @@ class App(tk.Tk):
         self.bind("<Control-Left>", lambda _: self.shift_day(-1) if self.grab_current() is None else None)
         self.bind("<Control-Right>", lambda _: self.shift_day(1) if self.grab_current() is None else None)
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self._tick_job = self.after(1000, self.tick)
 
     def _configure_styles(self):
         style = ttk.Style(self)
         style.theme_use("clam")
-        style.configure(".", font=(FONT, 10), background=BG, foreground=INK)
-        style.configure("TFrame", background=BG)
-        style.configure("TLabel", background=BG, foreground=INK)
-        style.configure("Muted.TLabel", foreground=MUTED, font=(FONT, 9))
-        style.configure("Title.TLabel", font=(FONT, 20, "bold"))
+        style.configure(".", font=(FONT, 10), background="white", foreground="#111111")
+        style.configure("TFrame", background="white")
+        style.configure("TLabel", background="white", foreground="#111111")
+        style.configure("Muted.TLabel", font=(FONT, 9))
         style.configure("Heading.TLabel", font=(FONT, 12, "bold"))
-        style.configure("Sidebar.TFrame", background="#e9e7de")
-        style.configure("Sidebar.TLabel", background="#e9e7de")
-        style.configure("Logo.TLabel", background="#e9e7de", font=(FONT, 23, "bold"), foreground=GREEN)
-        style.configure("SideMuted.TLabel", background="#e9e7de", foreground=MUTED, font=(FONT, 9))
-        style.configure("Card.TFrame", background="white")
-        style.configure("Card.TLabel", background="white")
-        style.configure("CardMuted.TLabel", background="white", foreground=MUTED, font=(FONT, 9))
-        style.configure("Metric.TLabel", background="white", font=(FONT, 19, "bold"), foreground=GREEN)
-        style.configure("TButton", padding=(12, 7), background="#e8ebe6", borderwidth=0)
-        style.map("TButton", background=[("active", "#dce3dc")])
-        style.configure("Accent.TButton", background=GREEN, foreground="white")
-        style.map("Accent.TButton", background=[("disabled", "#a9bcb5"), ("active", "#28584f")],
-                  foreground=[("disabled", "#edf0ee")])
-        style.configure("Danger.TButton", background="#f0e2da", foreground="#9d4f3c")
-        style.configure("TEntry", padding=7, fieldbackground="white", bordercolor="#d8ddd7")
-        style.configure("TCombobox", padding=6, fieldbackground="white", bordercolor="#d8ddd7")
+        style.configure("Logo.TLabel", font=(FONT, 23, "bold"))
+        style.configure("TButton", padding=(12, 8), background="white", bordercolor="#d4d4d4", borderwidth=1)
+        style.map("TButton", background=[("active", "#f3f4f6")], foreground=[("disabled", "#999999")])
+        style.configure("Accent.TButton", font=(FONT, 10, "bold"))
+        style.configure("Selected.TButton", background="#e5e7eb")
+        style.configure("TEntry", padding=7, fieldbackground="white", bordercolor="#d4d4d4")
+        style.map("TEntry", fieldbackground=[("readonly", "white")], foreground=[("readonly", "#111111")])
+        style.configure("TCombobox", padding=6, fieldbackground="white", bordercolor="#d4d4d4")
         style.map("TCombobox", fieldbackground=[("readonly", "white")])
-        style.configure("Treeview", background="white", fieldbackground="white", foreground=INK,
-                        rowheight=28, borderwidth=0)
-        style.map("Treeview", background=[("selected", "#dce9e2")], foreground=[("selected", INK)])
-        style.configure("Treeview.Heading", background="#edf0eb", font=(FONT, 9), padding=(6, 8))
-        style.configure("Tags.Treeview", background="#e9e7de", fieldbackground="#e9e7de", rowheight=34)
-        style.configure("Tooltip.TLabel", background="#243b33", foreground="white", font=(FONT, 10))
+        style.configure("Treeview", background="white", fieldbackground="white", foreground="#111111",
+                        rowheight=36, borderwidth=0)
+        style.map("Treeview", background=[("selected", "#e5e7eb")], foreground=[("selected", "#111111")])
+        style.configure("Treeview.Heading", background="white", font=(FONT, 10), padding=(6, 9))
+        style.configure("Tooltip.TLabel", background="white", foreground="#111111", relief="solid", borderwidth=1)
 
     def _build_sidebar(self):
-        sidebar = ttk.Frame(self, style="Sidebar.TFrame", padding=(20, 28))
+        sidebar = ttk.Frame(self, padding=(20, 24))
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.configure(width=250)
         sidebar.grid_propagate(False)
         sidebar.columnconfigure(0, weight=1)
-        sidebar.rowconfigure(4, weight=1)
-        ttk.Label(sidebar, text="Daymark", style="Logo.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(sidebar, text="日迹 / 时间有迹可循", style="SideMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 32))
-        ttk.Label(sidebar, text="我的标签", style="Sidebar.TLabel", font=(FONT, 12, "bold")).grid(row=2, column=0, sticky="w")
-        ttk.Button(sidebar, text="显示全部事件", command=self.clear_filter).grid(row=3, column=0, sticky="ew", pady=(12, 10))
-        tree_box = ttk.Frame(sidebar, style="Sidebar.TFrame")
-        tree_box.grid(row=4, column=0, sticky="nsew")
+        sidebar.rowconfigure(2, weight=1)
+        ttk.Label(sidebar, text="Daymark", style="Logo.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 28))
+        ttk.Label(sidebar, text="我的标签", style="Heading.TLabel").grid(row=1, column=0, sticky="w", pady=(0, 12))
+        tree_box = ttk.Frame(sidebar)
+        tree_box.grid(row=2, column=0, sticky="nsew")
         tree_box.columnconfigure(0, weight=1)
         tree_box.rowconfigure(0, weight=1)
-        self.tags_tree = ttk.Treeview(tree_box, show="tree", selectmode="browse", style="Tags.Treeview")
+        self.tags_tree = ttk.Treeview(tree_box, show="tree", selectmode="browse")
         self.tags_tree.column("#0", width=180, minwidth=80)
         self.tags_tree.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(tree_box, command=self.tags_tree.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.tags_tree.configure(yscrollcommand=scroll.set)
-        self.tags_tree.bind("<<TreeviewSelect>>", self.tag_selected)
+        self.tags_tree.tag_configure("drop", background="#f0f0f0")
+        self.tags_tree.bind("<Button-3>", self.tag_context_menu)
         self.tags_tree.bind("<Double-1>", lambda _: self.edit_tag())
-        ttk.Label(sidebar, text="选择标签可筛选整个分支的事件。", style="SideMuted.TLabel", wraplength=205).grid(
-            row=5, column=0, sticky="w", pady=(12, 14))
-        ttk.Button(sidebar, text="＋ 新增标签", command=self.add_tag).grid(row=6, column=0, sticky="ew", pady=(0, 8))
-        ttk.Button(sidebar, text="修改 / 移动标签", command=self.edit_tag).grid(row=7, column=0, sticky="ew", pady=(0, 8))
-        ttk.Button(sidebar, text="删除标签", command=self.delete_tag).grid(row=8, column=0, sticky="ew")
-        ttk.Label(sidebar, text="慢慢记录，慢慢看清。", style="SideMuted.TLabel").grid(row=9, column=0, sticky="w", pady=(28, 0))
+        self.tags_tree.bind("<ButtonPress-1>", self.drag_start)
+        self.tags_tree.bind("<B1-Motion>", self.drag_motion)
+        self.tags_tree.bind("<ButtonRelease-1>", self.drag_release)
+        self.tags_tree.bind("<Escape>", lambda _: self.cancel_drag())
+        ttk.Separator(self, orient="vertical").grid(row=0, column=0, sticky="nse")
 
     def _build_main(self):
-        main = ttk.Frame(self, padding=(24, 16, 24, 10))
+        main = ttk.Frame(self, padding=(24, 24))
         main.grid(row=0, column=1, sticky="nsew")
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(5, weight=1)
-        header = ttk.Frame(main)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        ttk.Label(header, text="今天，时间去了哪里？", style="Title.TLabel").pack(side="left")
-        ttk.Button(header, text="＋ 补录事件", command=self.add_event, style="Accent.TButton").pack(side="right")
+        main.rowconfigure(1, weight=1, minsize=280)
+        main.rowconfigure(2, weight=1, minsize=250)
         date_bar = ttk.Frame(main)
-        date_bar.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        date_bar.grid(row=0, column=0, sticky="ew", pady=(0, 24))
         ttk.Button(date_bar, text="‹", width=3, command=lambda: self.shift_day(-1)).pack(side="left")
-        self.date_entry = ttk.Entry(date_bar, textvariable=self.date_text, width=13)
-        self.date_entry.pack(side="left", padx=8)
-        self.date_entry.bind("<Return>", lambda _: self.set_day())
+        self.date_picker = DatePicker(date_bar, self.day, on_change=self.set_day)
+        self.date_picker.pack(side="left", padx=8)
+        self.date_picker.entry.bind("<Return>", lambda _: self.set_day())
         ttk.Button(date_bar, text="查看", command=self.set_day).pack(side="left")
         ttk.Button(date_bar, text="›", width=3, command=lambda: self.shift_day(1)).pack(side="left", padx=8)
         ttk.Button(date_bar, text="今天", command=self.go_today).pack(side="left")
-        self.weekday_label = ttk.Label(date_bar, style="Muted.TLabel")
+        self.weekday_label = ttk.Label(date_bar)
         self.weekday_label.pack(side="left", padx=14)
-        self.filter_label = ttk.Label(date_bar, style="Muted.TLabel")
-        self.filter_label.pack(side="right")
-        metrics = ttk.Frame(main)
-        metrics.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-        self.metric_values = []
-        for index, (title, note) in enumerate((
-            ("实际覆盖", "重叠时间只计算一次"),
-            ("事件累计", "重叠记录分别累加"),
-            ("全天未记录", "24 小时减去实际覆盖"),
-        )):
-            metrics.columnconfigure(index, weight=1, uniform="metric")
-            card = ttk.Frame(metrics, style="Card.TFrame", padding=(16, 9))
-            card.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 10, 0))
-            ttk.Label(card, text=title, style="CardMuted.TLabel").pack(anchor="w")
-            value = ttk.Label(card, style="Metric.TLabel")
-            value.pack(anchor="w", pady=(4, 2))
-            ttk.Label(card, text=note, style="CardMuted.TLabel").pack(anchor="w")
-            self.metric_values.append(value)
-        quick = ttk.Frame(main, style="Card.TFrame", padding=12)
-        quick.grid(row=3, column=0, sticky="ew", pady=(0, 12))
-        quick.columnconfigure(0, weight=1)
-        quick.columnconfigure(1, weight=1)
-        ttk.Label(quick, text="正在做什么？", style="CardMuted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        ttk.Label(quick, text="归属标签", style="CardMuted.TLabel").grid(row=0, column=1, sticky="w", padx=10, pady=(0, 6))
-        self.quick_title = ttk.Entry(quick, width=25)
-        self.quick_title.grid(row=1, column=0, sticky="ew")
-        self.quick_tag = TagChoice(quick, self.store, width=32)
-        self.quick_tag.grid(row=1, column=1, sticky="ew", padx=10)
-        self.start_button = ttk.Button(quick, text="▶ 开始计时", command=self.start_timer, style="Accent.TButton")
-        self.start_button.grid(row=1, column=2)
-        self.stop_button = ttk.Button(quick, text="■ 结束", command=self.stop_timer)
-        self.stop_button.grid(row=1, column=3, padx=(8, 0))
-        ttk.Label(quick, textvariable=self.timer_text, style="CardMuted.TLabel").grid(row=2, column=0, columnspan=4, sticky="w", pady=(8, 0))
-        self.quick_title.bind("<Return>", lambda _: self.start_timer())
+        ttk.Button(date_bar, text="＋ 补录事件", command=self.add_event, style="Accent.TButton").pack(side="right")
         timeline_box = ttk.Frame(main)
-        timeline_box.grid(row=4, column=0, sticky="ew", pady=(0, 12))
+        timeline_box.grid(row=1, column=0, sticky="nsew", pady=(0, 24))
         timeline_box.columnconfigure(0, weight=1)
-        timeline_heading = ttk.Frame(timeline_box)
-        timeline_heading.grid(row=0, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(timeline_heading, text="一天的轨迹", style="Heading.TLabel").pack(side="left")
-        ttk.Label(timeline_heading, text="点击选中 · 双击编辑 · 滚轮横移", style="Muted.TLabel").pack(side="left", padx=16)
-        self.zoom_choice = ttk.Combobox(timeline_heading, values=("全天", "2× 放大", "4× 放大"), state="readonly", width=10)
+        timeline_box.rowconfigure(1, weight=1)
+        heading = ttk.Frame(timeline_box)
+        heading.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        ttk.Label(heading, text="一天的轨迹", style="Heading.TLabel").pack(side="left")
+        ttk.Label(heading, text="点击选中 · 双击编辑 · 滚轮横移", style="Muted.TLabel").pack(side="left", padx=16)
+        self.zoom_choice = ttk.Combobox(heading, values=("全天", "2× 放大", "4× 放大"), state="readonly", width=10)
         self.zoom_choice.current(0)
         self.zoom_choice.pack(side="right")
         self.zoom_choice.bind("<<ComboboxSelected>>", self.zoom_changed)
         self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event)
-        self.timeline.grid(row=1, column=0, sticky="ew")
+        self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
-        bottom.grid(row=5, column=0, sticky="nsew")
+        bottom.grid(row=2, column=0, sticky="nsew")
         bottom.columnconfigure(0, weight=1)
         bottom.rowconfigure(1, weight=1)
         toolbar = ttk.Frame(bottom)
-        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.events_heading = ttk.Label(toolbar, text="事件明细", style="Heading.TLabel")
         self.events_heading.pack(side="left")
-        ttk.Button(toolbar, text="删除", command=self.delete_events, style="Danger.TButton").pack(side="right")
+        ttk.Button(toolbar, text="删除", command=self.delete_events).pack(side="right")
         ttk.Button(toolbar, text="更换标签", command=self.reassign_events).pack(side="right", padx=8)
         ttk.Button(toolbar, text="编辑", command=self.edit_selected_event).pack(side="right")
-        table_box = ttk.Frame(bottom, style="Card.TFrame")
+        table_box = ttk.Frame(bottom)
         table_box.grid(row=1, column=0, sticky="nsew")
         table_box.columnconfigure(0, weight=1)
         table_box.rowconfigure(0, weight=1)
-        self.events_tree = ttk.Treeview(table_box, columns=("title", "start", "end", "tag", "duration"), show="headings", selectmode="extended", height=5)
-        for column, label, width in (("title", "事件", 160), ("start", "开始", 88), ("end", "结束", 88),
-                                     ("tag", "标签路径", 230), ("duration", "本日用时", 95)):
+        self.events_tree = ttk.Treeview(table_box, columns=("title", "start", "end", "tag", "duration"),
+                                       show="headings", selectmode="extended", height=8)
+        for column, label, width in (("title", "事件", 240), ("start", "开始", 110), ("end", "结束", 110),
+                                     ("tag", "标签", 180), ("duration", "本日用时", 130)):
             self.events_tree.heading(column, text=label)
             self.events_tree.column(column, width=width, minwidth=width, stretch=column in ("title", "tag"))
         self.events_tree.grid(row=0, column=0, sticky="nsew")
@@ -201,136 +154,155 @@ class App(tk.Tk):
         self.events_tree.configure(yscrollcommand=table_y.set, xscrollcommand=table_x.set)
         self.events_tree.bind("<Double-1>", lambda _: self.edit_selected_event())
         self.events_tree.bind("<<TreeviewSelect>>", lambda _: self.draw_timeline())
-        distribution = ttk.Frame(bottom, style="Card.TFrame", padding=14, width=230)
-        distribution.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(14, 0))
-        distribution.grid_propagate(False)
-        distribution.columnconfigure(0, weight=1)
-        distribution.rowconfigure(2, weight=1)
-        ttk.Label(distribution, text="用时分布", style="Card.TLabel", font=(FONT, 12, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(distribution, text="全天 · 按一级标签累计", style="CardMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(4, 12))
-        self.summary_canvas = tk.Canvas(distribution, width=185, height=150, bg="white", highlightthickness=0)
-        self.summary_canvas.grid(row=2, column=0, sticky="nsew")
-        summary_scroll = ttk.Scrollbar(distribution, command=self.summary_canvas.yview)
-        summary_scroll.grid(row=2, column=1, sticky="ns")
-        self.summary_canvas.configure(yscrollcommand=summary_scroll.set)
-        self.summary_canvas.bind("<Configure>", lambda _: self.draw_summary())
-        self.summary_canvas.bind("<MouseWheel>", lambda event: self.summary_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units"))
-        ttk.Label(main, textvariable=self.status, style="Muted.TLabel").grid(row=6, column=0, sticky="w", pady=(10, 0))
-
-    def visible_events(self, now=None):
-        events = self.store.events_on(self.day, now)
-        if self.filter_tag:
-            branch = self.store.descendants(self.filter_tag)
-            events = [event for event in events if event.tag_id in branch]
-        return events
 
     def refresh_tags(self, selected=None):
-        selected = selected or self.filter_tag
+        selected = selected or self.selected_tag()
         initial = not self.tags_tree.get_children()
         expanded = {tag_id for tag_id in self.store.tags if self.tags_tree.exists(tag_id) and self.tags_tree.item(tag_id, "open")}
         self.tags_tree.delete(*self.tags_tree.get_children())
         for tag in self.store.ordered_tags():
-            self.tags_tree.insert(tag.parent_id or "", "end", iid=tag.id, text=tag.name,
-                                  open=initial or tag.id in expanded)
+            self.tags_tree.insert(tag.parent_id or "", "end", iid=tag.id, text=tag.name, open=initial or tag.id in expanded)
         if selected in self.store.tags:
             self.tags_tree.selection_set(selected)
             self.tags_tree.see(selected)
-        current_tag = self.quick_tag.tag_id()
-        self.quick_tag.ids = [None] + [tag.id for tag in self.store.ordered_tags()]
-        self.quick_tag.configure(values=["未分类"] + [self.store.tag_path(tag_id) for tag_id in self.quick_tag.ids[1:]])
-        self.quick_tag.current(self.quick_tag.ids.index(current_tag) if current_tag in self.quick_tag.ids else 0)
 
     def refresh(self):
-        now = datetime.now()
         selected = self.events_tree.selection()
-        events = self.visible_events(now)
+        events = self.store.events_on(self.day)
         self.events_tree.delete(*self.events_tree.get_children())
         for event in events:
-            start, end = event.interval_on(self.day, now)
+            interval = event.interval_on(self.day)
             def clock(moment):
                 return moment.strftime("%H:%M") if moment.date() == self.day else moment.strftime("%m-%d %H:%M")
             self.events_tree.insert("", "end", iid=event.id, values=(
-                event.title, clock(event.start), clock(event.end) if event.end else "计时中",
-                self.store.tag_path(event.tag_id), duration_text((end - start).total_seconds()),
+                event.title, clock(event.start), clock(event.end) if event.end else "待补全",
+                self.store.tag_name(event.tag_id), duration_text((interval[1] - interval[0]).total_seconds()) if interval else "—",
             ))
         self.events_tree.selection_set([event_id for event_id in selected if self.events_tree.exists(event_id)])
         self.events_heading.configure(text=f"事件明细 · {len(events)}")
-        self.date_text.set(self.day.isoformat())
+        self.date_picker.value.set(self.day.isoformat())
         self.weekday_label.configure(text="星期" + "一二三四五六日"[self.day.weekday()])
-        path = self.store.tag_path(self.filter_tag) if self.filter_tag else "全部标签"
-        self.filter_label.configure(text=path if len(path) <= 24 else path[:23] + "…")
-        total, covered, self.summary_groups = self.store.summary(self.day, now)
-        for label, seconds in zip(self.metric_values, (covered, total, 86400 - covered)):
-            label.configure(text=duration_text(seconds))
-        self.status.set("存在重叠事件，时间轴已分行展示；实际覆盖时间已去重。" if total > covered else "所有记录都留在这台电脑。Ctrl+N 补录事件；Ctrl+←/→ 切换日期。")
-        self.draw_timeline(now)
-        self.draw_summary()
-        self.update_timer_text(now)
+        self.draw_timeline()
 
-    def draw_timeline(self, now=None):
-        now = now or datetime.now()
-        self.timeline.update_events(self.visible_events(now), self.day, now, self.events_tree.selection())
+    def draw_timeline(self):
+        self.timeline.update_events(self.store.events_on(self.day), self.day, self.events_tree.selection())
 
-    def draw_summary(self):
-        canvas = self.summary_canvas
-        canvas.delete("all")
-        width = max(140, canvas.winfo_width() - 4)
-        total = sum(self.summary_groups.values())
-        if not total:
-            canvas.create_text(0, 15, anchor="nw", text="记录后，在这里看见分配。", fill=MUTED, font=(FONT, 9))
-        for index, (tag_id, seconds) in enumerate(sorted(self.summary_groups.items(), key=lambda item: -item[1])):
-            top = index * 62
-            name = self.store.tags[tag_id].name if tag_id else "未分类"
-            canvas.create_text(0, top + 3, anchor="nw", text=name[:10], fill=INK, font=(FONT, 10))
-            canvas.create_text(width, top + 4, anchor="ne", text=f"{seconds / total:.0%}", fill=MUTED, font=(FONT, 9))
-            canvas.create_rectangle(0, top + 26, width, top + 31, fill="#edf0eb", outline="")
-            canvas.create_rectangle(0, top + 26, width * seconds / total, top + 31, fill=tag_color(self.store, tag_id), outline="")
-            canvas.create_text(0, top + 37, anchor="nw", text=duration_text(seconds), fill=MUTED, font=(FONT, 9))
-        canvas.configure(scrollregion=(0, 0, width, max(100, len(self.summary_groups) * 62)))
-
-    def tag_selected(self, _=None):
+    def selected_tag(self):
         selected = self.tags_tree.selection()
-        self.filter_tag = selected[0] if selected else None
-        if self.filter_tag:
-            self.quick_tag.current(self.quick_tag.ids.index(self.filter_tag))
-        self.refresh()
-
-    def clear_filter(self):
-        self.tags_tree.selection_remove(self.tags_tree.selection())
-        self.filter_tag = None
-        self.refresh()
+        return selected[0] if selected else None
 
     def tag_saved(self, tag_id):
-        self.filter_tag = tag_id
         self.refresh_tags(tag_id)
         self.refresh()
 
-    def add_tag(self):
-        TagDialog(self, self.store, self.tag_saved, parent_id=self.filter_tag)
+    def add_tag(self, parent_id=None):
+        TagDialog(self, self.store, self.tag_saved, parent_id=parent_id)
 
     def edit_tag(self):
-        if self.filter_tag:
-            TagDialog(self, self.store, self.tag_saved, tag_id=self.filter_tag)
-        else:
-            messagebox.showinfo("修改标签", "请先在左侧选择一个标签。", parent=self)
+        if tag_id := self.selected_tag():
+            TagDialog(self, self.store, self.tag_saved, tag_id=tag_id)
 
     def delete_tag(self):
-        if not self.filter_tag:
-            messagebox.showinfo("删除标签", "请先在左侧选择一个标签。", parent=self)
+        if tag_id := self.selected_tag():
+            if messagebox.askyesno("删除标签", f"删除「{self.store.tag_name(tag_id)}」？", parent=self):
+                if self.try_action(lambda: self.store.delete_tag(tag_id)):
+                    self.refresh_tags()
+                    self.refresh()
+
+    def tag_context_menu(self, pointer):
+        self.cancel_drag()
+        tag_id = self.tags_tree.identify_row(pointer.y)
+        if tag_id:
+            self.tags_tree.selection_set(tag_id)
+        else:
+            self.tags_tree.selection_remove(self.tags_tree.selection())
+        if hasattr(self, "tag_menu"):
+            self.tag_menu.destroy()
+        self.tag_menu = menu = tk.Menu(self, tearoff=False, bg="white", fg="#111111",
+                                       activebackground="#e5e7eb", activeforeground="#111111")
+        menu.add_command(label="新增子标签" if tag_id else "新增一级标签", command=lambda: self.add_tag(tag_id or None))
+        if tag_id:
+            menu.add_command(label="修改标签", command=self.edit_tag)
+            menu.add_command(label="删除标签", command=self.delete_tag)
+            if self.store.tags[tag_id].parent_id:
+                menu.add_separator()
+                menu.add_command(label="移至一级标签", command=lambda: self.move_tag(tag_id, None))
+        try:
+            menu.tk_popup(pointer.x_root, pointer.y_root)
+        finally:
+            menu.grab_release()
+
+    def drag_start(self, pointer):
+        self.cancel_drag()
+        row = self.tags_tree.identify_row(pointer.y)
+        element = self.tags_tree.identify_element(pointer.x, pointer.y)
+        if row and "indicator" not in element:
+            self._drag_source = row
+            self._drag_origin = (pointer.x, pointer.y)
+
+    def drag_motion(self, pointer):
+        if not self._drag_source:
             return
-        tag_id = self.filter_tag
-        if messagebox.askyesno("删除标签", f"删除「{self.store.tag_path(tag_id)}」？", parent=self):
-            if self.try_action(lambda: self.store.delete_tag(tag_id)):
-                self.filter_tag = None
-                self.refresh_tags()
-                self.refresh()
+        if not self._drag_active and abs(pointer.x - self._drag_origin[0]) + abs(pointer.y - self._drag_origin[1]) < 6:
+            return
+        self._drag_active = True
+        target = self.tags_tree.identify_row(pointer.y) or None
+        inside = 0 <= pointer.x < self.tags_tree.winfo_width() and 0 <= pointer.y < self.tags_tree.winfo_height()
+        self._drop_valid = inside and target not in self.store.descendants(self._drag_source)
+        if target != self._drop_target:
+            self._clear_drop_highlight()
+            self._drop_target = target
+            if target and self._drop_valid:
+                self.tags_tree.item(target, tags=("drop",))
+                self._expand_job = self.after(450, lambda target=target: self.tags_tree.item(target, open=True))
+        self.tags_tree.configure(cursor="fleur" if self._drop_valid else "X_cursor")
+        if pointer.y < 24:
+            self.tags_tree.yview_scroll(-1, "units")
+        elif pointer.y > self.tags_tree.winfo_height() - 24:
+            self.tags_tree.yview_scroll(1, "units")
+        if self._drag_preview is None:
+            self._drag_preview = tk.Toplevel(self)
+            self._drag_preview.overrideredirect(True)
+            ttk.Label(self._drag_preview, text=self.store.tag_name(self._drag_source), padding=8,
+                      relief="solid", borderwidth=1).pack()
+        self._drag_preview.geometry(f"+{pointer.x_root + 16}+{pointer.y_root + 12}")
+
+    def drag_release(self, pointer):
+        source = self._drag_source
+        target = self.tags_tree.identify_row(pointer.y) or None
+        inside = 0 <= pointer.x < self.tags_tree.winfo_width() and 0 <= pointer.y < self.tags_tree.winfo_height()
+        valid = (self._drag_active and source is not None and inside
+                 and target not in self.store.descendants(source))
+        self.cancel_drag()
+        if source and valid:
+            self.move_tag(source, target)
+
+    def move_tag(self, source, target):
+        tag = self.store.tags[source]
+        if target != tag.parent_id and self.try_action(lambda: self.store.save_tag(tag.name, target, source)):
+            self.tag_saved(source)
+
+    def _clear_drop_highlight(self):
+        if self._expand_job is not None:
+            self.after_cancel(self._expand_job)
+            self._expand_job = None
+        if self._drop_target and self.tags_tree.exists(self._drop_target):
+            self.tags_tree.item(self._drop_target, tags=())
+
+    def cancel_drag(self):
+        self._clear_drop_highlight()
+        if self._drag_preview is not None:
+            self._drag_preview.destroy()
+        self._drag_source, self._drag_preview, self._drop_target = None, None, None
+        self._drag_active, self._drop_valid = False, False
+        self.tags_tree.configure(cursor="")
 
     def set_day(self):
         try:
-            self.day = datetime.strptime(self.date_text.get().strip(), "%Y-%m-%d").date()
+            self.day = datetime.strptime(self.date_picker.get().strip(), "%Y-%m-%d").date()
         except ValueError:
             messagebox.showerror("日期格式", "请使用 YYYY-MM-DD，例如 2026-10-07。", parent=self)
-            self.date_text.set(self.day.isoformat())
+            self.date_picker.value.set(self.day.isoformat())
             return
         self.refresh()
 
@@ -350,7 +322,7 @@ class App(tk.Tk):
         self.draw_timeline()
 
     def add_event(self):
-        EventDialog(self, self.store, self.refresh, self.day, tag_id=self.filter_tag)
+        EventDialog(self, self.store, self.refresh, self.day)
 
     def select_event(self, event_id):
         if self.events_tree.exists(event_id):
@@ -389,37 +361,7 @@ class App(tk.Tk):
             messagebox.showerror("操作未完成", str(error), parent=self)
             return False
 
-    def start_timer(self):
-        if self.try_action(lambda: self.store.start_timer(self.quick_title.get(), self.quick_tag.tag_id())):
-            self.quick_title.delete(0, "end")
-            self.day = date.today()
-            self.clear_filter()
-
-    def stop_timer(self):
-        if self.try_action(self.store.stop_timer):
-            self.refresh()
-
-    def update_timer_text(self, now):
-        running = self.store.running_event
-        self.start_button.configure(state="disabled" if running else "normal")
-        self.stop_button.configure(state="normal" if running else "disabled")
-        if running:
-            seconds = max(0, int((now - running.start).total_seconds()))
-            hours, remainder = divmod(seconds, 3600)
-            minutes, seconds = divmod(remainder, 60)
-            title = running.title[:30] + ("…" if len(running.title) > 30 else "")
-            self.timer_text.set(f"进行中 · {title} · {hours:02d}:{minutes:02d}:{seconds:02d}   关闭软件后仍会保留开始时间。")
-        else:
-            self.timer_text.set("为一件事按下开始；完成后结束计时。忘了记录，也可以稍后补录。")
-
-    def tick(self):
-        self.update_timer_text(datetime.now())
-        self._tick_count += 1
-        if self.store.running_event and self._tick_count % 10 == 0 and self.grab_current() is None:
-            self.refresh()
-        self._tick_job = self.after(1000, self.tick)
-
     def close(self):
-        self.after_cancel(self._tick_job)
+        self.cancel_drag()
         self.timeline._hide_tooltip()
         self.destroy()

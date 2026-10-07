@@ -6,11 +6,11 @@ import os
 import tempfile
 import time as clock
 from dataclasses import asdict, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from .model import Event, Tag, covered_seconds
+from .model import Event, Tag
 
 CSV_FIELDS = ("id", "title", "tag_id", "start", "end", "notes")
 DEFAULT_TAGS = (
@@ -96,8 +96,6 @@ class Store:
                 raise ValueError("标签 ID 必须是非空字符串。")
             if not isinstance(tag.name, str) or not tag.name.strip():
                 raise ValueError("标签名称不能为空。")
-            if "/" in tag.name or "→" in tag.name:
-                raise ValueError("标签名称不能包含 / 或 →，它们用于表示标签路径。")
             if tag.parent_id is not None and tag.parent_id not in tags:
                 raise ValueError(f"标签「{tag.name}」的父标签不存在。")
             key = (tag.parent_id, tag.name.strip().casefold())
@@ -130,7 +128,7 @@ class Store:
         except (ValueError, TypeError, KeyError, RecursionError) as error:
             raise DataError(f"无法读取 {self.tags_path}：{error}") from error
 
-    def _validate_event(self, event: Event):
+    def _validate_event(self, event: Event, allow_incomplete: bool = False):
         if not isinstance(event.id, str) or not event.id:
             raise ValueError("事件 ID 不能为空。")
         if not isinstance(event.title, str) or not event.title.strip():
@@ -139,6 +137,8 @@ class Store:
             raise ValueError("所选标签不存在。")
         if not isinstance(event.notes, str):
             raise ValueError("备注必须是文本。")
+        if event.end is None and not allow_incomplete:
+            raise ValueError("请填写事件的结束时间。")
         if event.start.tzinfo is not None or (event.end and event.end.tzinfo is not None):
             raise ValueError("时间应为本机本地时间，不带时区后缀。")
         if event.end is not None and event.end <= event.start:
@@ -163,28 +163,32 @@ class Store:
                             datetime.fromisoformat(row["end"]) if row["end"] else None,
                             row["notes"],
                         )
-                        self._validate_event(event)
+                        self._validate_event(event, allow_incomplete=True)
                         if event.id in events:
                             raise ValueError("事件 ID 重复。")
                         events[event.id] = event
                     except (ValueError, TypeError) as error:
                         raise ValueError(f"第 {line} 行：{error}") from error
-            if sum(event.end is None for event in events.values()) > 1:
-                raise ValueError("只能有一个正在计时的事件。")
             return events
         except (ValueError, TypeError, csv.Error) as error:
             raise DataError(f"无法读取 {self.events_path}：{error}") from error
 
-    def tag_path(self, tag_id: str | None) -> str:
-        names = []
+    def tag_ancestors(self, tag_id: str | None) -> list[Tag]:
+        ancestors = []
         while tag_id:
             tag = self.tags[tag_id]
-            names.append(tag.name)
+            ancestors.append(tag)
             tag_id = tag.parent_id
-        return " → ".join(reversed(names)) if names else "未分类"
+        return list(reversed(ancestors))
+
+    def tag_name(self, tag_id: str | None) -> str:
+        return self.tags[tag_id].name if tag_id else "未分类"
+
+    def tag_outline(self, tag_id: str | None) -> str:
+        return "\n".join("  " * depth + tag.name for depth, tag in enumerate(self.tag_ancestors(tag_id))) or "未分类"
 
     def ordered_tags(self) -> list[Tag]:
-        return sorted(self.tags.values(), key=lambda tag: self.tag_path(tag.id).casefold())
+        return sorted(self.tags.values(), key=lambda tag: tuple(item.name.casefold() for item in self.tag_ancestors(tag.id)))
 
     def descendants(self, tag_id: str) -> set[str]:
         result = {tag_id}
@@ -218,31 +222,9 @@ class Store:
 
     def save_event(self, event: Event):
         self._validate_event(event)
-        if event.end is None and any(
-            other.end is None and other.id != event.id for other in self.events.values()
-        ):
-            raise ValueError("已有一个事件正在计时，请先结束它。")
         events = {**self.events, event.id: event}
         self._write_events(events)
         self.events = events
-
-    @property
-    def running_event(self) -> Event | None:
-        return next((event for event in self.events.values() if event.end is None), None)
-
-    def start_timer(self, title: str, tag_id: str | None, notes: str = "", now: datetime | None = None) -> Event:
-        event = Event(uuid4().hex, title.strip(), tag_id, (now or datetime.now()).replace(microsecond=0), None, notes)
-        self.save_event(event)
-        return event
-
-    def stop_timer(self, now: datetime | None = None):
-        event = self.running_event
-        if event is None:
-            raise ValueError("没有正在计时的事件。")
-        end = (now or datetime.now()).replace(microsecond=0)
-        if end == event.start:
-            end += timedelta(seconds=1)
-        self.save_event(replace(event, end=end))
 
     def delete_events(self, event_ids: list[str]):
         events = {key: value for key, value in self.events.items() if key not in event_ids}
@@ -258,24 +240,9 @@ class Store:
         self._write_events(events)
         self.events = events
 
-    def events_on(self, day: date, now: datetime | None = None) -> list[Event]:
-        now = now or datetime.now()
+    def events_on(self, day: date) -> list[Event]:
         return sorted(
-            (event for event in self.events.values() if event.interval_on(day, now)),
+            (event for event in self.events.values() if event.interval_on(day)
+             or (event.end is None and event.start.date() == day)),
             key=lambda event: (event.start, event.id),
         )
-
-    def summary(self, day: date, now: datetime | None = None) -> tuple[float, float, dict[str | None, float]]:
-        """Return recorded seconds, covered seconds and totals by top-level tag."""
-        now = now or datetime.now()
-        intervals = []
-        groups: dict[str | None, float] = {}
-        for event in self.events_on(day, now):
-            start, end = event.interval_on(day, now)
-            seconds = (end - start).total_seconds()
-            intervals.append((start, end))
-            root = event.tag_id
-            while root and self.tags[root].parent_id:
-                root = self.tags[root].parent_id
-            groups[root] = groups.get(root, 0) + seconds
-        return sum(groups.values()), covered_seconds(intervals), groups

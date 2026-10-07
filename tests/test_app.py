@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from daymark.app import App
-from daymark.dialogs import EventDialog, ReassignDialog, TagDialog
+from daymark.dialogs import EventDialog, ReassignDialog
 from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
@@ -25,18 +25,58 @@ class AppTests(unittest.TestCase):
         self.app = App(self.store)
         self.addCleanup(self.app.close)
         self.app.update()
-        self.errors = patch("tkinter.messagebox.showerror", side_effect=AssertionError("Unexpected UI error"))
-        self.errors.start()
-        self.addCleanup(self.errors.stop)
+        errors = patch("tkinter.messagebox.showerror", side_effect=AssertionError("Unexpected UI error"))
+        errors.start()
+        self.addCleanup(errors.stop)
 
     @staticmethod
     def fill(entry, value):
-        entry.delete(0, "end")
-        entry.insert(0, value)
+        if hasattr(entry, "value"):
+            entry.value.set(value)
+        else:
+            entry.delete(0, "end")
+            entry.insert(0, value)
 
-    def test_add_event_edit_reassign_move_tag_and_delete(self):
-        editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7), tag_id="linux")
+    def choose_tag(self, picker, tag_id):
+        picker.button.invoke()
+        self.app.update()
+        picker.popup.tree.selection_set(f"tag:{tag_id}" if tag_id else "none")
+        picker.choose()
+        self.app.update()
+
+    def menu_for(self, tag_id=None):
+        tree = self.app.tags_tree
+        if tag_id:
+            tree.see(tag_id)
+            self.app.update()
+            y = tree.bbox(tag_id)[1] + 18
+        else:
+            y = tree.winfo_height() - 30
+        # Native Windows menu posting can enter a modal OS loop; invoke the
+        # real menu actions after verifying the mouse binding requests posting.
+        with patch("tkinter.Menu.tk_popup") as post:
+            tree.event_generate("<Button-3>", x=100, y=y)
+            self.app.update()
+            post.assert_called_once()
+        return self.app.tag_menu
+
+    def drag(self, source, target):
+        tree = self.app.tags_tree
+        tree.see(source)
+        if target:
+            tree.see(target)
+        self.app.update()
+        start_y = tree.bbox(source)[1] + 18
+        end_y = tree.bbox(target)[1] + 18 if target else tree.winfo_height() - 30
+        tree.event_generate("<ButtonPress-1>", x=130, y=start_y)
+        tree.event_generate("<B1-Motion>", x=130, y=end_y)
+        tree.event_generate("<ButtonRelease-1>", x=130, y=end_y)
+        self.app.update()
+
+    def test_add_edit_reassign_and_delete_event(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
         self.fill(editor.title_entry, "驱动开发")
+        self.choose_tag(editor.tag, "linux")
         self.fill(editor.start_date, "2026-10-07")
         self.fill(editor.start_time, "09:00")
         self.fill(editor.end_date, "2026-10-07")
@@ -48,25 +88,15 @@ class AppTests(unittest.TestCase):
         event = next(iter(self.store.events.values()))
         self.assertEqual(self.app.events_tree.get_children(), (event.id,))
         self.assertTrue(self.app.timeline.canvas.find_withtag(f"event:{event.id}"))
-        self.assertEqual(self.app.metric_values[0].cget("text"), "1 小时 30 分")
-
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 30 分")
+        self.assertEqual((event.start.second, event.end.second), (0, 0))
         editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day, event)
         self.fill(editor.title_entry, "Linux 驱动开发")
         editor.save()
         self.assertEqual(self.store.events[event.id].title, "Linux 驱动开发")
-
-        mover = TagDialog(self.app, self.store, self.app.tag_saved, "embedded")
-        mover.parent_choice.current(mover.parent_choice.ids.index("side"))
-        self.fill(mover.name, "技术")
-        mover.save()
-        self.app.update()
-        self.assertEqual(self.store.tag_path("linux"), "副业 → 技术 → Linux")
-        self.assertIn("副业 → 技术 → Linux", self.app.events_tree.item(event.id, "values"))
-
         reassign = ReassignDialog(self.app, self.store, [event.id], self.app.refresh)
-        reassign.tag.current(reassign.tag.ids.index("explore"))
+        self.choose_tag(reassign.tag, "explore")
         reassign.save()
-        self.app.clear_filter()
         self.app.select_event(event.id)
         self.app.update()
         self.assertEqual(self.store.events[event.id].tag_id, "explore")
@@ -74,26 +104,16 @@ class AppTests(unittest.TestCase):
             self.app.delete_events()
         self.assertEqual(Store(self.store.directory).events, {})
 
-    def test_timer_restore_display_and_stop(self):
-        timer = self.store.start_timer("Agent 学习", "learning", now=datetime.now() - timedelta(minutes=20))
-        self.app.store = Store(self.store.directory)
-        self.app.timeline.store = self.app.store
-        self.app.refresh()
-        self.assertIn("Agent 学习", self.app.timer_text.get())
-        self.assertEqual(str(self.app.start_button.cget("state")), "disabled")
-        self.app.stop_timer()
-        self.assertIsNotNone(Store(self.store.directory).events[timer.id].end)
-        self.assertEqual(str(self.app.stop_button.cget("state")), "disabled")
-
-    def test_filter_cross_day_timeline_selection_and_zoom(self):
+    def test_sidebar_selection_keeps_all_events_visible(self):
         start = datetime(2026, 10, 7, 23, 30)
         self.store.save_event(Event("late", "夜间学习", "linux", start, start + timedelta(hours=1)))
-        self.store.save_event(Event("other", "探索", "explore", start, start + timedelta(minutes=15)))
+        self.store.save_event(Event("other", "探索", "explore", start, start + timedelta(hours=1)))
         self.app.day = date(2026, 10, 8)
+        self.app.refresh()
         self.app.tags_tree.selection_set("work")
         self.app.update()
-        self.app.refresh()
-        self.assertEqual(self.app.events_tree.get_children(), ("late",))
+        self.assertEqual(set(self.app.events_tree.get_children()), {"late", "other"})
+        self.assertTrue(self.app.timeline.canvas.find_withtag("event:other"))
         self.assertEqual(self.app.events_tree.item("late", "values")[-1], "30 分钟")
         self.app.timeline.on_select("late")
         self.app.update()
@@ -101,9 +121,114 @@ class AppTests(unittest.TestCase):
         self.app.zoom_choice.current(2)
         self.app.zoom_changed()
         self.assertEqual(self.app.timeline.zoom, 4)
-        self.app.clear_filter()
-        self.app.shift_day(-1)
-        self.assertEqual(len(self.app.events_tree.get_children()), 2)
+
+    def test_context_menu_add_rename_and_delete(self):
+        self.menu_for("work").invoke(0)
+        dialog = self.app.grab_current()
+        self.fill(dialog.name, "新标签")
+        dialog.save()
+        self.app.update()
+        tag_id = self.app.selected_tag()
+        self.assertEqual(self.store.tags[tag_id].parent_id, "work")
+        self.menu_for(tag_id).invoke(1)
+        dialog = self.app.grab_current()
+        self.fill(dialog.name, "改名")
+        dialog.save()
+        self.app.update()
+        self.assertEqual(Store(self.store.directory).tags[tag_id].name, "改名")
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            self.menu_for(tag_id).invoke(2)
+        self.assertNotIn(tag_id, Store(self.store.directory).tags)
+        self.menu_for().invoke(0)
+        dialog = self.app.grab_current()
+        self.fill(dialog.name, "一级标签")
+        dialog.save()
+        self.app.update()
+        self.assertIsNone(self.store.tags[self.app.selected_tag()].parent_id)
+
+    def test_drag_reparents_branch_and_can_move_back_to_root(self):
+        start = datetime(2026, 10, 7, 9)
+        self.store.save_event(Event("event", "学习", "linux", start, start + timedelta(hours=1)))
+        original_events = self.store.events_path.read_bytes()
+        self.drag("embedded", "side")
+        self.assertEqual(self.store.tags["embedded"].parent_id, "side")
+        self.assertEqual(self.app.tags_tree.parent("linux"), "embedded")
+        self.assertEqual(Store(self.store.directory).events["event"].tag_id, "linux")
+        self.assertEqual(self.store.events_path.read_bytes(), original_events)
+        self.drag("embedded", None)
+        self.assertIsNone(Store(self.store.directory).tags["embedded"].parent_id)
+
+    def test_drag_to_descendant_is_rejected(self):
+        original = self.store.tags_path.read_bytes()
+        self.drag("work", "linux")
+        self.assertEqual(self.store.tags_path.read_bytes(), original)
+        self.assertIsNone(self.store.tags["work"].parent_id)
+
+    def test_drag_release_outside_the_tree_cancels_the_move(self):
+        original = self.store.tags_path.read_bytes()
+        tree = self.app.tags_tree
+        source_y = tree.bbox("embedded")[1] + 18
+        target_y = tree.bbox("side")[1] + 18
+        tree.event_generate("<ButtonPress-1>", x=130, y=source_y)
+        tree.event_generate("<B1-Motion>", x=130, y=target_y)
+        tree.event_generate("<ButtonRelease-1>", x=tree.winfo_width() + 20, y=target_y)
+        self.app.update()
+        self.assertEqual(self.store.tags_path.read_bytes(), original)
+
+    def test_tree_picker_has_hierarchy_and_restores_modal_grab(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day)
+        editor.tag.open_popup()
+        self.app.update()
+        tree = editor.tag.popup.tree
+        self.assertEqual(tree.parent("tag:linux"), "tag:embedded")
+        self.assertEqual(tree.item("tag:linux", "text"), "Linux")
+        tree.selection_set("tag:course")
+        editor.tag.choose()
+        self.assertEqual(editor.tag.get(), "某一门课程")
+        self.assertEqual(self.app.grab_current(), editor)
+        editor.destroy()
+
+    def test_calendar_and_time_can_be_selected_with_mouse_controls(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
+        editor.start_date.button.invoke()
+        self.app.update()
+        editor.start_date.popup.day_buttons[8].invoke()
+        self.assertEqual(editor.start_date.get(), "2026-10-08")
+        editor.start_time.button.invoke()
+        self.app.update()
+        popup = editor.start_time.popup
+        popup.hours.selection_clear(0, "end")
+        popup.hours.selection_set(14)
+        popup.minutes.selection_clear(0, "end")
+        popup.minutes.selection_set(35)
+        editor.start_time.choose()
+        self.assertEqual(editor.start_time.get(), "14:35")
+        self.assertEqual(self.app.grab_current(), editor)
+        editor.destroy()
+        self.app.date_picker.value.set("2026-10-07")
+        self.app.date_picker.button.invoke()
+        self.app.update()
+        self.app.date_picker.popup.day_buttons[8].invoke()
+        self.assertEqual(self.app.day, date(2026, 10, 8))
+
+    def test_legacy_seconds_are_preserved_when_only_title_changes(self):
+        start = datetime(2026, 10, 7, 9, 0, 32)
+        event = Event("old", "旧记录", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        editor = EventDialog(self.app, self.store, self.app.refresh, start.date(), event)
+        self.assertEqual(editor.start_time.get(), "09:00")
+        self.fill(editor.title_entry, "更新名称")
+        editor.save()
+        restored = Store(self.store.directory).events["old"]
+        self.assertEqual((restored.start, restored.end), (event.start, event.end))
+
+    def test_layout_is_white_and_both_record_panels_have_more_height(self):
+        self.app.geometry("1100x740")
+        self.app.update()
+        self.assertEqual(self.app.title(), "Daymark")
+        self.assertEqual(self.app.cget("bg"), "white")
+        self.assertGreaterEqual(self.app.timeline.canvas.winfo_height(), 200)
+        self.assertGreaterEqual(self.app.events_tree.winfo_height(), 200)
 
     def test_single_instance_lock_released_after_close(self):
         lock = InstanceLock(self.store.directory)

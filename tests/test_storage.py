@@ -34,7 +34,7 @@ class StorageTests(unittest.TestCase):
         self.store.save_event(self.event())
         self.store.save_tag("技术基础", "side", "embedded")
         restored = Store(self.store.directory)
-        self.assertEqual(restored.tag_path(restored.events["event"].tag_id), "副业 → 技术基础 → Linux")
+        self.assertEqual([tag.name for tag in restored.tag_ancestors(restored.events["event"].tag_id)], ["副业", "技术基础", "Linux"])
 
     def test_tag_cycles_and_duplicate_siblings_are_rejected(self):
         original = self.store.tags_path.read_bytes()
@@ -57,39 +57,34 @@ class StorageTests(unittest.TestCase):
     def test_cross_midnight_clips_each_day(self):
         event = self.event(start="2026-10-07T23:30:00", end="2026-10-08T00:30:00")
         self.store.save_event(event)
-        self.assertEqual(self.store.summary(date(2026, 10, 7))[0], 1800)
-        self.assertEqual(self.store.summary(date(2026, 10, 8))[0], 1800)
+        for day in (date(2026, 10, 7), date(2026, 10, 8)):
+            start, end = event.interval_on(day)
+            self.assertEqual((end - start).total_seconds(), 1800)
         self.assertEqual(self.store.events_on(date(2026, 10, 9)), [])
 
-    def test_overlaps_use_separate_lanes_and_union_coverage(self):
+    def test_overlaps_use_separate_lanes(self):
         for event in (
             self.event("a"),
             self.event("b", "2026-10-07T09:30:00", "2026-10-07T10:30:00"),
             self.event("c", "2026-10-07T10:00:00", "2026-10-07T11:00:00"),
         ):
             self.store.save_event(event)
-        total, covered, groups = self.store.summary(date(2026, 10, 7))
-        self.assertEqual((total, covered, groups["work"]), (10800, 7200, 10800))
-        lanes = timeline_lanes(list(self.store.events.values()), date(2026, 10, 7), datetime.now())
+        lanes = timeline_lanes(list(self.store.events.values()), date(2026, 10, 7))
         self.assertEqual(len(lanes), 2)
         self.assertEqual([item[0].id for item in lanes[0]], ["a", "c"])
 
-    def test_timer_survives_restart_and_only_one_can_run(self):
-        timer = self.store.start_timer("课程学习", "course", now=datetime(2026, 10, 7, 23, 50))
+    def test_legacy_missing_end_is_visible_without_accumulating_time(self):
+        with self.store.events_path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=("id", "title", "tag_id", "start", "end", "notes"))
+            writer.writeheader()
+            writer.writerow({"id": "old", "title": "旧记录", "tag_id": "linux",
+                             "start": "2026-10-07T09:00:32", "end": "", "notes": ""})
+        original = self.store.events_path.read_bytes()
         restored = Store(self.store.directory)
-        self.assertEqual(restored.running_event, timer)
-        with self.assertRaises(ValueError):
-            restored.start_timer("另一个任务", None)
-        restored.stop_timer(datetime(2026, 10, 8, 0, 10))
-        final = Store(self.store.directory)
-        self.assertIsNone(final.running_event)
-        self.assertEqual(final.summary(date(2026, 10, 8))[0], 600)
-
-    def test_timer_can_be_stopped_in_the_same_second(self):
-        now = datetime(2026, 10, 7, 9)
-        timer = self.store.start_timer("短任务", None, now=now)
-        self.store.stop_timer(now)
-        self.assertEqual((Store(self.store.directory).events[timer.id].end - now).total_seconds(), 1)
+        self.assertEqual([event.id for event in restored.events_on(date(2026, 10, 7))], ["old"])
+        self.assertIsNone(restored.events["old"].interval_on(date(2026, 10, 7)))
+        self.assertEqual(restored.events_on(date(2026, 10, 8)), [])
+        self.assertEqual(restored.events_path.read_bytes(), original)
 
     def test_invalid_time_or_missing_tag_does_not_write(self):
         original = self.store.events_path.read_bytes()
@@ -97,6 +92,7 @@ class StorageTests(unittest.TestCase):
             self.event(end="2026-10-07T08:00:00"),
             self.event(tag="missing"),
             self.event(start="2026-10-07T09:00:00+08:00"),
+            self.event(end=None),
         ):
             with self.assertRaises(ValueError):
                 self.store.save_event(event)

@@ -12,7 +12,7 @@ from .storage import Store
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Daymark · 日迹：本地桌面时间记录")
+    parser = argparse.ArgumentParser(description="Daymark：本地桌面时间记录")
     parser.add_argument("--data-dir", type=Path, default=Path(__file__).resolve().parents[1] / "data",
                         help="自定义数据目录，默认是项目下的 data 文件夹")
     args = parser.parse_args()

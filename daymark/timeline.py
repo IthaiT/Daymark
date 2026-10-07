@@ -7,13 +7,13 @@ from tkinter import ttk
 
 from .model import duration_text, timeline_lanes
 
-PALETTE = ("#356f64", "#5c6eb1", "#b57c3a", "#9a6389", "#638653", "#467e9e", "#b26656")
+PALETTE = ("#dbeafe", "#ede9fe", "#fef3c7", "#fee2e2", "#ffedd5", "#cffafe", "#fce7f3")
 DEFAULT_COLORS = {"work": PALETTE[0], "side": PALETTE[1], "explore": PALETTE[2], "life": PALETTE[4]}
 
 
 def tag_color(store, tag_id):
     if tag_id is None:
-        return "#78828a"
+        return "#e5e7eb"
     while store.tags[tag_id].parent_id:
         tag_id = store.tags[tag_id].parent_id
     if tag_id in DEFAULT_COLORS:
@@ -24,9 +24,9 @@ def tag_color(store, tag_id):
 
 class Timeline(ttk.Frame):
     def __init__(self, parent, store, on_select, on_edit):
-        super().__init__(parent, style="Card.TFrame")
+        super().__init__(parent)
         self.store, self.on_select, self.on_edit = store, on_select, on_edit
-        self.canvas = tk.Canvas(self, height=132, bg="#ffffff", highlightthickness=0)
+        self.canvas = tk.Canvas(self, height=280, bg="white", highlightthickness=1, highlightbackground="#e5e5e5")
         self.canvas.grid(row=0, column=0, sticky="nsew")
         horizontal = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
         horizontal.grid(row=1, column=0, sticky="ew")
@@ -41,14 +41,14 @@ class Timeline(ttk.Frame):
         self.canvas.bind("<Motion>", self._hover)
         self.canvas.bind("<Leave>", lambda _: self._hide_tooltip())
         self.canvas.bind("<MouseWheel>", self._wheel)
-        self.events, self.day, self.now = [], None, None
+        self.events, self.day = [], None
         self.zoom = 1
         self.selected = set()
         self.tooltip = None
         self.hovered_id = None
 
-    def update_events(self, events, day, now, selected=()):
-        self.events, self.day, self.now = events, day, now
+    def update_events(self, events, day, selected=()):
+        self.events, self.day = events, day
         self.selected = set(selected)
         self.draw()
 
@@ -59,8 +59,8 @@ class Timeline(ttk.Frame):
         canvas = self.canvas
         canvas.delete("all")
         width = max(650, canvas.winfo_width() - 48) * self.zoom
-        lanes = timeline_lanes(self.events, self.day, self.now)
-        bottom = max(128, 50 + len(lanes) * 44)
+        lanes = timeline_lanes(self.events, self.day)
+        bottom = max(self.canvas.winfo_height() - 25, 50 + len(lanes) * 56)
         canvas.configure(scrollregion=(0, 0, width + 48, bottom + 24))
         origin = datetime.combine(self.day, time.min)
 
@@ -69,11 +69,11 @@ class Timeline(ttk.Frame):
 
         for hour in range(25):
             xpos = 24 + hour / 24 * width
-            canvas.create_line(xpos, 43, xpos, bottom, fill="#ecefea")
+            canvas.create_line(xpos, 43, xpos, bottom, fill="#e5e5e5")
             if self.zoom > 1 or hour % 2 == 0:
-                canvas.create_text(xpos, 24, text=f"{hour:02d}:00", fill="#7b8581", font=("Microsoft YaHei UI", 9))
+                canvas.create_text(xpos, 24, text=f"{hour:02d}:00", fill="#111111", font=("Microsoft YaHei UI", 9))
         for lane_index, lane in enumerate(lanes):
-            top = 50 + lane_index * 44
+            top = 50 + lane_index * 56
             for event, start, end in lane:
                 left, right = x(start), x(end)
                 # The narrowest records keep a visible hit target; duration stays exact in the tooltip.
@@ -81,22 +81,22 @@ class Timeline(ttk.Frame):
                 tags = (f"event:{event.id}",)
                 color = tag_color(self.store, event.tag_id)
                 canvas.create_rectangle(
-                    left, top, right, top + 30, fill=color,
-                    outline="#162e28" if event.id in self.selected else color,
+                    left, top, right, top + 40, fill=color,
+                    outline="#111111" if event.id in self.selected else "#cccccc",
                     width=3 if event.id in self.selected else 1,
-                    dash=(4, 2) if event.end is None else (), tags=tags,
+                    tags=tags,
                 )
                 available = right - left - 12
                 if available >= 20:
                     limit = max(1, int(available / 13))
                     title = event.title if len(event.title) <= limit else event.title[:max(1, limit - 1)] + "…"
-                    canvas.create_text(left + 7, top + 15, text=title, fill="white",
+                    canvas.create_text(left + 7, top + 20, text=title, fill="#111111",
                                        anchor="w", font=("Microsoft YaHei UI", 10), tags=tags)
         if not lanes:
-            canvas.create_text(width / 2 + 24, 96, text="这一天还没有记录。开始计时，或补录一段时间。",
-                               fill="#8b948e", font=("Microsoft YaHei UI", 11))
-        if self.day == self.now.date():
-            current = x(self.now)
+            canvas.create_text(width / 2 + 24, bottom / 2, text="这一天还没有记录。", fill="#111111", font=("Microsoft YaHei UI", 11))
+        now = datetime.now()
+        if self.day == now.date():
+            current = x(now)
             canvas.create_line(current, 42, current, bottom, fill="#c46d49", width=2, dash=(3, 3))
             canvas.create_polygon(current - 4, 39, current + 4, 39, current, 45, fill="#c46d49")
 
@@ -126,10 +126,10 @@ class Timeline(ttk.Frame):
             return
         self._hide_tooltip()
         self.hovered_id = event.id
-        start, end = event.interval_on(self.day, self.now)
-        description = (f"{event.title}\n{self.store.tag_path(event.tag_id)}\n"
-                       f"{start:%H:%M:%S} — {end:%H:%M:%S} · {duration_text((end-start).total_seconds())}"
-                       + (" · 计时中" if event.end is None else ""))
+        start, end = event.interval_on(self.day)
+        end_text = "24:00" if end.date() > self.day else end.strftime("%H:%M")
+        description = (f"{event.title}\n{self.store.tag_outline(event.tag_id)}\n"
+                       f"{start:%H:%M} — {end_text} · {duration_text((end-start).total_seconds())}")
         self.tooltip = tk.Toplevel(self)
         self.tooltip.overrideredirect(True)
         self.tooltip.attributes("-topmost", True)
