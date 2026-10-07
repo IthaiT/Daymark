@@ -60,14 +60,15 @@ class Popup(tk.Toplevel):
 
 
 class Picker(ttk.Frame):
-    def __init__(self, parent, width, editable=True, symbol="▾"):
+    def __init__(self, parent, width, editable=True, symbol=None):
         super().__init__(parent)
         self.value = tk.StringVar()
         self.entry = ttk.Entry(self, textvariable=self.value, width=width,
                                state="normal" if editable else "readonly")
         self.entry.pack(side="left", fill="x", expand=True)
-        self.button = ttk.Button(self, text=symbol, width=2, style="Icon.TButton", command=self.open_popup)
-        self.button.pack(side="left", padx=(4, 0))
+        if symbol is not None:
+            self.button = ttk.Button(self, text=symbol, width=2, style="Icon.TButton", command=self.open_popup)
+            self.button.pack(side="left", padx=(4, 0))
         # Open after mouse release, so the entry's press binding cannot steal
         # focus from the new popup or keep the pointer captured by the entry.
         self.entry.bind("<ButtonRelease-1>", lambda _: self.open_popup())
@@ -86,7 +87,7 @@ class Picker(ttk.Frame):
 
 class TagPicker(Picker):
     def __init__(self, parent, store, selected=None, excluded=(), empty_label="未分类", width=44):
-        super().__init__(parent, width, editable=False)
+        super().__init__(parent, width, editable=False, symbol="▾")
         self.store, self.excluded, self.empty_label = store, set(excluded), empty_label
         self.selected_id = None
         self.set_tag(selected)
@@ -143,7 +144,7 @@ class TagPicker(Picker):
 
 class DatePicker(Picker):
     def __init__(self, parent, value: date, on_change=None):
-        super().__init__(parent, width=12, symbol="▦")
+        super().__init__(parent, width=12)
         self.value.set(value.isoformat())
         self.year, self.month = value.year, value.month
         self.on_change = on_change

@@ -1,4 +1,4 @@
-"""Focused modal editors for labels, events, and bulk reassignment."""
+"""Focused modal editors for labels and events."""
 
 import tkinter as tk
 from datetime import datetime, timedelta
@@ -153,19 +153,4 @@ class EventDialog(Dialog):
                           self.notes.get("1.0", "end-1c"))
             self.store.save_event(event)
         if self.try_save(write):
-            self.on_saved()
-
-
-class ReassignDialog(Dialog):
-    def __init__(self, parent, store, event_ids, on_saved):
-        super().__init__(parent, "更换事件标签")
-        self.store, self.event_ids, self.on_saved = store, event_ids, on_saved
-        ttk.Label(self.body, text=f"将 {len(event_ids)} 个事件转移到：").grid(row=0, column=0, sticky="w", pady=(0, 16))
-        self.tag = TagPicker(self.body, store, store.events[event_ids[0]].tag_id, width=46)
-        self.tag.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self.buttons(2, self.save, "更换标签")
-        self.show(self.tag)
-
-    def save(self):
-        if self.try_save(lambda: self.store.reassign_events(self.event_ids, self.tag.tag_id())):
             self.on_saved()

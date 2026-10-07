@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from daymark.app import App
-from daymark.dialogs import EventDialog, ReassignDialog
+from daymark.dialogs import EventDialog
 from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
@@ -218,7 +218,7 @@ class AppTests(unittest.TestCase):
         self.click(editor.notes)
         self.type_key("b")
         self.assertEqual(editor.notes.get("1.0", "end-1c"), "b")
-        self.click(editor.start_time.button)
+        self.click(editor.start_time.entry)
         self.assertTrue(editor.start_time.popup.winfo_viewable())
         editor.destroy()
         self.assertIsNone(self.app.grab_current())
@@ -254,6 +254,53 @@ class AppTests(unittest.TestCase):
             post.assert_called_once()
         return self.app.tag_menu
 
+    def event_menu_for(self, event_id):
+        tree = self.app.events_tree
+        tree.see(event_id)
+        self.app.update()
+        x, y, width, height = tree.bbox(event_id)
+        with patch("tkinter.Menu.tk_popup") as post:
+            tree.event_generate("<Button-3>", x=x + 100, y=y + height // 2)
+            self.app.update()
+            post.assert_called_once()
+        return self.app.event_menu
+
+    def test_event_context_menu_keeps_multiselection_and_confirms_deletion(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        for key in ("a", "b", "c"):
+            self.store.save_event(Event(key, key, "linux", start, start + timedelta(hours=1)))
+        self.app.refresh()
+        self.app.events_tree.selection_set(("a", "b"))
+        menu = self.event_menu_for("b")
+        self.assertEqual(set(self.app.events_tree.selection()), {"a", "b"})
+        self.assertEqual(menu.entrycget(0, "label"), "删除")
+        with patch("tkinter.messagebox.askyesno", return_value=False):
+            menu.invoke(0)
+        self.assertEqual(set(self.store.events), {"a", "b", "c"})
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            menu.invoke(0)
+        self.assertEqual(set(Store(self.store.directory).events), {"c"})
+        self.assertIsNone(self.app.grab_current())
+
+    def test_event_context_menu_targets_clicked_row_and_ignores_empty_space(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        for key in ("a", "b"):
+            self.store.save_event(Event(key, key, "linux", start, start + timedelta(hours=1)))
+        self.app.refresh()
+        tree = self.app.events_tree
+        tree.selection_set("a")
+        menu = self.event_menu_for("b")
+        self.assertEqual(tree.selection(), ("b",))
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            menu.invoke(0)
+        self.assertEqual(set(self.store.events), {"a"})
+        self.app.update()
+        with patch("tkinter.Menu.tk_popup") as post:
+            tree.event_generate("<Button-3>", x=100, y=tree.winfo_height() - 10)
+            self.app.update()
+            post.assert_not_called()
+        self.assertEqual(set(self.store.events), {"a"})
+
     def drag(self, source, target):
         tree = self.app.tags_tree
         tree.see(source)
@@ -288,9 +335,9 @@ class AppTests(unittest.TestCase):
         self.fill(editor.title_entry, "Linux 驱动开发")
         editor.save()
         self.assertEqual(self.store.events[event.id].title, "Linux 驱动开发")
-        reassign = ReassignDialog(self.app, self.store, [event.id], self.app.refresh)
-        self.choose_tag(reassign.tag, "explore")
-        reassign.save()
+        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day, self.store.events[event.id])
+        self.choose_tag(editor.tag, "explore")
+        editor.save()
         self.app.select_event(event.id)
         self.app.update()
         self.assertEqual(self.store.events[event.id].tag_id, "explore")
@@ -381,11 +428,11 @@ class AppTests(unittest.TestCase):
 
     def test_calendar_and_time_can_be_selected_with_mouse_controls(self):
         editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
-        editor.start_date.button.invoke()
+        self.click(editor.start_date.entry)
         self.app.update()
         editor.start_date.popup.day_buttons[8].invoke()
         self.assertEqual(editor.start_date.get(), "2026-10-08")
-        editor.start_time.button.invoke()
+        self.click(editor.start_time.entry)
         self.app.update()
         popup = editor.start_time.popup
         popup.hours.selection_clear(0, "end")
@@ -397,7 +444,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.grab_current(), editor)
         editor.destroy()
         self.app.date_picker.value.set("2026-10-07")
-        self.app.date_picker.button.invoke()
+        self.click(self.app.date_picker.entry)
         self.app.update()
         self.app.date_picker.popup.day_buttons[8].invoke()
         self.assertEqual(self.app.day, date(2026, 10, 8))

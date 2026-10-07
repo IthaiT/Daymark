@@ -4,7 +4,7 @@ import tkinter as tk
 from datetime import date, datetime, timedelta
 from tkinter import messagebox, ttk
 
-from .dialogs import EventDialog, ReassignDialog, TagDialog
+from .dialogs import EventDialog, TagDialog
 from .model import duration_text
 from .timeline import Timeline
 from .widgets import DatePicker
@@ -48,7 +48,6 @@ class App(tk.Tk):
         style.configure(".", font=(FONT, 10), background="white", foreground="#111111")
         style.configure("TFrame", background="white")
         style.configure("TLabel", background="white", foreground="#111111")
-        style.configure("Muted.TLabel", font=(FONT, 9))
         style.configure("Heading.TLabel", font=(FONT, 12, "bold"))
         style.configure("Logo.TLabel", font=(FONT, 23, "bold"))
         style.configure("TButton", padding=(12, 8), background="white", bordercolor="#d4d4d4", borderwidth=1)
@@ -104,7 +103,6 @@ class App(tk.Tk):
         self.date_picker = DatePicker(date_bar, self.day, on_change=self.set_day)
         self.date_picker.pack(side="left", padx=8)
         self.date_picker.entry.bind("<Return>", lambda _: self.set_day())
-        ttk.Button(date_bar, text="查看", command=self.set_day).pack(side="left")
         ttk.Button(date_bar, text="›", width=2, style="Icon.TButton", command=lambda: self.shift_day(1)).pack(side="left", padx=8)
         ttk.Button(date_bar, text="今天", command=self.go_today).pack(side="left")
         self.weekday_label = ttk.Label(date_bar)
@@ -114,23 +112,15 @@ class App(tk.Tk):
         timeline_box.grid(row=1, column=0, sticky="nsew", pady=(0, 24))
         timeline_box.columnconfigure(0, weight=1)
         timeline_box.rowconfigure(1, weight=1)
-        heading = ttk.Frame(timeline_box)
-        heading.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        ttk.Label(heading, text="一天的轨迹", style="Heading.TLabel").pack(side="left")
-        ttk.Label(heading, text="点击选中 · 双击编辑 · 滚轮横移 · Ctrl+滚轮缩放", style="Muted.TLabel").pack(side="left", padx=16)
+        ttk.Label(timeline_box, text="一天的轨迹", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
         self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event)
         self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
         bottom.grid(row=2, column=0, sticky="nsew")
         bottom.columnconfigure(0, weight=1)
         bottom.rowconfigure(1, weight=1)
-        toolbar = ttk.Frame(bottom)
-        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        self.events_heading = ttk.Label(toolbar, text="事件明细", style="Heading.TLabel")
-        self.events_heading.pack(side="left")
-        ttk.Button(toolbar, text="删除", command=self.delete_events).pack(side="right")
-        ttk.Button(toolbar, text="更换标签", command=self.reassign_events).pack(side="right", padx=8)
-        ttk.Button(toolbar, text="编辑", command=self.edit_selected_event).pack(side="right")
+        self.events_heading = ttk.Label(bottom, text="事件明细", style="Heading.TLabel")
+        self.events_heading.grid(row=0, column=0, sticky="w", pady=(0, 12))
         table_box = ttk.Frame(bottom)
         table_box.grid(row=1, column=0, sticky="nsew")
         table_box.columnconfigure(0, weight=1)
@@ -147,7 +137,8 @@ class App(tk.Tk):
         table_x = ttk.Scrollbar(table_box, orient="horizontal", command=self.events_tree.xview)
         table_x.grid(row=1, column=0, sticky="ew")
         self.events_tree.configure(yscrollcommand=table_y.set, xscrollcommand=table_x.set)
-        self.events_tree.bind("<Double-1>", lambda _: self.edit_selected_event())
+        self.events_tree.bind("<Double-1>", self.event_double_click)
+        self.events_tree.bind("<Button-3>", self.event_context_menu)
         self.events_tree.bind("<<TreeviewSelect>>", lambda _: self.draw_timeline())
 
     def refresh_tags(self, selected=None):
@@ -324,22 +315,29 @@ class App(tk.Tk):
         if self.grab_current() is None and event_id in self.store.events:
             EventDialog(self, self.store, self.refresh, self.day, self.store.events[event_id])
 
-    def selected_events(self):
-        selected = list(self.events_tree.selection())
-        if not selected:
-            messagebox.showinfo("选择事件", "请先选择事件；按 Ctrl 或 Shift 可多选。", parent=self)
-        return selected
+    def event_double_click(self, pointer):
+        if event_id := self.events_tree.identify_row(pointer.y):
+            self.edit_event(event_id)
 
-    def edit_selected_event(self):
-        if selected := self.selected_events():
-            self.edit_event(selected[0])
-
-    def reassign_events(self):
-        if selected := self.selected_events():
-            ReassignDialog(self, self.store, selected, self.refresh)
+    def event_context_menu(self, pointer):
+        event_id = self.events_tree.identify_row(pointer.y)
+        if not event_id:
+            return
+        if event_id not in self.events_tree.selection():
+            self.events_tree.selection_set(event_id)
+        self.events_tree.focus(event_id)
+        if hasattr(self, "event_menu"):
+            self.event_menu.destroy()
+        self.event_menu = menu = tk.Menu(self, tearoff=False, bg="white", fg="#111111",
+                                         activebackground="#e5e7eb", activeforeground="#111111")
+        menu.add_command(label="删除", command=self.delete_events)
+        try:
+            menu.tk_popup(pointer.x_root, pointer.y_root)
+        finally:
+            menu.grab_release()
 
     def delete_events(self):
-        selected = self.selected_events()
+        selected = list(self.events_tree.selection())
         if selected and messagebox.askyesno("删除事件", f"删除所选的 {len(selected)} 个事件？", parent=self):
             if self.try_action(lambda: self.store.delete_events(selected)):
                 self.refresh()
