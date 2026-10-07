@@ -166,7 +166,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(canvas.yview(), vertical)
         horizontal = canvas.xview()
         self.wheel(-120, state=0x1)
-        self.assertGreater(canvas.yview()[0], vertical[0])
+        self.assertEqual(canvas.yview(), vertical)
         self.assertEqual(canvas.xview(), horizontal)
         self.assertEqual(timeline.zoom, zoom)
 
@@ -187,6 +187,25 @@ class AppTests(unittest.TestCase):
                 self.type_key("n")
                 self.assertEqual(editor.notes.get("1.0", "end-1c"), "n")
                 editor.destroy()
+
+    def test_timeline_fills_height_and_expands_after_an_overlap_ends(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=13)
+        self.store.save_event(Event("cooking", "做饭", "life", start, start + timedelta(hours=2)))
+        self.store.save_event(Event("podcast", "听博客", "explore", start, start + timedelta(hours=1)))
+        self.app.refresh()
+        self.app.update()
+        canvas = self.app.timeline.canvas
+        for geometry in ("1100x740", "1360x900"):
+            self.app.geometry(geometry)
+            self.app.update()
+            ticks = canvas.find_withtag("time-tick")
+            left, right = canvas.coords(ticks[0])[0], canvas.coords(ticks[-1])[0]
+            height = canvas.winfo_height() - 24 - 50
+            for hour, share, expected in ((13.5, 0.25, "cooking"), (13.5, 0.75, "podcast"),
+                                          (14.5, 0.25, "cooking"), (14.5, 0.75, "cooking")):
+                x = int(left + (right - left) * hour / 24 - canvas.canvasx(0))
+                self.click(canvas, x, int(50 + height * share))
+                self.assertEqual(self.app.events_tree.selection(), (expected,))
 
     def test_single_mouse_click_selects_a_tag_and_returns_to_notes(self):
         editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))

@@ -6,7 +6,7 @@ import tkinter.font as tkfont
 from datetime import datetime, time
 from tkinter import ttk
 
-from .model import duration_text, timeline_lanes
+from .model import duration_text, timeline_segments
 
 PALETTE = ("#dbeafe", "#ede9fe", "#fef3c7", "#fee2e2", "#ffedd5", "#cffafe", "#fce7f3")
 DEFAULT_COLORS = {"work": PALETTE[0], "side": PALETTE[1], "explore": PALETTE[2], "life": PALETTE[4]}
@@ -61,8 +61,8 @@ class Timeline(ttk.Frame):
         canvas = self.canvas
         canvas.delete("all")
         width = max(650, canvas.winfo_width() - 48) * self.zoom
-        lanes = timeline_lanes(self.events, self.day)
-        bottom = max(self.canvas.winfo_height() - 25, 50 + len(lanes) * 56)
+        segments = timeline_segments(self.events, self.day)
+        bottom = max(90, canvas.winfo_height() - 26)
         canvas.configure(scrollregion=(0, 0, width + 48, bottom + 24))
         origin = datetime.combine(self.day, time.min)
 
@@ -78,27 +78,35 @@ class Timeline(ttk.Frame):
             if is_major:
                 canvas.create_text(xpos, 24, text=f"{minute // 60:02d}:{minute % 60:02d}",
                                    fill="#111111", font=self.tick_font, tags=("time-label",))
-        for lane_index, lane in enumerate(lanes):
-            top = 50 + lane_index * 56
-            for event, start, end in lane:
-                left, right = x(start), x(end)
-                # The narrowest records keep a visible hit target; duration stays exact in the tooltip.
-                right = max(left + 3, right)
-                tags = (f"event:{event.id}",)
-                color = tag_color(self.store, event.tag_id)
+        pieces = {}
+        for segment in segments:
+            top = 50 + (bottom - 50) * segment.slot / segment.total
+            low = 50 + (bottom - 50) * (segment.slot + 1) / segment.total
+            left, right = x(segment.start), x(segment.end)
+            pieces.setdefault(segment.event.id, []).append((left, max(left + 3, right), top, low))
+        visible_events = {segment.event.id: segment.event for segment in segments}
+        for event_id, rectangles in pieces.items():
+            event = visible_events[event_id]
+            tags = (f"event:{event_id}", "event-body")
+            options = dict(fill=tag_color(self.store, event.tag_id),
+                           outline="#111111" if event_id in self.selected else "#cccccc",
+                           width=3 if event_id in self.selected else 1, tags=tags)
+            if all((top, low) == rectangles[0][2:] for _, _, top, low in rectangles):
                 canvas.create_rectangle(
-                    left, top, right, top + 40, fill=color,
-                    outline="#111111" if event.id in self.selected else "#cccccc",
-                    width=3 if event.id in self.selected else 1,
-                    tags=tags,
+                    rectangles[0][0], rectangles[0][2], rectangles[-1][1], rectangles[-1][3], **options
                 )
-                available = right - left - 12
-                if available >= 20:
-                    limit = max(1, int(available / 13))
-                    title = event.title if len(event.title) <= limit else event.title[:max(1, limit - 1)] + "…"
-                    canvas.create_text(left + 7, top + 20, text=title, fill="#111111",
-                                       anchor="w", font=("Microsoft YaHei UI", 10), tags=tags)
-        if not lanes:
+            else:
+                outline = [(value, top) for left, right, top, low in rectangles for value in (left, right)]
+                outline += [(value, low) for left, right, top, low in reversed(rectangles) for value in (right, left)]
+                canvas.create_polygon(*[coordinate for point in outline for coordinate in point], **options)
+            left, right, top, low = max(rectangles, key=lambda item: (item[1] - item[0]) * (item[3] - item[2]))
+            available = right - left - 12
+            if available >= 20 and low - top >= 18:
+                limit = max(1, int(available / 13))
+                title = event.title if len(event.title) <= limit else event.title[:max(1, limit - 1)] + "…"
+                canvas.create_text(left + 7, (top + low) / 2, text=title, fill="#111111",
+                                   anchor="w", font=("Microsoft YaHei UI", 10), tags=(f"event:{event_id}",))
+        if not segments:
             canvas.create_text(width / 2 + 24, bottom / 2, text="这一天还没有记录。", fill="#111111", font=("Microsoft YaHei UI", 11))
         now = datetime.now()
         if self.day == now.date():

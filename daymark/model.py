@@ -38,17 +38,31 @@ def duration_text(seconds: float) -> str:
     return f"{hours} 小时 {minutes:02d} 分" if hours else f"{minutes} 分钟"
 
 
-def timeline_lanes(
-    events: list[Event], day: date
-) -> list[list[tuple[Event, datetime, datetime]]]:
-    """Place overlapping records in separate lanes, ordered by start time."""
-    clipped = [(event, interval) for event in events if (interval := event.interval_on(day))]
-    lanes: list[list[tuple[Event, datetime, datetime]]] = []
-    for event, (start, end) in sorted(clipped, key=lambda item: (item[1][0], item[1][1], item[0].id)):
-        for lane in lanes:
-            if lane[-1][2] <= start:
-                lane.append((event, start, end))
-                break
-        else:
-            lanes.append([(event, start, end)])
-    return lanes
+@dataclass(frozen=True)
+class TimelineSegment:
+    event: Event
+    start: datetime
+    end: datetime
+    slot: int
+    total: int
+
+
+def timeline_segments(events: list[Event], day: date) -> list[TimelineSegment]:
+    """Divide each interval equally among the events active at that time."""
+    starts, ends = {}, {}
+    for event in events:
+        if interval := event.interval_on(day):
+            start, end = interval
+            starts.setdefault(start, []).append(event)
+            ends.setdefault(end, []).append(event.id)
+    boundaries = sorted(starts.keys() | ends.keys())
+    active, segments = {}, []
+    for left, right in zip(boundaries, boundaries[1:]):
+        for event_id in ends.get(left, ()):
+            active.pop(event_id, None)
+        for event in starts.get(left, ()):
+            active[event.id] = event
+        ordered = sorted(active.values(), key=lambda event: (event.start, event.id))
+        for slot, event in enumerate(ordered):
+            segments.append(TimelineSegment(event, left, right, slot, len(ordered)))
+    return segments

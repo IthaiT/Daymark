@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from daymark.model import Event, timeline_lanes
+from daymark.model import Event, timeline_segments
 from daymark.storage import DataError, Store
 
 
@@ -82,16 +82,31 @@ class StorageTests(unittest.TestCase):
             self.assertEqual((end - start).total_seconds(), 1800)
         self.assertEqual(self.store.events_on(date(2026, 10, 9)), [])
 
-    def test_overlaps_use_separate_lanes(self):
-        for event in (
-            self.event("a"),
-            self.event("b", "2026-10-07T09:30:00", "2026-10-07T10:30:00"),
-            self.event("c", "2026-10-07T10:00:00", "2026-10-07T11:00:00"),
-        ):
-            self.store.save_event(event)
-        lanes = timeline_lanes(list(self.store.events.values()), date(2026, 10, 7))
-        self.assertEqual(len(lanes), 2)
-        self.assertEqual([item[0].id for item in lanes[0]], ["a", "c"])
+    def test_partial_overlaps_share_height_only_while_both_events_are_active(self):
+        cooking = self.event("cooking", "2026-10-07T13:00:00", "2026-10-07T15:00:00")
+        podcast = self.event("podcast", "2026-10-07T13:00:00", "2026-10-07T14:00:00")
+        segments = timeline_segments([cooking, podcast], date(2026, 10, 7))
+        self.assertEqual([(item.event.id, item.start.hour, item.end.hour, item.slot, item.total) for item in segments],
+                         [("cooking", 13, 14, 0, 2), ("podcast", 13, 14, 1, 2), ("cooking", 14, 15, 0, 1)])
+
+    def test_three_way_segments_preserve_each_duration_and_are_order_independent(self):
+        events = [self.event("a", "2026-10-07T09:00:00", "2026-10-07T12:00:00"),
+                  self.event("b", "2026-10-07T10:00:00", "2026-10-07T13:00:00"),
+                  self.event("c", "2026-10-07T11:00:00", "2026-10-07T12:00:00")]
+        segments = timeline_segments(events, date(2026, 10, 7))
+        self.assertEqual(segments, timeline_segments(list(reversed(events)), date(2026, 10, 7)))
+        for event in events:
+            seconds = sum((item.end - item.start).total_seconds() for item in segments if item.event.id == event.id)
+            self.assertEqual(seconds, (event.end - event.start).total_seconds())
+        self.assertEqual([item.total for item in segments if item.start.hour == 11], [3, 3, 3])
+        self.assertEqual([item.event.id for item in segments if item.start.hour == 12], ["b"])
+
+    def test_segments_clip_cross_midnight_and_ignore_unfinished_events(self):
+        events = [self.event("late", "2026-10-07T23:30:00", "2026-10-08T00:30:00"),
+                  self.event("morning", "2026-10-08T00:15:00", "2026-10-08T01:00:00"), self.event("unfinished", end=None)]
+        segments = timeline_segments(events, date(2026, 10, 8))
+        self.assertEqual([(item.event.id, item.start.minute, item.total) for item in segments],
+                         [("late", 0, 1), ("late", 15, 2), ("morning", 15, 2), ("morning", 30, 1)])
 
     def test_legacy_missing_end_is_visible_without_accumulating_time(self):
         with self.store.events_path.open("w", encoding="utf-8-sig", newline="") as stream:
