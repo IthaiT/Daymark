@@ -38,11 +38,130 @@ class AppTests(unittest.TestCase):
             entry.insert(0, value)
 
     def choose_tag(self, picker, tag_id):
-        picker.button.invoke()
+        self.click(picker.button)
+        tree = picker.popup.tree
+        item = f"tag:{tag_id}" if tag_id else "none"
+        tree.see(item)
         self.app.update()
-        picker.popup.tree.selection_set(f"tag:{tag_id}" if tag_id else "none")
-        picker.choose()
+        x, y, width, height = tree.bbox(item)
+        self.click(tree, x + 110, y + height // 2)
+
+    def click(self, widget, x=None, y=None):
+        """Exercise Tk's mouse bindings rather than invoking widget callbacks."""
         self.app.update()
+        x = widget.winfo_width() // 2 if x is None else x
+        y = widget.winfo_height() // 2 if y is None else y
+        coordinates = {"x": x, "y": y, "rootx": widget.winfo_rootx() + x, "rooty": widget.winfo_rooty() + y}
+        widget.event_generate("<Enter>", **coordinates)
+        widget.event_generate("<Motion>", **coordinates)
+        widget.event_generate("<ButtonPress-1>", **coordinates)
+        self.app.update()
+        widget.event_generate("<ButtonRelease-1>", **coordinates)
+        self.app.update()
+
+    def type_key(self, keysym):
+        focused = self.app.focus_get()
+        self.assertIsNotNone(focused, "A visible editor must have keyboard focus")
+        focused.event_generate("<KeyPress>", keysym=keysym)
+        # Escape can destroy the popup on key press; key release goes to the
+        # restored input target, as it does in the normal event loop.
+        released_to = self.app.focus_get()
+        self.assertIsNotNone(released_to)
+        released_to.event_generate("<KeyRelease>", keysym=keysym)
+        self.app.update()
+
+    def test_new_and_existing_event_fields_accept_mouse_focus_and_typing(self):
+        start = datetime(2026, 10, 7, 9)
+        existing = Event("old", "原名称", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(existing)
+        for event in (None, existing):
+            with self.subTest(editing=event is not None):
+                editor = EventDialog(self.app, self.store, self.app.refresh, start.date(), event)
+                self.click(editor.title_entry)
+                self.assertEqual(self.app.focus_get(), editor.title_entry)
+                original = editor.title_entry.get()
+                self.type_key("x")
+                self.assertNotEqual(editor.title_entry.get(), original)
+                self.click(editor.notes)
+                self.assertEqual(self.app.focus_get(), editor.notes)
+                self.type_key("n")
+                self.assertEqual(editor.notes.get("1.0", "end-1c"), "n")
+                editor.destroy()
+
+    def test_single_mouse_click_selects_a_tag_and_returns_to_notes(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
+        self.click(editor.tag.entry)
+        popup = editor.tag.popup
+        tree = popup.tree
+        tree.see("tag:linux")
+        self.app.update()
+        x, y, width, height = tree.bbox("tag:linux")
+        self.click(tree, x + 90, y + height // 2)
+        self.assertFalse(popup.winfo_exists())
+        self.assertEqual(editor.tag.tag_id(), "linux")
+        self.assertEqual(self.app.grab_current(), editor)
+        self.click(editor.notes)
+        self.assertEqual(self.app.focus_get(), editor.notes)
+        self.type_key("a")
+        self.assertEqual(editor.notes.get("1.0", "end-1c"), "a")
+        editor.destroy()
+
+    def test_clicking_main_date_field_opens_calendar_and_changes_day(self):
+        self.app.date_picker.value.set("2026-10-07")
+        self.click(self.app.date_picker.entry)
+        popup = self.app.date_picker.popup
+        self.assertTrue(popup.winfo_viewable())
+        self.click(popup.day_buttons[8])
+        self.assertEqual(self.app.day, date(2026, 10, 8))
+        self.assertFalse(popup.winfo_exists())
+        self.assertIsNone(self.app.grab_current())
+        self.assertIsNotNone(self.app.focus_get())
+
+    def test_mouse_selects_hours_minutes_and_confirms_the_time(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
+        self.click(editor.start_time.entry)
+        popup = editor.start_time.popup
+        for items, index in ((popup.hours, 14), (popup.minutes, 35)):
+            items.see(index)
+            self.app.update()
+            x, y, width, height = items.bbox(index)
+            self.click(items, x + 8, y + height // 2)
+        footer = popup.body.grid_slaves(row=1)[0]
+        self.click(footer.winfo_children()[-1])
+        self.assertEqual(editor.start_time.get(), "14:35")
+        self.assertEqual(self.app.grab_current(), editor)
+        self.assertFalse(popup.winfo_exists())
+        editor.destroy()
+
+    def test_dismissing_a_picker_restores_typing_and_can_reopen(self):
+        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day)
+        self.click(editor.start_time.entry)
+        popup = editor.start_time.popup
+        self.type_key("Escape")
+        self.assertFalse(popup.winfo_exists())
+        self.assertEqual(self.app.grab_current(), editor)
+        self.click(editor.notes)
+        self.type_key("b")
+        self.assertEqual(editor.notes.get("1.0", "end-1c"), "b")
+        self.click(editor.start_time.button)
+        self.assertTrue(editor.start_time.popup.winfo_viewable())
+        editor.destroy()
+        self.assertIsNone(self.app.grab_current())
+
+    def test_closing_editor_with_open_picker_unlocks_event_selection(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        event = Event("selectable", "事件", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day, event)
+        self.click(editor.tag.button)
+        editor.destroy()
+        self.app.update()
+        self.assertIsNone(self.app.grab_current())
+        tree = self.app.events_tree
+        x, y, width, height = tree.bbox(event.id)
+        self.click(tree, x + 100, y + height // 2)
+        self.assertEqual(tree.selection(), (event.id,))
 
     def menu_for(self, tag_id=None):
         tree = self.app.tags_tree

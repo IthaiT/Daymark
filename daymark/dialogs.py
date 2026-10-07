@@ -12,6 +12,9 @@ from .widgets import DatePicker, TagPicker, TimePicker
 class Dialog(tk.Toplevel):
     def __init__(self, parent, title):
         super().__init__(parent)
+        self.withdraw()
+        self.previous_focus = parent.focus_get()
+        self.previous_grab = parent.grab_current()
         self.title(title)
         self.configure(bg="white")
         self.transient(parent)
@@ -27,8 +30,26 @@ class Dialog(tk.Toplevel):
         x = self.master.winfo_rootx() + (self.master.winfo_width() - self.winfo_reqwidth()) // 2
         y = self.master.winfo_rooty() + (self.master.winfo_height() - self.winfo_reqheight()) // 2
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.deiconify()
+        self.wait_visibility()
+        self.lift()
         self.grab_set()
-        focus.focus_set()
+        focus.focus_force()
+
+    def destroy(self):
+        if not self.winfo_exists():
+            return
+        grabbed = self.grab_current()
+        if grabbed is not None and (grabbed is self or str(grabbed).startswith(str(self) + ".")):
+            grabbed.grab_release()
+        super().destroy()
+        if self.previous_grab is not None and self.previous_grab.winfo_exists():
+            self.previous_grab.grab_set()
+        target = self.previous_focus
+        if target is None or not target.winfo_exists() or not target.winfo_viewable():
+            target = self.master
+        if target.winfo_exists() and target.winfo_viewable():
+            target.focus_force()
 
     def buttons(self, row, callback, label="保存"):
         bar = ttk.Frame(self.body)

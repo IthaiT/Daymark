@@ -11,8 +11,10 @@ FONT = "Microsoft YaHei UI"
 class Popup(tk.Toplevel):
     def __init__(self, owner):
         super().__init__(owner)
+        self.withdraw()
         self.owner = owner
         self.previous_grab = owner.grab_current()
+        self.previous_focus = owner.focus_get()
         self.overrideredirect(True)
         self.transient(owner.winfo_toplevel())
         self.configure(bg="#d4d4d4", padx=1, pady=1)
@@ -20,6 +22,7 @@ class Popup(tk.Toplevel):
         self.body.pack(fill="both", expand=True)
         self.bind("<Escape>", lambda _: self.close())
         self.bind("<Button-1>", self._outside_click)
+        self.protocol("WM_DELETE_WINDOW", self.close)
 
     def show(self, focus):
         self.update_idletasks()
@@ -29,19 +32,31 @@ class Popup(tk.Toplevel):
         if y + height > self.winfo_screenheight():
             y = self.owner.winfo_rooty() - height - 2
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.deiconify()
+        self.wait_visibility()
+        self.lift()
         self.grab_set()
-        focus.focus_set()
+        # focus_set alone cannot reactivate an override-redirect window on Windows.
+        focus.focus_force()
 
     def _outside_click(self, event):
         if not (self.winfo_rootx() <= event.x_root < self.winfo_rootx() + self.winfo_width()
                 and self.winfo_rooty() <= event.y_root < self.winfo_rooty() + self.winfo_height()):
             self.close()
+            return "break"
 
     def close(self):
+        if not self.winfo_exists():
+            return
         self.grab_release()
         self.destroy()
         if self.previous_grab is not None and self.previous_grab.winfo_exists():
             self.previous_grab.grab_set()
+        target = self.previous_focus
+        if target is None or not target.winfo_exists() or not target.winfo_viewable():
+            target = self.owner.entry
+        if target.winfo_exists() and target.winfo_viewable():
+            target.focus_force()
 
 
 class Picker(ttk.Frame):
@@ -53,8 +68,9 @@ class Picker(ttk.Frame):
         self.entry.pack(side="left", fill="x", expand=True)
         self.button = ttk.Button(self, text=symbol, width=3, command=self.open_popup)
         self.button.pack(side="left", padx=(4, 0))
-        if not editable:
-            self.entry.bind("<Button-1>", lambda _: self.open_popup())
+        # Open after mouse release, so the entry's press binding cannot steal
+        # focus from the new popup or keep the pointer captured by the entry.
+        self.entry.bind("<ButtonRelease-1>", lambda _: self.open_popup())
         self.entry.bind("<Alt-Down>", lambda _: self.open_popup())
         self.popup = None
 
@@ -104,10 +120,19 @@ class TagPicker(Picker):
         selected = f"tag:{self.selected_id}" if self.selected_id else "none"
         popup.tree.selection_set(selected)
         popup.tree.see(selected)
-        popup.tree.bind("<Double-1>", lambda _: self.choose())
+        popup.tree.bind("<ButtonRelease-1>", self._choose_clicked)
         popup.tree.bind("<Return>", lambda _: self.choose())
         ttk.Button(popup.body, text="选择", command=self.choose).pack(anchor="e", pady=(10, 0))
         popup.show(popup.tree)
+
+    def _choose_clicked(self, pointer):
+        tree = self.popup.tree
+        row = tree.identify_row(pointer.y)
+        if (row and tree.identify_region(pointer.x, pointer.y) == "tree"
+                and "indicator" not in tree.identify_element(pointer.x, pointer.y)):
+            tree.selection_set(row)
+            self.choose()
+            return "break"
 
     def choose(self):
         selected = self.popup.tree.selection()
