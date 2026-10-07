@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`daymark/` contains the Python desktop application. `app.py`, `dialogs.py`, and `timeline.py` implement the Tkinter interface; `widgets.py` provides tree, calendar, and time pickers; `model.py` handles time calculations; `storage.py` validates and persists records; `instance.py` locks the data directory; `__main__.py` starts the application. Keep calculations and persistence independent of UI code.
+`daymark/` contains the Python desktop application. `app.py`, `dialogs.py`, and `timeline.py` implement the Tkinter interface; `inline.py` edits event-table cells; `widgets.py` provides tree, calendar, and time pickers; `model.py` handles time calculations; `storage.py` validates and persists records; `instance.py` locks the data directory; `__main__.py` starts the application. Keep calculations and persistence independent of UI code.
 
 `tests/` contains storage and desktop integration tests. `environment.yml` defines the Conda environment; `start.cmd` and `start.ps1` are Windows launchers. There is no separate asset directory. Runtime `data/` and generated `.test-artifacts/` are ignored by Git.
 
@@ -32,7 +32,7 @@ No formatter or linter is configured. Follow neighboring code and run `git diff 
 
 ## Testing Guidelines
 
-Use `unittest`, naming files `test_*.py` and methods `test_<behavior>`. Add regression tests for changed persistence or time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility, and failed writes. Test right-click, drag, and picker interactions when changing the UI. Use isolated temporary directories under `.test-artifacts/`.
+Use `unittest`, naming files `test_*.py` and methods `test_<behavior>`. Add regression tests for changed persistence or time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility, and failed writes. Test right-click, drag, picker, and inline-edit interactions when changing the UI. Use isolated temporary directories under `.test-artifacts/`.
 
 UI tests require a desktop session and `DAYMARK_UI_TESTS=1`; otherwise they are skipped. Run affected tests before committing. No numeric coverage threshold is configured.
 
