@@ -105,8 +105,7 @@ class EventDialog(Dialog):
         if event:
             self.title_entry.insert(0, event.title)
         ttk.Label(self.body, text="标签").grid(row=1, column=0, sticky="w")
-        self.tag = TagPicker(self.body, store, event.tag_id if event else tag_id, width=46,
-                             empty_label="请选择叶子标签", leaf_only=True)
+        self.tag = TagPicker(self.body, store, event.tag_id if event else tag_id, width=46)
         self.tag.grid(row=1, column=1, sticky="ew", pady=(0, 16))
         self.start_date, self.start_time = self.time_fields(2, "开始", start)
         self.end_date, self.end_time = self.time_fields(3, "结束", end or now)

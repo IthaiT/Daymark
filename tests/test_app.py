@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from daymark.app import App
-from daymark.dialogs import EventDialog, TagDialog
+from daymark.dialogs import EventDialog
 from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
@@ -206,55 +206,6 @@ class AppTests(unittest.TestCase):
         self.assertEqual(editor.notes.get("1.0", "end-1c"), "a")
         editor.destroy()
 
-    def test_event_picker_rejects_branch_selection_with_mouse_and_keyboard(self):
-        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day)
-        self.click(editor.tag.entry)
-        popup = editor.tag.popup
-        tree = popup.tree
-        self.assertFalse(tree.exists("none"))
-        for tag_id in ("work", "embedded"):
-            tree.see(f"tag:{tag_id}")
-            self.app.update()
-            x, y, width, height = tree.bbox(f"tag:{tag_id}")
-            self.click(tree, x + 90, y + height // 2)
-            self.assertTrue(popup.winfo_exists())
-            self.assertIsNone(editor.tag.tag_id())
-            self.assertIn("disabled", popup.choose_button.state())
-            self.type_key("Return")
-            self.assertTrue(popup.winfo_exists())
-            self.assertIsNone(editor.tag.tag_id())
-        tree.see("tag:linux")
-        self.app.update()
-        x, y, width, height = tree.bbox("tag:linux")
-        self.click(tree, x + 90, y + height // 2)
-        self.assertEqual(editor.tag.tag_id(), "linux")
-        self.assertFalse(popup.winfo_exists())
-        self.fill(editor.title_entry, "叶子标签事件")
-        editor.save()
-        self.assertEqual(next(iter(self.store.events.values())).tag_id, "linux")
-
-    def test_event_dialog_requires_a_tag_before_saving(self):
-        editor = EventDialog(self.app, self.store, self.app.refresh, self.app.day)
-        self.fill(editor.title_entry, "未选择标签")
-        original = self.store.events_path.read_bytes()
-        with patch("tkinter.messagebox.showerror") as error:
-            editor.save()
-            error.assert_called_once()
-            self.assertIn("叶子标签", error.call_args.args[1])
-        self.assertTrue(editor.winfo_exists())
-        self.assertEqual(self.app.grab_current(), editor)
-        self.assertEqual(self.store.events, {})
-        self.assertEqual(self.store.events_path.read_bytes(), original)
-        editor.destroy()
-
-    def test_tag_parent_picker_can_still_choose_branch_nodes(self):
-        editor = TagDialog(self.app, self.store, self.app.tag_saved)
-        self.fill(editor.name, "另一门课程")
-        self.choose_tag(editor.parent_choice, "learning")
-        editor.save()
-        tag = self.store.tags[self.app.selected_tag()]
-        self.assertEqual(tag.parent_id, "learning")
-
     def test_clicking_main_date_field_opens_calendar_and_changes_day(self):
         self.app.date_picker.value.set("2026-10-07")
         self.click(self.app.date_picker.entry)
@@ -375,25 +326,6 @@ class AppTests(unittest.TestCase):
             post.assert_not_called()
         self.assertEqual(set(self.store.events), {"a"})
 
-    def test_double_click_opens_the_clicked_event_and_allows_tag_changes(self):
-        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
-        event = Event("edited", "原名称", "linux", start, start + timedelta(hours=1))
-        self.store.save_event(event)
-        self.app.refresh()
-        self.app.update()
-        tree = self.app.events_tree
-        x, y, width, height = tree.bbox(event.id)
-        self.click(tree, x + 100, y + height // 2)
-        self.click(tree, x + 100, y + height // 2)
-        editor = self.app.grab_current()
-        self.assertIsInstance(editor, EventDialog)
-        self.assertEqual(editor.event.id, event.id)
-        self.fill(editor.title_entry, "修改后的名称")
-        self.choose_tag(editor.tag, "course")
-        editor.save()
-        self.assertEqual(self.store.events[event.id].title, "修改后的名称")
-        self.assertEqual(self.store.events[event.id].tag_id, "course")
-
     def drag(self, source, target):
         tree = self.app.tags_tree
         tree.see(source)
@@ -495,19 +427,6 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.store.tags_path.read_bytes(), original)
         self.assertIsNone(self.store.tags["work"].parent_id)
 
-    def test_drag_to_used_leaf_is_rejected_without_changing_records(self):
-        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
-        self.store.save_event(Event("leaf", "学习", "linux", start, start + timedelta(hours=1)))
-        original_tags = self.store.tags_path.read_bytes()
-        original_events = self.store.events_path.read_bytes()
-        with patch("tkinter.messagebox.showerror") as error:
-            self.drag("explore", "linux")
-            error.assert_called_once()
-            self.assertIn("已有事件", error.call_args.args[1])
-        self.assertEqual(self.store.tags_path.read_bytes(), original_tags)
-        self.assertEqual(self.store.events_path.read_bytes(), original_events)
-        self.assertIsNone(self.store.tags["explore"].parent_id)
-
     def test_drag_release_outside_the_tree_cancels_the_move(self):
         original = self.store.tags_path.read_bytes()
         tree = self.app.tags_tree
@@ -526,9 +445,9 @@ class AppTests(unittest.TestCase):
         tree = editor.tag.popup.tree
         self.assertEqual(tree.parent("tag:linux"), "tag:embedded")
         self.assertEqual(tree.item("tag:linux", "text"), "Linux")
-        tree.selection_set("tag:course")
-        editor.tag.choose()
-        self.assertEqual(editor.tag.get(), "某一门课程")
+        x, y, width, height = tree.bbox("tag:embedded")
+        self.click(tree, x + 90, y + height // 2)
+        self.assertEqual(editor.tag.get(), "嵌入式")
         self.assertEqual(self.app.grab_current(), editor)
         editor.destroy()
 

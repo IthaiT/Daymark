@@ -86,18 +86,15 @@ class Picker(ttk.Frame):
 
 
 class TagPicker(Picker):
-    def __init__(self, parent, store, selected=None, excluded=(), empty_label="未分类", width=44, leaf_only=False):
+    def __init__(self, parent, store, selected=None, excluded=(), empty_label="未分类", width=44):
         super().__init__(parent, width, editable=False, symbol="▾")
         self.store, self.excluded, self.empty_label = store, set(excluded), empty_label
-        self.leaf_only = leaf_only
         self.selected_id = None
         self.set_tag(selected)
 
     def set_tag(self, tag_id):
         if tag_id is not None and (tag_id not in self.store.tags or tag_id in self.excluded):
             raise ValueError("所选标签不可用。")
-        if tag_id is not None and self.leaf_only and not self.store.is_leaf_tag(tag_id):
-            raise ValueError("事件只能使用叶子标签。")
         self.selected_id = tag_id
         self.value.set(self.store.tags[tag_id].name if tag_id else self.empty_label)
 
@@ -116,31 +113,18 @@ class TagPicker(Picker):
         scroll = ttk.Scrollbar(box, command=popup.tree.yview)
         scroll.pack(side="right", fill="y")
         popup.tree.configure(yscrollcommand=scroll.set)
-        popup.tree.tag_configure("branch", foreground="#888888")
-        if not self.leaf_only:
-            popup.tree.insert("", "end", iid="none", text=self.empty_label)
+        popup.tree.insert("", "end", iid="none", text=self.empty_label)
         for tag in self.store.ordered_tags():
             if tag.id not in self.excluded:
                 popup.tree.insert(f"tag:{tag.parent_id}" if tag.parent_id else "", "end",
-                                  iid=f"tag:{tag.id}", text=tag.name, open=True,
-                                  tags=("branch",) if self.leaf_only and not self.store.is_leaf_tag(tag.id) else ())
+                                  iid=f"tag:{tag.id}", text=tag.name, open=True)
         selected = f"tag:{self.selected_id}" if self.selected_id else "none"
-        if popup.tree.exists(selected):
-            popup.tree.selection_set(selected)
-            popup.tree.see(selected)
+        popup.tree.selection_set(selected)
+        popup.tree.see(selected)
         popup.tree.bind("<ButtonRelease-1>", self._choose_clicked)
         popup.tree.bind("<Return>", lambda _: self.choose())
-        popup.choose_button = ttk.Button(popup.body, text="选择", command=self.choose)
-        popup.choose_button.pack(anchor="e", pady=(10, 0))
-        popup.tree.bind("<<TreeviewSelect>>", lambda _: self._update_choice())
-        self._update_choice()
+        ttk.Button(popup.body, text="选择", command=self.choose).pack(anchor="e", pady=(10, 0))
         popup.show(popup.tree)
-
-    def _update_choice(self):
-        if self._popup_open():
-            selected = self.popup.tree.selection()
-            allowed = bool(selected) and (not self.leaf_only or self.store.is_leaf_tag(selected[0][4:]))
-            self.popup.choose_button.state(("!disabled",) if allowed else ("disabled",))
 
     def _choose_clicked(self, pointer):
         tree = self.popup.tree
@@ -154,10 +138,7 @@ class TagPicker(Picker):
     def choose(self):
         selected = self.popup.tree.selection()
         if selected:
-            tag_id = selected[0][4:] if selected[0].startswith("tag:") else None
-            if self.leaf_only and not self.store.is_leaf_tag(tag_id):
-                return
-            self.set_tag(tag_id)
+            self.set_tag(selected[0][4:] if selected[0].startswith("tag:") else None)
             self.popup.close()
 
 

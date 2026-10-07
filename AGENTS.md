@@ -46,4 +46,4 @@ PR descriptions should explain the problem, resulting behavior, and validation p
 
 Preserve stable tag IDs, JSON versioning, CSV columns, and UTF-8 BOM encoding for CSV. Retain atomic writes, single-instance locking, and corrupt-file protection. Use local timestamps consistently. Never commit personal records or test against the user's live `data/` directory.
 
-Require existing leaf-tag IDs for events on reads and writes. Reject tree changes that give children to a tag already used by events.
+Events may use any tag level or remain unclassified. Adding or moving child tags must preserve existing event-to-tag IDs.

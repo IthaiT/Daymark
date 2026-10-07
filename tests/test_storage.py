@@ -30,6 +30,26 @@ class StorageTests(unittest.TestCase):
         with restored.events_path.open(encoding="utf-8-sig", newline="") as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
 
+    def test_events_accept_any_tag_level_and_unclassified_records(self):
+        events = [self.event(f"event-{index}", tag=tag)
+                  for index, tag in enumerate((None, "work", "embedded", "linux"))]
+        for event in events:
+            self.store.save_event(event)
+        self.assertEqual(Store(self.store.directory).events, {event.id: event for event in events})
+        self.store.reassign_events([event.id for event in events], "embedded")
+        self.assertTrue(all(event.tag_id == "embedded" for event in Store(self.store.directory).events.values()))
+
+    def test_tag_with_events_can_receive_new_and_moved_children(self):
+        self.store.save_event(self.event())
+        original = self.store.events_path.read_bytes()
+        child = self.store.save_tag("专题", "linux")
+        self.store.save_tag("课程", "linux", "course")
+        restored = Store(self.store.directory)
+        self.assertEqual(restored.tags[child.id].parent_id, "linux")
+        self.assertEqual(restored.tags["course"].parent_id, "linux")
+        self.assertEqual(restored.events["event"].tag_id, "linux")
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+
     def test_rename_and_move_parent_preserves_history(self):
         self.store.save_event(self.event())
         self.store.save_tag("技术基础", "side", "embedded")
@@ -98,61 +118,6 @@ class StorageTests(unittest.TestCase):
                 self.store.save_event(event)
         self.assertEqual(self.store.events_path.read_bytes(), original)
 
-    def test_new_and_edited_events_require_leaf_tags_without_writing_on_failure(self):
-        self.store.save_event(self.event())
-        original = self.store.events_path.read_bytes()
-        existing = dict(self.store.events)
-        for key in ("event", "new"):
-            for tag in (None, "work", "embedded"):
-                with self.subTest(key=key, tag=tag), self.assertRaisesRegex(ValueError, "叶子标签"):
-                    self.store.save_event(self.event(key, tag=tag))
-                self.assertEqual(self.store.events_path.read_bytes(), original)
-                self.assertEqual(self.store.events, existing)
-
-    def test_loading_non_leaf_or_unassigned_tags_rejects_csv_without_rewriting(self):
-        for tag in ("", "work", "embedded"):
-            with self.subTest(tag=tag):
-                with self.store.events_path.open("w", encoding="utf-8-sig", newline="") as stream:
-                    writer = csv.DictWriter(stream, fieldnames=("id", "title", "tag_id", "start", "end", "notes"))
-                    writer.writeheader()
-                    writer.writerow({"id": "invalid", "title": "实验记录", "tag_id": tag,
-                                     "start": "2026-10-07T09:00:00", "end": "2026-10-07T10:00:00", "notes": ""})
-                original = self.store.events_path.read_bytes()
-                with self.assertRaisesRegex(DataError, "叶子标签"):
-                    Store(self.store.directory)
-                self.assertEqual(self.store.events_path.read_bytes(), original)
-
-    def test_reassignment_requires_a_leaf_and_preserves_the_batch_on_failure(self):
-        for key in ("a", "b"):
-            self.store.save_event(self.event(key))
-        original = self.store.events_path.read_bytes()
-        existing = dict(self.store.events)
-        for tag in (None, "work", "embedded", "missing"):
-            with self.subTest(tag=tag), self.assertRaises(ValueError):
-                self.store.reassign_events(["a", "b"], tag)
-            self.assertEqual(self.store.events_path.read_bytes(), original)
-            self.assertEqual(self.store.events, existing)
-        self.store.reassign_events(["a", "b"], "course")
-        self.assertTrue(all(event.tag_id == "course" for event in Store(self.store.directory).events.values()))
-
-    def test_used_leaf_cannot_receive_new_or_moved_children(self):
-        self.store.save_event(self.event())
-        original_tags = self.store.tags_path.read_bytes()
-        original_events = self.store.events_path.read_bytes()
-        existing_tags = dict(self.store.tags)
-        for name, tag_id in (("新子标签", None), ("学习", "learning")):
-            with self.subTest(tag_id=tag_id), self.assertRaisesRegex(ValueError, "已有事件"):
-                self.store.save_tag(name, "linux", tag_id)
-            self.assertEqual(self.store.tags, existing_tags)
-            self.assertEqual(self.store.tags_path.read_bytes(), original_tags)
-            self.assertEqual(self.store.events_path.read_bytes(), original_events)
-        self.store.reassign_events(["event"], "course")
-        child = self.store.save_tag("新子标签", "linux")
-        with self.assertRaisesRegex(ValueError, "叶子标签"):
-            self.store.save_event(self.event())
-        self.store.save_event(self.event(tag=child.id))
-        self.assertEqual(Store(self.store.directory).events["event"].tag_id, child.id)
-
     def test_failed_write_keeps_file_and_memory_unchanged(self):
         original = self.store.events_path.read_bytes()
         with patch("daymark.storage.os.replace", side_effect=PermissionError("文件正在使用")):
@@ -180,8 +145,8 @@ class StorageTests(unittest.TestCase):
     def test_batch_reassignment_and_delete_survive_restart(self):
         self.store.save_event(self.event("a"))
         self.store.save_event(self.event("b"))
-        self.store.reassign_events(["a", "b"], "explore")
-        self.assertTrue(all(event.tag_id == "explore" for event in Store(self.store.directory).events.values()))
+        self.store.reassign_events(["a", "b"], None)
+        self.assertTrue(all(event.tag_id is None for event in Store(self.store.directory).events.values()))
         self.store.delete_events(["a", "b"])
         self.assertEqual(Store(self.store.directory).events, {})
 

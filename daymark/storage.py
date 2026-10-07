@@ -133,7 +133,8 @@ class Store:
             raise ValueError("事件 ID 不能为空。")
         if not isinstance(event.title, str) or not event.title.strip():
             raise ValueError("请输入事件名称。")
-        self._validate_event_tag(event.tag_id)
+        if event.tag_id is not None and event.tag_id not in self.tags:
+            raise ValueError("所选标签不存在。")
         if not isinstance(event.notes, str):
             raise ValueError("备注必须是文本。")
         if event.end is None and not allow_incomplete:
@@ -142,17 +143,6 @@ class Store:
             raise ValueError("时间应为本机本地时间，不带时区后缀。")
         if event.end is not None and event.end <= event.start:
             raise ValueError("结束时间必须晚于开始时间；跨天事件请修改结束日期。")
-
-    def is_leaf_tag(self, tag_id: str | None) -> bool:
-        return tag_id in self.tags and not any(tag.parent_id == tag_id for tag in self.tags.values())
-
-    def _validate_event_tag(self, tag_id: str | None):
-        if tag_id is None:
-            raise ValueError("请选择一个叶子标签；事件不能未分类。")
-        if tag_id not in self.tags:
-            raise ValueError("所选标签不存在。")
-        if not self.is_leaf_tag(tag_id):
-            raise ValueError("事件只能使用叶子标签，请选择没有子标签的节点。")
 
     def _read_events(self) -> dict[str, Event]:
         if not self.events_path.exists():
@@ -216,8 +206,6 @@ class Store:
         tag = Tag(tag_id or uuid4().hex, name.strip(), parent_id)
         tags = {**self.tags, tag.id: tag}
         self._validate_tags(tags)
-        if parent_id is not None and any(event.tag_id == parent_id for event in self.events.values()):
-            raise ValueError("此标签已有事件，不能新增或移入子标签；请先给这些事件更换标签。")
         self._write_tags(tags)
         self.tags = tags
         return tag
@@ -244,7 +232,8 @@ class Store:
         self.events = events
 
     def reassign_events(self, event_ids: list[str], tag_id: str | None):
-        self._validate_event_tag(tag_id)
+        if tag_id is not None and tag_id not in self.tags:
+            raise ValueError("所选标签不存在。")
         events = dict(self.events)
         for event_id in event_ids:
             events[event_id] = replace(events[event_id], tag_id=tag_id)
