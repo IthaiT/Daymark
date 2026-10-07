@@ -70,6 +70,81 @@ class AppTests(unittest.TestCase):
         released_to.event_generate("<KeyRelease>", keysym=keysym)
         self.app.update()
 
+    def wheel(self, delta, state=0, x=None):
+        canvas = self.app.timeline.canvas
+        self.app.update()
+        canvas.event_generate("<MouseWheel>", delta=delta, state=state,
+                              x=canvas.winfo_width() // 2 if x is None else x, y=70)
+        self.app.update()
+
+    def test_ctrl_wheel_zooms_between_full_day_and_four_times(self):
+        timeline = self.app.timeline
+        canvas = timeline.canvas
+        self.assertEqual(timeline.zoom, 1)
+        # The first and last grid lines mark midnight at each end of the day.
+        grid = [item for item in canvas.find_all() if canvas.type(item) == "line"][:25]
+        original_span = canvas.coords(grid[-1])[0] - canvas.coords(grid[0])[0]
+        self.wheel(-120, state=0x4)
+        self.assertEqual(timeline.zoom, 1)
+        for _ in range(16):
+            self.wheel(120, state=0x4)
+        self.assertEqual(timeline.zoom, 4)
+        grid = [item for item in canvas.find_all() if canvas.type(item) == "line"][:25]
+        enlarged_span = canvas.coords(grid[-1])[0] - canvas.coords(grid[0])[0]
+        self.assertAlmostEqual(enlarged_span, original_span * 4)
+        for _ in range(16):
+            self.wheel(-120, state=0x4)
+        self.assertEqual(timeline.zoom, 1)
+        self.assertAlmostEqual(canvas.xview()[0], 0, places=3)
+
+    def test_ctrl_wheel_keeps_pointer_time_and_event_selection(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=12)
+        event = Event("zoomed", "午间学习", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        self.app.update()
+        timeline = self.app.timeline
+        canvas = timeline.canvas
+        rectangle = canvas.find_withtag(f"event:{event.id}")[0]
+        left, top, right, bottom = canvas.coords(rectangle)
+        pointer_x = int((left + right) / 2)
+        self.click(canvas, pointer_x, int((top + bottom) / 2))
+        self.assertEqual(self.app.events_tree.selection(), (event.id,))
+        fraction = (canvas.canvasx(pointer_x) - left) / (right - left)
+        for _ in range(6):
+            self.wheel(120, state=0x4, x=pointer_x)
+            rectangle = canvas.find_withtag(f"event:{event.id}")[0]
+            left, top, right, bottom = canvas.coords(rectangle)
+            self.assertAlmostEqual(canvas.canvasx(pointer_x), left + fraction * (right - left), delta=2)
+            fraction = (canvas.canvasx(pointer_x) - left) / (right - left)
+        self.assertEqual(self.app.events_tree.selection(), (event.id,))
+        self.assertEqual(timeline.selected, {event.id})
+        # Hit testing still selects the same record after zooming and scrolling.
+        self.app.events_tree.selection_remove(event.id)
+        self.app.update()
+        # Use a different point in the record so Tk does not treat this as a double-click.
+        self.click(canvas, pointer_x + 12, int((top + bottom) / 2))
+        self.assertEqual(self.app.events_tree.selection(), (event.id,))
+
+    def test_normal_and_shift_wheel_scroll_without_changing_zoom(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        for index in range(12):
+            self.store.save_event(Event(str(index), "重叠事件", "linux", start, start + timedelta(hours=1)))
+        self.app.refresh()
+        self.app.update()
+        self.wheel(120, state=0x4)
+        timeline = self.app.timeline
+        canvas = timeline.canvas
+        zoom, horizontal, vertical = timeline.zoom, canvas.xview(), canvas.yview()
+        self.wheel(-120)
+        self.assertGreater(canvas.xview()[0], horizontal[0])
+        self.assertEqual(canvas.yview(), vertical)
+        horizontal = canvas.xview()
+        self.wheel(-120, state=0x1)
+        self.assertGreater(canvas.yview()[0], vertical[0])
+        self.assertEqual(canvas.xview(), horizontal)
+        self.assertEqual(timeline.zoom, zoom)
+
     def test_new_and_existing_event_fields_accept_mouse_focus_and_typing(self):
         start = datetime(2026, 10, 7, 9)
         existing = Event("old", "原名称", "linux", start, start + timedelta(hours=1))
@@ -237,9 +312,6 @@ class AppTests(unittest.TestCase):
         self.app.timeline.on_select("late")
         self.app.update()
         self.assertEqual(self.app.events_tree.selection(), ("late",))
-        self.app.zoom_choice.current(2)
-        self.app.zoom_changed()
-        self.assertEqual(self.app.timeline.zoom, 4)
 
     def test_context_menu_add_rename_and_delete(self):
         self.menu_for("work").invoke(0)

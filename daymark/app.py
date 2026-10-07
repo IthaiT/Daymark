@@ -54,13 +54,12 @@ class App(tk.Tk):
         style.configure("TButton", padding=(12, 8), background="white", bordercolor="#d4d4d4", borderwidth=1)
         style.map("TButton", background=[("active", "#f3f4f6")], foreground=[("disabled", "#999999")])
         style.configure("Accent.TButton", font=(FONT, 10, "bold"))
+        style.configure("Icon.TButton", font=(FONT, 16), padding=(8, 4))
         style.configure("Selected.TButton", background="#e5e7eb")
         style.configure("TEntry", padding=7, fieldbackground="white", bordercolor="#d4d4d4")
         style.map("TEntry", fieldbackground=[("readonly", "white")], foreground=[("readonly", "#111111")])
-        style.configure("TCombobox", padding=6, fieldbackground="white", bordercolor="#d4d4d4")
-        style.map("TCombobox", fieldbackground=[("readonly", "white")])
         style.configure("Treeview", background="white", fieldbackground="white", foreground="#111111",
-                        rowheight=36, borderwidth=0)
+                        rowheight=36, borderwidth=0, indicatorsize=16)
         style.map("Treeview", background=[("selected", "#e5e7eb")], foreground=[("selected", "#111111")])
         style.configure("Treeview.Heading", background="white", font=(FONT, 10), padding=(6, 9))
         style.configure("Tooltip.TLabel", background="white", foreground="#111111", relief="solid", borderwidth=1)
@@ -101,12 +100,12 @@ class App(tk.Tk):
         main.rowconfigure(2, weight=1, minsize=250)
         date_bar = ttk.Frame(main)
         date_bar.grid(row=0, column=0, sticky="ew", pady=(0, 24))
-        ttk.Button(date_bar, text="‹", width=3, command=lambda: self.shift_day(-1)).pack(side="left")
+        ttk.Button(date_bar, text="‹", width=2, style="Icon.TButton", command=lambda: self.shift_day(-1)).pack(side="left")
         self.date_picker = DatePicker(date_bar, self.day, on_change=self.set_day)
         self.date_picker.pack(side="left", padx=8)
         self.date_picker.entry.bind("<Return>", lambda _: self.set_day())
         ttk.Button(date_bar, text="查看", command=self.set_day).pack(side="left")
-        ttk.Button(date_bar, text="›", width=3, command=lambda: self.shift_day(1)).pack(side="left", padx=8)
+        ttk.Button(date_bar, text="›", width=2, style="Icon.TButton", command=lambda: self.shift_day(1)).pack(side="left", padx=8)
         ttk.Button(date_bar, text="今天", command=self.go_today).pack(side="left")
         self.weekday_label = ttk.Label(date_bar)
         self.weekday_label.pack(side="left", padx=14)
@@ -118,11 +117,7 @@ class App(tk.Tk):
         heading = ttk.Frame(timeline_box)
         heading.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         ttk.Label(heading, text="一天的轨迹", style="Heading.TLabel").pack(side="left")
-        ttk.Label(heading, text="点击选中 · 双击编辑 · 滚轮横移", style="Muted.TLabel").pack(side="left", padx=16)
-        self.zoom_choice = ttk.Combobox(heading, values=("全天", "2× 放大", "4× 放大"), state="readonly", width=10)
-        self.zoom_choice.current(0)
-        self.zoom_choice.pack(side="right")
-        self.zoom_choice.bind("<<ComboboxSelected>>", self.zoom_changed)
+        ttk.Label(heading, text="点击选中 · 双击编辑 · 滚轮横移 · Ctrl+滚轮缩放", style="Muted.TLabel").pack(side="left", padx=16)
         self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event)
         self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
@@ -316,10 +311,6 @@ class App(tk.Tk):
     def go_today(self):
         self.day = date.today()
         self.refresh()
-
-    def zoom_changed(self, _=None):
-        self.timeline.zoom = (1, 2, 4)[self.zoom_choice.current()]
-        self.draw_timeline()
 
     def add_event(self):
         EventDialog(self, self.store, self.refresh, self.day)

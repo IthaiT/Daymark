@@ -66,7 +66,7 @@ class Picker(ttk.Frame):
         self.entry = ttk.Entry(self, textvariable=self.value, width=width,
                                state="normal" if editable else "readonly")
         self.entry.pack(side="left", fill="x", expand=True)
-        self.button = ttk.Button(self, text=symbol, width=3, command=self.open_popup)
+        self.button = ttk.Button(self, text=symbol, width=2, style="Icon.TButton", command=self.open_popup)
         self.button.pack(side="left", padx=(4, 0))
         # Open after mouse release, so the entry's press binding cannot steal
         # focus from the new popup or keep the pointer captured by the entry.
@@ -159,10 +159,10 @@ class DatePicker(Picker):
         self.popup = popup = Popup(self)
         header = ttk.Frame(popup.body)
         header.pack(fill="x", pady=(0, 8))
-        ttk.Button(header, text="‹", width=3, command=lambda: self.shift_month(-1)).pack(side="left")
+        ttk.Button(header, text="‹", width=2, style="Icon.TButton", command=lambda: self.shift_month(-1)).pack(side="left")
         popup.month_label = ttk.Label(header, anchor="center", width=16)
         popup.month_label.pack(side="left", expand=True)
-        ttk.Button(header, text="›", width=3, command=lambda: self.shift_month(1)).pack(side="right")
+        ttk.Button(header, text="›", width=2, style="Icon.TButton", command=lambda: self.shift_month(1)).pack(side="right")
         popup.days = ttk.Frame(popup.body)
         popup.days.pack(fill="both", expand=True)
         ttk.Button(popup.body, text="今天", command=lambda: self.choose(date.today())).pack(fill="x", pady=(8, 0))

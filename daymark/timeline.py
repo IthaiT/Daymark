@@ -142,7 +142,21 @@ class Timeline(ttk.Frame):
         self.tooltip, self.hovered_id = None, None
 
     def _wheel(self, pointer):
-        if pointer.state & 1:
-            self.canvas.yview_scroll(-1 if pointer.delta > 0 else 1, "units")
+        if not pointer.delta:
+            return "break"
+        direction = 1 if pointer.delta > 0 else -1
+        if pointer.state & 0x4:
+            zoom = min(4, max(1, self.zoom + direction * 0.25))
+            if zoom != self.zoom:
+                width = max(650, self.canvas.winfo_width() - 48)
+                # Keep the time under the pointer in place while changing scale.
+                fraction = (self.canvas.canvasx(pointer.x) - 24) / (width * self.zoom)
+                self.zoom = zoom
+                self.draw()
+                left = 24 + fraction * width * zoom - pointer.x
+                self.canvas.xview_moveto(left / (width * zoom + 48))
+        elif pointer.state & 0x1:
+            self.canvas.yview_scroll(-direction, "units")
         else:
-            self.canvas.xview_scroll(-1 if pointer.delta > 0 else 1, "units")
+            self.canvas.xview_scroll(-direction, "units")
+        return "break"
