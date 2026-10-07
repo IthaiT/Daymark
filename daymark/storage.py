@@ -6,7 +6,7 @@ import os
 import tempfile
 import time as clock
 from dataclasses import asdict, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -239,7 +239,10 @@ class Store:
         event = self.running_event
         if event is None:
             raise ValueError("没有正在计时的事件。")
-        self.save_event(replace(event, end=(now or datetime.now()).replace(microsecond=0)))
+        end = (now or datetime.now()).replace(microsecond=0)
+        if end == event.start:
+            end += timedelta(seconds=1)
+        self.save_event(replace(event, end=end))
 
     def delete_events(self, event_ids: list[str]):
         events = {key: value for key, value in self.events.items() if key not in event_ids}

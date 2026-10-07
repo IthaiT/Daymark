@@ -23,12 +23,14 @@ class Event:
     def interval_on(self, day: date, now: datetime) -> tuple[datetime, datetime] | None:
         """Clip an event to a day; a running event ends at `now`."""
         day_start = datetime.combine(day, time.min)
-        day_end = day_start + timedelta(days=1)
+        day_end = datetime.max if day == date.max else day_start + timedelta(days=1)
         left, right = max(self.start, day_start), min(self.end or now, day_end)
         return (left, right) if right > left else None
 
 
 def duration_text(seconds: float) -> str:
+    if 0 < seconds < 60:
+        return "不足 1 分钟"
     minutes = max(0, int(seconds // 60))
     hours, minutes = divmod(minutes, 60)
     return f"{hours} 小时 {minutes:02d} 分" if hours else f"{minutes} 分钟"

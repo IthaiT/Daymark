@@ -85,6 +85,12 @@ class StorageTests(unittest.TestCase):
         self.assertIsNone(final.running_event)
         self.assertEqual(final.summary(date(2026, 10, 8))[0], 600)
 
+    def test_timer_can_be_stopped_in_the_same_second(self):
+        now = datetime(2026, 10, 7, 9)
+        timer = self.store.start_timer("短任务", None, now=now)
+        self.store.stop_timer(now)
+        self.assertEqual((Store(self.store.directory).events[timer.id].end - now).total_seconds(), 1)
+
     def test_invalid_time_or_missing_tag_does_not_write(self):
         original = self.store.events_path.read_bytes()
         for event in (
