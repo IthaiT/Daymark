@@ -1,0 +1,9 @@
+.conda/
+.conda-pkgs/
+__pycache__/
+*.py[cod]
+data/
+.test-artifacts/
+.pytest_cache/
+*.tmp
+*.log
