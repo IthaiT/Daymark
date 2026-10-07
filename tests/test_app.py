@@ -77,6 +77,115 @@ class AppTests(unittest.TestCase):
                               x=canvas.winfo_width() // 2 if x is None else x, y=70)
         self.app.update()
 
+    def begin_resize(self, event_id, edge, moment):
+        self.app.select_event(event_id)
+        self.app.update()
+        canvas = self.app.timeline.canvas
+        handle = canvas.find_withtag(f"resize:{edge}:{event_id}")[0]
+        left, top, right, bottom = canvas.bbox(handle)
+        x, y = round((left + right) / 2 - canvas.canvasx(0)), round((top + bottom) / 2 - canvas.canvasy(0))
+        canvas.event_generate("<ButtonPress-1>", x=x, y=y)
+        self.app.update()
+        ticks = canvas.find_withtag("time-tick")
+        left, right = canvas.coords(ticks[0])[0], canvas.coords(ticks[-1])[0]
+        original = getattr(self.store.events[event_id], edge)
+        x = round(x + (right - left) * (moment - original).total_seconds() / 86400)
+        canvas.event_generate("<B1-Motion>", x=x, y=y)
+        self.app.update()
+        return canvas, x, y
+
+    def finish_resize(self, pointer):
+        canvas, x, y = pointer
+        canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
+        self.app.update()
+
+    def test_resize_previews_without_writing_then_updates_scrolled_timeline_and_table(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        event = Event("resized", "学习", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        self.app.timeline.canvas.xview_moveto(0.25)
+        original = self.store.events_path.read_bytes()
+        end = start + timedelta(hours=1, minutes=30)
+        pointer = self.begin_resize(event.id, "end", end)
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.finish_resize(pointer)
+        self.assertEqual(Store(self.store.directory).events[event.id].end, end)
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 30 分")
+        pointer = self.begin_resize(event.id, "start", start + timedelta(minutes=15))
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events[event.id].start, start + timedelta(minutes=15))
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 15 分")
+        self.assertIsNone(self.app.grab_current())
+
+    def test_escape_cancels_a_resize_without_changing_storage(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        event = Event("cancelled", "学习", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        original = self.store.events_path.read_bytes()
+        pointer = self.begin_resize(event.id, "end", start + timedelta(hours=2))
+        self.type_key("Escape")
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.assertIsNone(self.app.grab_current())
+
+    def test_failed_resize_restores_the_event_and_releases_mouse_capture(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        event = Event("failed", "学习", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        original = self.store.events_path.read_bytes()
+        pointer = self.begin_resize(event.id, "end", start + timedelta(hours=2))
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.finish_resize(pointer)
+            error.assert_called_once()
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 00 分")
+        self.assertIsNone(self.app.grab_current())
+
+    def test_resize_preserves_a_hidden_cross_day_boundary_and_prevents_reversed_times(self):
+        origin = datetime.combine(self.app.day, datetime.min.time())
+        event = Event("night", "夜间学习", "linux", origin - timedelta(hours=1), origin + timedelta(minutes=30))
+        self.store.save_event(event)
+        self.app.refresh()
+        self.app.update()
+        self.assertFalse(self.app.timeline.canvas.find_withtag(f"resize:start:{event.id}"))
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        pointer = self.begin_resize(event.id, "end", origin + timedelta(hours=1))
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events[event.id].start, event.start)
+        self.assertEqual(self.store.events[event.id].end, origin + timedelta(hours=1))
+        self.app.timeline.zoom = 1
+        start = origin + timedelta(hours=9)
+        second = Event("short", "学习", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(second)
+        self.app.refresh()
+        pointer = self.begin_resize(second.id, "start", start + timedelta(hours=2))
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events[second.id].end - self.store.events[second.id].start, timedelta(minutes=1))
+
+    def test_short_event_resize_handles_work_at_datetime_limits(self):
+        for key, start, end, edge, target in (
+            ("minimum", datetime.min, datetime.min + timedelta(seconds=30), "start", datetime.min + timedelta(minutes=2)),
+            ("maximum", datetime.max - timedelta(seconds=30), datetime.max, "end", datetime.max - timedelta(minutes=2)),
+        ):
+            with self.subTest(edge=edge):
+                self.app.day = start.date()
+                event = Event(key, "边界记录", "linux", start, end)
+                self.store.save_event(event)
+                self.app.refresh()
+                pointer = self.begin_resize(key, edge, target)
+                self.finish_resize(pointer)
+                self.assertEqual(self.store.events[key], event)
+                self.assertIsNone(self.app.grab_current())
+
     def test_ctrl_wheel_zooms_between_full_day_and_four_times(self):
         timeline = self.app.timeline
         canvas = timeline.canvas

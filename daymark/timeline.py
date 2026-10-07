@@ -3,7 +3,8 @@
 import hashlib
 import tkinter as tk
 import tkinter.font as tkfont
-from datetime import datetime, time
+from dataclasses import replace
+from datetime import datetime, time, timedelta
 from tkinter import ttk
 
 from .model import duration_text, timeline_segments
@@ -24,9 +25,11 @@ def tag_color(store, tag_id):
 
 
 class Timeline(ttk.Frame):
-    def __init__(self, parent, store, on_select, on_edit):
+    def __init__(self, parent, store, on_select, on_edit, on_resize):
         super().__init__(parent)
         self.store, self.on_select, self.on_edit = store, on_select, on_edit
+        self.on_resize = on_resize
+        self._resize = None
         self.canvas = tk.Canvas(self, height=280, bg="white", highlightthickness=1, highlightbackground="#e5e5e5")
         self.tick_font = tkfont.Font(self.canvas, family="Microsoft YaHei UI", size=9)
         self.canvas.grid(row=0, column=0, sticky="nsew")
@@ -39,6 +42,9 @@ class Timeline(ttk.Frame):
         self.rowconfigure(0, weight=1)
         self.canvas.bind("<Configure>", lambda _: self.draw())
         self.canvas.bind("<Button-1>", self._click)
+        self.canvas.bind("<B1-Motion>", self._resize_motion)
+        self.canvas.bind("<ButtonRelease-1>", self._resize_release)
+        self.canvas.bind("<Escape>", lambda _: self.cancel_resize())
         self.canvas.bind("<Double-1>", self._double_click)
         self.canvas.bind("<Motion>", self._hover)
         self.canvas.bind("<Leave>", lambda _: self._hide_tooltip())
@@ -61,7 +67,11 @@ class Timeline(ttk.Frame):
         canvas = self.canvas
         canvas.delete("all")
         width = max(650, canvas.winfo_width() - 48) * self.zoom
-        segments = timeline_segments(self.events, self.day)
+        events = self.events
+        if self._resize is not None:
+            preview = self._resize["preview"]
+            events = [preview if event.id == preview.id else event for event in events]
+        segments = timeline_segments(events, self.day)
         bottom = max(90, canvas.winfo_height() - 26)
         canvas.configure(scrollregion=(0, 0, width + 48, bottom + 24))
         origin = datetime.combine(self.day, time.min)
@@ -108,6 +118,17 @@ class Timeline(ttk.Frame):
                                    anchor="w", font=("Microsoft YaHei UI", 10), tags=(f"event:{event_id}",))
         if not segments:
             canvas.create_text(width / 2 + 24, bottom / 2, text="这一天还没有记录。", fill="#111111", font=("Microsoft YaHei UI", 11))
+        if len(self.selected) == 1 and (event := visible_events.get(next(iter(self.selected)))):
+            start, end = event.interval_on(self.day)
+            for edge, moment, clipped in (("start", event.start, start), ("end", event.end, end)):
+                if moment != clipped:
+                    continue
+                xpos = x(moment)
+                canvas.create_line(xpos, 50, xpos, bottom, fill="#d95b54", dash=(3, 3), tags=("resize-guide",))
+                outside = xpos - 12 if edge == "start" else xpos + 12
+                canvas.create_polygon(outside, bottom + 19, xpos, bottom + 4, xpos, bottom + 19,
+                                      fill="white", outline="#d95b54", width=2,
+                                      tags=(f"resize:{edge}:{event.id}",))
         now = datetime.now()
         if self.day == now.date():
             current = x(now)
@@ -131,14 +152,97 @@ class Timeline(ttk.Frame):
         return None
 
     def _click(self, pointer):
+        self._hide_tooltip()
+        if handle := self._handle_at(pointer):
+            edge, event_id = handle
+            if self.on_select(event_id) is False:
+                return "break"
+            event = self.store.events[event_id]
+            width = max(650, self.canvas.winfo_width() - 48) * self.zoom
+            origin = datetime.combine(self.day, time.min)
+            edge_x = 24 + (getattr(event, edge) - origin).total_seconds() / 86400 * width
+            self._resize = dict(edge=edge, original=event, preview=event, origin_x=pointer.x, moved=False,
+                                offset=self.canvas.canvasx(pointer.x) - edge_x)
+            self.canvas.focus_force()
+            self.canvas.grab_set()
+            return "break"
         if event := self._event_at(pointer):
             self.on_select(event.id)
 
     def _double_click(self, pointer):
+        if self._handle_at(pointer):
+            return self._click(pointer)
         if event := self._event_at(pointer):
             self.on_edit(event.id)
 
+    def _handle_at(self, pointer):
+        x, y = self.canvas.canvasx(pointer.x), self.canvas.canvasy(pointer.y)
+        for item in reversed(self.canvas.find_overlapping(x - 3, y - 3, x + 3, y + 3)):
+            for tag in self.canvas.gettags(item):
+                if tag.startswith("resize:"):
+                    _, edge, event_id = tag.split(":", 2)
+                    return edge, event_id
+        return None
+
+    def _resize_motion(self, pointer):
+        if self._resize is None:
+            return
+        if not self._resize["moved"] and abs(pointer.x - self._resize["origin_x"]) < 2:
+            return
+        self._resize["moved"] = True
+        if pointer.x < 16:
+            self.canvas.xview_scroll(-1, "units")
+        elif pointer.x > self.canvas.winfo_width() - 16:
+            self.canvas.xview_scroll(1, "units")
+        width = max(650, self.canvas.winfo_width() - 48) * self.zoom
+        xpos = self.canvas.canvasx(pointer.x) - self._resize["offset"]
+        minutes = min(1440, max(0, round((xpos - 24) / width * 1440)))
+        try:
+            moment = datetime.combine(self.day, time.min) + timedelta(minutes=minutes)
+        except OverflowError:
+            moment = datetime.max.replace(second=0, microsecond=0)
+        original = self._resize["original"]
+        edge = self._resize["edge"]
+        try:
+            if edge == "start" and moment >= original.end:
+                moment = (original.end - timedelta(minutes=1)).replace(second=0, microsecond=0)
+            elif edge == "end" and moment <= original.start:
+                moment = original.start.replace(second=0, microsecond=0) + timedelta(minutes=1)
+        except OverflowError:
+            moment = getattr(original, edge)
+        self._resize["preview"] = replace(original, **{edge: moment})
+        self.canvas.configure(cursor="sb_h_double_arrow")
+        self.draw()
+        return "break"
+
+    def _resize_release(self, _):
+        if self._resize is None:
+            return
+        state, self._resize = self._resize, None
+        if self.canvas.grab_current() is self.canvas:
+            self.canvas.grab_release()
+        if state["moved"] and state["preview"] != state["original"]:
+            self.on_resize(state["preview"])
+        self.canvas.configure(cursor="")
+        self.draw()
+        return "break"
+
+    def cancel_resize(self):
+        if self._resize is not None:
+            self._resize = None
+            if self.canvas.grab_current() is self.canvas:
+                self.canvas.grab_release()
+            self.canvas.configure(cursor="")
+            self.draw()
+        return "break"
+
     def _hover(self, pointer):
+        if self._resize is not None:
+            return
+        if self._handle_at(pointer):
+            self.canvas.configure(cursor="sb_h_double_arrow")
+            self._hide_tooltip()
+            return
         event = self._event_at(pointer)
         self.canvas.configure(cursor="hand2" if event else "")
         if event is None:
@@ -164,7 +268,7 @@ class Timeline(ttk.Frame):
         self.tooltip, self.hovered_id = None, None
 
     def _wheel(self, pointer):
-        if not pointer.delta:
+        if not pointer.delta or self._resize is not None:
             return "break"
         direction = 1 if pointer.delta > 0 else -1
         if pointer.state & 0x4:

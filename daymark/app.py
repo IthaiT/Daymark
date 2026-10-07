@@ -113,7 +113,7 @@ class App(tk.Tk):
         timeline_box.columnconfigure(0, weight=1)
         timeline_box.rowconfigure(1, weight=1)
         ttk.Label(timeline_box, text="一天的轨迹", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
-        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event)
+        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event, self.resize_event)
         self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
         bottom.grid(row=2, column=0, sticky="nsew")
@@ -315,6 +315,11 @@ class App(tk.Tk):
         if self.grab_current() is None and event_id in self.store.events:
             EventDialog(self, self.store, self.refresh, self.day, self.store.events[event_id])
 
+    def resize_event(self, event):
+        saved = self.try_action(lambda: self.store.save_event(event))
+        self.refresh()
+        return saved
+
     def event_double_click(self, pointer):
         if event_id := self.events_tree.identify_row(pointer.y):
             self.edit_event(event_id)
@@ -352,5 +357,6 @@ class App(tk.Tk):
 
     def close(self):
         self.cancel_drag()
+        self.timeline.cancel_resize()
         self.timeline._hide_tooltip()
         self.destroy()
