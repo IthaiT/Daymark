@@ -12,6 +12,7 @@ from daymark.dialogs import EventDialog
 from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
+from daymark.timeline import tag_color
 
 
 @unittest.skipUnless(os.environ.get("DAYMARK_UI_TESTS") == "1", "Set DAYMARK_UI_TESTS=1 to open test windows")
@@ -93,6 +94,180 @@ class AppTests(unittest.TestCase):
         canvas.event_generate("<B1-Motion>", x=x, y=y)
         self.app.update()
         return canvas, x, y
+
+    def cell_event(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
+        event = Event("cell", "原名称", "linux", start, start + timedelta(hours=1), "保留备注")
+        self.store.save_event(event)
+        self.app.refresh()
+        self.app.update()
+        return event
+
+    def double_click_cell(self, event_id, column):
+        tree = self.app.events_tree
+        tree.see(event_id)
+        self.app.update()
+        x, y, width, height = tree.bbox(event_id, column)
+        self.click(tree, x + width // 2, y + height // 2)
+        self.click(tree, x + width // 2, y + height // 2)
+        self.assertIsNotNone(self.app.cell_editor)
+        self.assertEqual(self.app.cell_editor.column, column)
+        return self.app.cell_editor
+
+    def test_inline_title_saves_on_enter_and_escape_discards_changes(self):
+        event = self.cell_event()
+        editor = self.double_click_cell(event.id, "title")
+        self.assertIsNone(self.app.grab_current())
+        self.type_key("x")
+        self.type_key("Return")
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(Store(self.store.directory).events[event.id].title, "x")
+        self.assertEqual(self.store.events[event.id].notes, event.notes)
+        editor = self.double_click_cell(event.id, "title")
+        self.fill(editor.entry, "取消修改")
+        self.type_key("Escape")
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(self.store.events[event.id].title, "x")
+
+    def test_inline_tag_can_select_a_parent_or_unclassified(self):
+        event = self.cell_event()
+        for tag_id in ("embedded", None):
+            editor = self.double_click_cell(event.id, "tag")
+            tree = editor.input.popup.tree
+            row = f"tag:{tag_id}" if tag_id else "none"
+            tree.see(row)
+            self.app.update()
+            x, y, width, height = tree.bbox(row)
+            self.click(tree, x + 110, y + height // 2)
+            self.assertIsNone(self.app.cell_editor)
+            self.assertEqual(self.store.events[event.id].tag_id, tag_id)
+            self.assertIsNone(self.app.grab_current())
+
+    def test_inline_timestamp_uses_nested_pickers_and_recalculates_daily_duration(self):
+        self.app.day = date(2026, 10, 7)
+        event = self.cell_event()
+        editor = self.double_click_cell(event.id, "end")
+        popup = editor.input.popup
+        self.click(popup.date.entry)
+        self.click(popup.date.popup.day_buttons[8])
+        self.assertEqual(self.app.grab_current(), popup)
+        self.click(popup.time.entry)
+        clock = popup.time.popup
+        for items, index in ((clock.hours, 0), (clock.minutes, 30)):
+            items.see(index)
+            self.app.update()
+            x, y, width, height = items.bbox(index)
+            self.click(items, x + 8, y + height // 2)
+        footer = clock.body.grid_slaves(row=1)[0]
+        self.click(footer.winfo_children()[-1])
+        self.click(popup.confirm)
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(self.store.events[event.id].end, datetime(2026, 10, 8, 0, 30))
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "15 小时 00 分")
+        self.assertIsNone(self.app.grab_current())
+        tree = self.app.events_tree
+        x, y, width, height = tree.bbox(event.id, "duration")
+        self.click(tree, x + width // 2, y + height // 2)
+        self.click(tree, x + width // 2, y + height // 2)
+        self.assertIsNone(self.app.cell_editor)
+
+    def test_inline_invalid_time_and_failed_writes_keep_data_and_editor(self):
+        event = self.cell_event()
+        original = self.store.events_path.read_bytes()
+        editor = self.double_click_cell(event.id, "end")
+        editor.input.popup.close()
+        self.fill(editor.input, "08:00")
+        with patch("tkinter.messagebox.showerror") as error:
+            self.type_key("Return")
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Escape")
+        editor = self.double_click_cell(event.id, "title")
+        self.fill(editor.entry, "写入失败")
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.type_key("Return")
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Escape")
+        self.assertIsNone(self.app.grab_current())
+
+    def test_unchanged_inline_timestamp_preserves_legacy_seconds(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9, second=32)
+        event = Event("seconds", "已有秒数", "linux", start, start + timedelta(hours=1))
+        self.store.save_event(event)
+        self.app.refresh()
+        original = self.store.events_path.read_bytes()
+        editor = self.double_click_cell(event.id, "start")
+        self.click(editor.input.popup.confirm)
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+
+    def test_cancelling_inline_picker_unlocks_main_calendar(self):
+        event = self.cell_event()
+        self.double_click_cell(event.id, "tag")
+        self.app.cancel_cell()
+        self.assertIsNone(self.app.grab_current())
+        self.click(self.app.date_picker.entry)
+        self.assertTrue(self.app.date_picker.popup.winfo_viewable())
+        self.type_key("Escape")
+        self.assertIsNone(self.app.grab_current())
+
+    def test_sidebar_double_click_does_not_open_editor_and_rows_match_timeline_colors(self):
+        event = self.cell_event()
+        tree = self.app.tags_tree
+        tree.see("linux")
+        self.app.update()
+        x, y, width, height = tree.bbox("linux")
+        self.click(tree, x + 130, y + height // 2)
+        self.click(tree, x + 130, y + height // 2)
+        self.assertIsNone(self.app.grab_current())
+        self.assertEqual(self.app.add_event_button.master, self.app.events_heading.master)
+        self.app.select_event(event.id)
+        self.app.update()
+        color = tag_color(self.store, event.tag_id)
+        row_tag = self.app.events_tree.item(event.id, "tags")[0]
+        self.assertEqual(str(self.app.events_tree.tag_configure(row_tag, "background")), color)
+        body = self.app.timeline.canvas.find_withtag(f"event:{event.id}")[0]
+        self.assertEqual(self.app.timeline.canvas.itemcget(body, "fill"), color)
+        self.assertEqual(self.app.tk.call("ttk::style", "map", "Treeview", "-background"), "")
+
+    def test_inline_title_blur_commits_before_resizing_the_event(self):
+        event = self.cell_event()
+        editor = self.double_click_cell(event.id, "title")
+        self.fill(editor.entry, "新名称")
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        self.app.timeline.canvas.xview_moveto(0.25)
+        pointer = self.begin_resize(event.id, "end", event.end + timedelta(minutes=30))
+        self.finish_resize(pointer)
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(self.store.events[event.id].title, "新名称")
+        self.assertEqual(self.store.events[event.id].end, event.end + timedelta(minutes=30))
+
+    def test_inline_title_commit_preserves_requested_day_navigation(self):
+        event = self.cell_event()
+        editor = self.double_click_cell(event.id, "title")
+        target = self.app.day + timedelta(days=1)
+        self.fill(editor.entry, "")
+        self.app.date_picker.value.set(target.isoformat())
+        with patch("tkinter.messagebox.showerror") as error:
+            self.app.set_day()
+            error.assert_called_once()
+        self.assertEqual(self.app.day, event.start.date())
+        self.assertEqual(self.app.date_picker.get(), self.app.day.isoformat())
+        self.assertIs(self.app.cell_editor, editor)
+        self.fill(editor.entry, "切换日期前保存")
+        self.app.date_picker.value.set(target.isoformat())
+        self.app.set_day()
+        self.app.update()
+        self.assertEqual(self.app.day, target)
+        self.assertEqual(self.app.date_picker.get(), target.isoformat())
+        self.assertEqual(self.store.events[event.id].title, "切换日期前保存")
+        self.assertIsNone(self.app.cell_editor)
+        self.assertFalse(self.app.events_tree.exists(event.id))
 
     def finish_resize(self, pointer):
         canvas, x, y = pointer

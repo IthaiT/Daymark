@@ -3,7 +3,7 @@
 import calendar
 import tkinter as tk
 from datetime import date, datetime
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 FONT = "Microsoft YaHei UI"
 
@@ -86,10 +86,11 @@ class Picker(ttk.Frame):
 
 
 class TagPicker(Picker):
-    def __init__(self, parent, store, selected=None, excluded=(), empty_label="未分类", width=44):
+    def __init__(self, parent, store, selected=None, excluded=(), empty_label="未分类", width=44, on_change=None):
         super().__init__(parent, width, editable=False, symbol="▾")
         self.store, self.excluded, self.empty_label = store, set(excluded), empty_label
         self.selected_id = None
+        self.on_change = on_change
         self.set_tag(selected)
 
     def set_tag(self, tag_id):
@@ -107,7 +108,7 @@ class TagPicker(Picker):
         self.popup = popup = Popup(self)
         box = ttk.Frame(popup.body)
         box.pack(fill="both", expand=True)
-        popup.tree = ttk.Treeview(box, show="tree", selectmode="browse", height=10)
+        popup.tree = ttk.Treeview(box, show="tree", selectmode="browse", height=10, style="Tags.Treeview")
         popup.tree.column("#0", width=max(300, self.winfo_width() - 40), minwidth=160)
         popup.tree.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(box, command=popup.tree.yview)
@@ -140,6 +141,8 @@ class TagPicker(Picker):
         if selected:
             self.set_tag(selected[0][4:] if selected[0].startswith("tag:") else None)
             self.popup.close()
+            if self.on_change is not None:
+                self.on_change()
 
 
 class DatePicker(Picker):
@@ -253,3 +256,56 @@ class TimePicker(Picker):
     def choose_now(self):
         self.value.set(datetime.now().strftime("%H:%M"))
         self.popup.close()
+
+
+class DateTimePicker(Picker):
+    """A cell-sized field with a popup for editing one complete timestamp."""
+
+    def __init__(self, parent, value: datetime, on_change=None):
+        super().__init__(parent, width=18)
+        self.initial = value
+        self.on_change = on_change
+        self.value.set(value.isoformat(sep=" ", timespec="minutes"))
+
+    def get_datetime(self):
+        text = self.get().strip()
+        try:
+            if len(text) == 5:
+                return datetime.combine(self.initial.date(), datetime.strptime(text, "%H:%M").time())
+            return datetime.strptime(text, "%Y-%m-%d %H:%M")
+        except ValueError as error:
+            raise ValueError("请输入 HH:MM 或 YYYY-MM-DD HH:MM。") from error
+
+    def open_popup(self):
+        if self._popup_open():
+            return
+        try:
+            selected = self.get_datetime()
+        except ValueError:
+            selected = self.initial
+        self.popup = popup = Popup(self)
+        ttk.Label(popup.body, text="日期").grid(row=0, column=0, padx=(0, 12), pady=(0, 10))
+        popup.date = DatePicker(popup.body, selected.date())
+        popup.date.grid(row=0, column=1, pady=(0, 10))
+        ttk.Label(popup.body, text="时间").grid(row=1, column=0, padx=(0, 12))
+        popup.time = TimePicker(popup.body, selected)
+        popup.time.grid(row=1, column=1, sticky="w")
+        footer = ttk.Frame(popup.body)
+        footer.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(footer, text="取消", command=popup.close).pack(side="left", padx=(0, 8))
+        popup.confirm = ttk.Button(footer, text="确定", command=self.choose)
+        popup.confirm.pack(side="left")
+        popup.bind("<Return>", lambda _: self.choose())
+        popup.show(popup.time.entry)
+
+    def choose(self):
+        text = f"{self.popup.date.get().strip()} {self.popup.time.get().strip()}"
+        try:
+            selected = datetime.strptime(text, "%Y-%m-%d %H:%M")
+        except ValueError:
+            messagebox.showerror("时间格式", "请选择有效日期和时间。", parent=self.popup)
+            return
+        self.value.set(selected.isoformat(sep=" ", timespec="minutes"))
+        self.popup.close()
+        if self.on_change is not None:
+            self.on_change()
