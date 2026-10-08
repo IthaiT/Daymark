@@ -348,6 +348,95 @@ class AppTests(unittest.TestCase):
         canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
         self.app.update()
 
+    def begin_move(self, event_id, minutes, share=0.3):
+        self.app.select_event(event_id)
+        self.app.update()
+        canvas = self.app.timeline.canvas
+        left, top, right, bottom = canvas.bbox(canvas.find_withtag(f"event:{event_id}")[0])
+        x, y = round((left + right) / 2 - canvas.canvasx(0)), round(top + (bottom - top) * share - canvas.canvasy(0))
+        canvas.event_generate("<ButtonPress-1>", x=x, y=y)
+        self.app.update()
+        self.assertIsNotNone(self.app.timeline._drag)
+        ticks = canvas.find_withtag("time-tick")
+        span = canvas.coords(ticks[-1])[0] - canvas.coords(ticks[0])[0]
+        x = round(x + span * minutes / 1440)
+        canvas.event_generate("<B1-Motion>", x=x, y=y)
+        self.app.update()
+        return canvas, x, y
+
+    def test_body_drag_moves_both_times_preserves_duration_and_updates_table_after_release(self):
+        start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9, second=32)
+        event = Event("moved", "平移学习", "linux", start, start + timedelta(hours=1), "保留备注")
+        self.store.save_event(event)
+        self.app.refresh()
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        self.app.timeline.canvas.xview_moveto(0.25)
+        original = self.store.events_path.read_bytes()
+        pointer = self.begin_move(event.id, 90)
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.assertEqual(self.app.timeline._drag["preview"].start, start + timedelta(minutes=90))
+        self.finish_resize(pointer)
+        moved = Store(self.store.directory).events[event.id]
+        self.assertEqual(moved.start, start + timedelta(minutes=90))
+        self.assertEqual(moved.end, event.end + timedelta(minutes=90))
+        self.assertEqual(moved.end - moved.start, event.end - event.start)
+        self.assertEqual((moved.title, moved.tag_id, moved.notes), (event.title, event.tag_id, event.notes))
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[1:3], ("10:30", "11:30"))
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 00 分")
+        self.assertEqual(self.app.timeline.selected, {event.id})
+        self.assertIsNone(self.app.grab_current())
+
+    def test_body_drag_can_cancel_and_failed_writes_restore_the_original(self):
+        event = self.cell_event()
+        original = self.store.events_path.read_bytes()
+        pointer = self.begin_move(event.id, 60)
+        self.type_key("Escape")
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        pointer = self.begin_move(event.id, -30, share=0.7)
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.finish_resize(pointer)
+            error.assert_called_once()
+        self.assertEqual(self.store.events[event.id], event)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[1:3], ("09:00", "10:00"))
+        self.assertIsNone(self.app.grab_current())
+
+    def test_timeline_double_click_still_opens_editor_without_an_active_drag(self):
+        event = self.cell_event()
+        self.click_timeline_event(event.id)
+        self.click_timeline_event(event.id)
+        dialog = self.app.grab_current()
+        self.assertIsInstance(dialog, EventDialog)
+        self.assertIsNone(self.app.timeline._drag)
+        self.assertEqual(dialog.notes.get("1.0", "end-1c"), event.notes)
+        self.click(dialog.notes)
+        self.type_key("x")
+        self.assertIn("x", dialog.notes.get("1.0", "end-1c"))
+        dialog.destroy()
+        self.assertIsNone(self.app.grab_current())
+        self.assertEqual(self.store.events[event.id], event)
+
+    def test_body_drag_keeps_events_within_day_edges_and_moves_cross_day_endpoints_together(self):
+        event = self.cell_event()
+        origin = datetime.combine(self.app.day, datetime.min.time())
+        self.finish_resize(self.begin_move(event.id, -1000))
+        self.assertEqual(self.store.events[event.id].start, origin)
+        self.assertEqual(self.store.events[event.id].end, origin + timedelta(hours=1))
+        self.finish_resize(self.begin_move(event.id, 2000, share=0.7))
+        self.assertEqual(self.store.events[event.id].start, origin + timedelta(hours=23))
+        self.assertEqual(self.store.events[event.id].end, origin + timedelta(days=1))
+        night = Event("night-move", "夜间记录", "life", origin - timedelta(hours=1), origin + timedelta(minutes=30))
+        self.store.save_event(night)
+        self.app.refresh()
+        self.finish_resize(self.begin_move(night.id, 120))
+        self.assertEqual(self.store.events[night.id].start, night.start + timedelta(hours=2))
+        self.assertEqual(self.store.events[night.id].end, night.end + timedelta(hours=2))
+        self.assertEqual(self.app.events_tree.item(night.id, "values")[-1], "1 小时 30 分")
+        self.assertIsNone(self.app.grab_current())
+
     def test_resize_previews_without_writing_then_updates_scrolled_timeline_and_table(self):
         start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
         event = Event("resized", "学习", "linux", start, start + timedelta(hours=1))

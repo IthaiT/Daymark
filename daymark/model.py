@@ -1,6 +1,6 @@
 """Data models and date math, independent of the desktop UI."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 
 
@@ -36,6 +36,21 @@ def duration_text(seconds: float) -> str:
     minutes = max(0, int(seconds // 60))
     hours, minutes = divmod(minutes, 60)
     return f"{hours} 小时 {minutes:02d} 分" if hours else f"{minutes} 分钟"
+
+
+def move_event_on_day(event: Event, day: date, minutes: int) -> Event:
+    """Shift both endpoints equally, keeping the visible interval inside the day."""
+    interval = event.interval_on(day)
+    if interval is None:
+        return event
+    start, end = interval
+    origin = datetime.combine(day, time.min)
+    limit = datetime.max if day == date.max else origin + timedelta(days=1)
+    minute = timedelta(minutes=1)
+    lower = max(-((start - origin) // minute), -((event.start - datetime.min) // minute))
+    upper = min((limit - end) // minute, (datetime.max - event.end) // minute)
+    offset = timedelta(minutes=min(upper, max(lower, minutes)))
+    return replace(event, start=event.start + offset, end=event.end + offset)
 
 
 @dataclass(frozen=True)

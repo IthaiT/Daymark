@@ -2,11 +2,11 @@ import csv
 import json
 import tempfile
 import unittest
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from daymark.model import Event, timeline_segments
+from daymark.model import Event, move_event_on_day, timeline_segments
 from daymark.storage import DataError, Store
 
 
@@ -29,6 +29,20 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(restored.events[event.id], event)
         with restored.events_path.open(encoding="utf-8-sig", newline="") as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
+
+    def test_moves_preserve_seconds_and_duration_at_datetime_limits(self):
+        for start, end, blocked, allowed in (
+            (datetime.min + timedelta(seconds=30), datetime.min + timedelta(seconds=90), -120, 2),
+            (datetime.max - timedelta(seconds=90), datetime.max - timedelta(seconds=30), 120, -2),
+        ):
+            with self.subTest(start=start):
+                event = Event("limit", "边界", "linux", start, end, "备注")
+                self.assertEqual(move_event_on_day(event, start.date(), blocked), event)
+                moved = move_event_on_day(event, start.date(), allowed)
+                self.assertEqual(moved.start, start + timedelta(minutes=allowed))
+                self.assertEqual(moved.end, end + timedelta(minutes=allowed))
+                self.assertEqual(moved.end - moved.start, end - start)
+                self.assertEqual((moved.id, moved.title, moved.tag_id, moved.notes), (event.id, event.title, event.tag_id, event.notes))
 
     def test_events_accept_any_tag_level_and_unclassified_records(self):
         events = [self.event(f"event-{index}", tag=tag)
