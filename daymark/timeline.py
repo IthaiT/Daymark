@@ -13,15 +13,21 @@ PALETTE = ("#dbeafe", "#ede9fe", "#fef3c7", "#fee2e2", "#ffedd5", "#cffafe", "#f
 DEFAULT_COLORS = {"work": PALETTE[0], "side": PALETTE[1], "explore": PALETTE[2], "life": PALETTE[4]}
 
 
-def tag_color(store, tag_id):
+def tag_color(store, tag_id, selected=False):
     if tag_id is None:
-        return "#e5e7eb"
-    while store.tags[tag_id].parent_id:
-        tag_id = store.tags[tag_id].parent_id
-    if tag_id in DEFAULT_COLORS:
-        return DEFAULT_COLORS[tag_id]
-    index = int(hashlib.sha256(tag_id.encode()).hexdigest()[:8], 16)
-    return PALETTE[index % len(PALETTE)]
+        color = "#e5e7eb"
+    else:
+        while store.tags[tag_id].parent_id:
+            tag_id = store.tags[tag_id].parent_id
+        if tag_id in DEFAULT_COLORS:
+            color = DEFAULT_COLORS[tag_id]
+        else:
+            index = int(hashlib.sha256(tag_id.encode()).hexdigest()[:8], 16)
+            color = PALETTE[index % len(PALETTE)]
+    if selected:
+        color = "#" + "".join(f"{round(int(color[index:index + 2], 16) * 0.78 + 17 * 0.22):02x}"
+                               for index in (1, 3, 5))
+    return color
 
 
 class Timeline(ttk.Frame):
@@ -98,7 +104,7 @@ class Timeline(ttk.Frame):
         for event_id, rectangles in pieces.items():
             event = visible_events[event_id]
             tags = (f"event:{event_id}", "event-body")
-            options = dict(fill=tag_color(self.store, event.tag_id),
+            options = dict(fill=tag_color(self.store, event.tag_id, event_id in self.selected),
                            outline="#111111" if event_id in self.selected else "#cccccc",
                            width=3 if event_id in self.selected else 1, tags=tags)
             if all((top, low) == rectangles[0][2:] for _, _, top, low in rectangles):
@@ -124,11 +130,10 @@ class Timeline(ttk.Frame):
                 if moment != clipped:
                     continue
                 xpos = x(moment)
-                canvas.create_line(xpos, 50, xpos, bottom, fill="#d95b54", dash=(3, 3), tags=("resize-guide",))
+                canvas.create_line(xpos, 50, xpos, bottom, fill="#111111", dash=(3, 3), tags=("resize-guide",))
                 outside = xpos - 12 if edge == "start" else xpos + 12
-                canvas.create_polygon(outside, bottom + 19, xpos, bottom + 4, xpos, bottom + 19,
-                                      fill="white", outline="#d95b54", width=2,
-                                      tags=(f"resize:{edge}:{event.id}",))
+                canvas.create_line(xpos, bottom + 12, outside, bottom + 12, fill="#111111", width=2,
+                                   arrow=tk.LAST, arrowshape=(5, 6, 3), tags=(f"resize:{edge}:{event.id}",))
         now = datetime.now()
         if self.day == now.date():
             current = x(now)
@@ -168,6 +173,9 @@ class Timeline(ttk.Frame):
             return "break"
         if event := self._event_at(pointer):
             self.on_select(event.id)
+            self.canvas.focus_force()
+        else:
+            self.on_select(None)
 
     def _double_click(self, pointer):
         if self._handle_at(pointer):

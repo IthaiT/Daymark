@@ -103,6 +103,80 @@ class AppTests(unittest.TestCase):
         self.app.update()
         return event
 
+    def click_timeline_event(self, event_id):
+        canvas = self.app.timeline.canvas
+        self.app.update()
+        left, top, right, bottom = canvas.bbox(canvas.find_withtag(f"event:{event_id}")[0])
+        x, y = round((left + right) / 2 - canvas.canvasx(0)), round((top + bottom) / 2 - canvas.canvasy(0))
+        self.click(canvas, x, y)
+
+    def test_event_selection_matches_both_panels_and_background_click_clears_it(self):
+        event = self.cell_event()
+        tree, canvas = self.app.events_tree, self.app.timeline.canvas
+        x, y, width, height = tree.bbox(event.id)
+        self.click(tree, x + 100, y + height // 2)
+        selected_color = tag_color(self.store, event.tag_id, selected=True)
+        row_tag = tree.item(event.id, "tags")[0]
+        self.assertEqual(self.app.timeline.selected, {event.id})
+        self.assertEqual(str(tree.tag_configure(row_tag, "background")), selected_color)
+        self.assertEqual(canvas.itemcget(canvas.find_withtag(f"event:{event.id}")[0], "fill"), selected_color)
+        for edge in ("start", "end"):
+            handle = canvas.find_withtag(f"resize:{edge}:{event.id}")[0]
+            self.assertEqual(canvas.type(handle), "line")
+            self.assertEqual(canvas.itemcget(handle, "fill"), "#111111")
+            self.assertEqual(canvas.itemcget(handle, "arrow"), "last")
+        for widget, xpos, ypos in ((canvas, 12, 25), (tree, 100, tree.winfo_height() - 10),
+                                   (self.app.events_heading, 10, 10)):
+            self.app.select_event(event.id)
+            self.app.update()
+            self.click(widget, xpos, ypos)
+            self.assertEqual(tree.selection(), ())
+            self.assertFalse(self.app.timeline.selected)
+            self.assertFalse(canvas.find_withtag(f"resize:start:{event.id}"))
+            self.assertFalse(canvas.find_withtag(f"resize:end:{event.id}"))
+            self.assertEqual(str(tree.tag_configure(row_tag, "background")), tag_color(self.store, event.tag_id))
+        self.click_timeline_event(event.id)
+        self.assertEqual(tree.selection(), (event.id,))
+        self.assertEqual(str(tree.tag_configure(row_tag, "background")), selected_color)
+
+    def test_delete_key_works_in_both_panels_and_respects_cancel_and_multiselection(self):
+        event = self.cell_event()
+        for key, hours in (("second", 2), ("third", 4)):
+            self.store.save_event(Event(key, key, "explore", event.start + timedelta(hours=hours), event.end + timedelta(hours=hours)))
+        self.app.refresh()
+        self.click_timeline_event(event.id)
+        original = self.store.events_path.read_bytes()
+        with patch("tkinter.messagebox.askyesno", return_value=False) as confirm:
+            self.type_key("Delete")
+            confirm.assert_called_once()
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            self.type_key("Delete")
+        self.assertNotIn(event.id, Store(self.store.directory).events)
+        self.assertFalse(self.app.timeline.selected)
+        self.app.events_tree.selection_set(("second", "third"))
+        self.app.events_tree.focus_force()
+        self.app.update()
+        with patch("tkinter.messagebox.askyesno", return_value=True) as confirm:
+            self.type_key("Delete")
+            confirm.assert_called_once()
+        self.assertFalse(Store(self.store.directory).events)
+        self.assertFalse(self.app.events_tree.get_children())
+        self.assertIsNone(self.app.grab_current())
+
+    def test_delete_key_in_an_inline_editor_only_deletes_text(self):
+        event = self.cell_event()
+        editor = self.double_click_cell(event.id, "title")
+        self.fill(editor.entry, "abc")
+        editor.entry.selection_clear()
+        editor.entry.icursor(1)
+        with patch("tkinter.messagebox.askyesno") as confirm:
+            self.type_key("Delete")
+            confirm.assert_not_called()
+        self.assertEqual(editor.entry.get(), "ac")
+        self.assertEqual(self.store.events[event.id], event)
+        self.type_key("Escape")
+
     def double_click_cell(self, event_id, column):
         tree = self.app.events_tree
         tree.see(event_id)
@@ -227,7 +301,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.add_event_button.master, self.app.events_heading.master)
         self.app.select_event(event.id)
         self.app.update()
-        color = tag_color(self.store, event.tag_id)
+        color = tag_color(self.store, event.tag_id, selected=True)
         row_tag = self.app.events_tree.item(event.id, "tags")[0]
         self.assertEqual(str(self.app.events_tree.tag_configure(row_tag, "background")), color)
         body = self.app.timeline.canvas.find_withtag(f"event:{event.id}")[0]

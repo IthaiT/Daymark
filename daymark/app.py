@@ -43,6 +43,8 @@ class App(tk.Tk):
         self.bind("<Control-n>", lambda _: self.add_event() if self.grab_current() is None else None)
         self.bind("<Control-Left>", lambda _: self.shift_day(-1) if self.grab_current() is None else None)
         self.bind("<Control-Right>", lambda _: self.shift_day(1) if self.grab_current() is None else None)
+        self.bind("<Button-1>", self.background_click)
+        self.bind("<Delete>", self.delete_key)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_styles(self):
@@ -144,6 +146,7 @@ class App(tk.Tk):
         table_x.grid(row=1, column=0, sticky="ew")
         self.events_tree.configure(yscrollcommand=table_y.set, xscrollcommand=table_x.set)
         self.events_tree.bind("<Double-1>", self.event_double_click)
+        self.events_tree.bind("<Button-1>", self.event_press)
         self.events_tree.bind("<Button-3>", self.event_context_menu)
         self.events_tree.bind("<<TreeviewSelect>>", lambda _: self.draw_timeline())
         self.events_tree.bind("<Configure>", lambda _: self.position_cell())
@@ -182,7 +185,40 @@ class App(tk.Tk):
         self.draw_timeline()
 
     def draw_timeline(self):
-        self.timeline.update_events(self.store.events_on(self.day), self.day, self.events_tree.selection())
+        selected = set(self.events_tree.selection())
+        for event_id in self.events_tree.get_children():
+            event = self.store.events[event_id]
+            self.events_tree.tag_configure(f"event-color:{event_id}",
+                                           background=tag_color(self.store, event.tag_id, event_id in selected),
+                                           font=(FONT, 10, "bold" if event_id in selected else "normal"))
+        self.timeline.update_events(self.store.events_on(self.day), self.day, selected)
+
+    def clear_event_selection(self):
+        if not self.commit_cell():
+            return False
+        self.events_tree.selection_remove(*self.events_tree.selection())
+        self.events_tree.focus("")
+        self.draw_timeline()
+        return True
+
+    def background_click(self, pointer):
+        if self.grab_current() is not None or pointer.widget in (self.timeline.canvas, self.events_tree):
+            return
+        if isinstance(pointer.widget, ttk.Scrollbar):
+            return
+        if self.cell_editor is not None and str(pointer.widget).startswith(str(self.cell_editor) + "."):
+            return
+        self.clear_event_selection()
+
+    def event_press(self, pointer):
+        if not self.events_tree.identify_row(pointer.y):
+            self.clear_event_selection()
+            return "break"
+
+    def delete_key(self, pointer):
+        if self.cell_editor is None and self.grab_current() is None and pointer.widget in (self.events_tree, self.timeline.canvas):
+            self.delete_events()
+            return "break"
 
     def selected_tag(self):
         selected = self.tags_tree.selection()
@@ -329,11 +365,15 @@ class App(tk.Tk):
             EventDialog(self, self.store, self.refresh, self.day)
 
     def select_event(self, event_id):
+        if event_id is None:
+            return self.clear_event_selection()
         if not self.commit_cell():
             return False
         if self.events_tree.exists(event_id):
             self.events_tree.selection_set(event_id)
+            self.events_tree.focus(event_id)
             self.events_tree.see(event_id)
+            self.draw_timeline()
             return True
         return False
 
