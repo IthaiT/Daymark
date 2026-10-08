@@ -4,12 +4,13 @@ import tkinter as tk
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from tkinter import messagebox, ttk
+from uuid import uuid4
 
 from .dialogs import EventDialog, TagDialog
 from .inline import CellEditor
-from .model import duration_text
+from .model import Event, default_event_interval, duration_text
 from .timeline import Timeline, tag_color
-from .widgets import DatePicker
+from .widgets import AutoScrollbar, DatePicker
 
 FONT = "Microsoft YaHei UI"
 
@@ -27,6 +28,8 @@ class App(tk.Tk):
         self.minsize(1100, 740)
         self.day = date.today()
         self.cell_editor = None
+        self.draft_event = None
+        self._pressed_cell = None
         self._drag_source = None
         self._drag_active = False
         self._drop_target = None
@@ -44,6 +47,7 @@ class App(tk.Tk):
         self.bind("<Control-Left>", lambda _: self.shift_day(-1) if self.grab_current() is None else None)
         self.bind("<Control-Right>", lambda _: self.shift_day(1) if self.grab_current() is None else None)
         self.bind("<Button-1>", self.background_click)
+        self.bind("<<PickerDismissed>>", self.picker_dismissed)
         self.bind("<Delete>", self.delete_key)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -68,6 +72,15 @@ class App(tk.Tk):
         style.map("Tags.Treeview", background=[("selected", "#e5e7eb")], foreground=[("selected", "#111111")])
         style.configure("Treeview.Heading", background="white", font=(FONT, 10), padding=(6, 9))
         style.configure("Tooltip.TLabel", background="white", foreground="#111111", relief="solid", borderwidth=1)
+        for direction, sticky in (("Horizontal", "ew"), ("Vertical", "ns")):
+            name = f"{direction}.TScrollbar"
+            style.layout(name, [(f"{direction}.Scrollbar.trough", {"sticky": "nsew", "children": [
+                (f"{direction}.Scrollbar.thumb", {"sticky": sticky, "expand": True}),
+            ]})])
+            style.configure(name, background="#cbd0d6", troughcolor="#f5f6f7", borderwidth=0,
+                            bordercolor="#f5f6f7", lightcolor="#cbd0d6", darkcolor="#cbd0d6",
+                            arrowsize=9, width=9)
+            style.map(name, background=[("active", "#aeb5be"), ("pressed", "#929ba7")])
 
     def _build_sidebar(self):
         sidebar = ttk.Frame(self, padding=(20, 24))
@@ -85,7 +98,7 @@ class App(tk.Tk):
         self.tags_tree = ttk.Treeview(tree_box, show="tree", selectmode="browse", style="Tags.Treeview")
         self.tags_tree.column("#0", width=180, minwidth=80)
         self.tags_tree.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(tree_box, command=self.tags_tree.yview)
+        scroll = AutoScrollbar(tree_box, command=self.tags_tree.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.tags_tree.configure(yscrollcommand=scroll.set)
         self.tags_tree.tag_configure("drop", background="#f0f0f0")
@@ -117,7 +130,8 @@ class App(tk.Tk):
         timeline_box.columnconfigure(0, weight=1)
         timeline_box.rowconfigure(1, weight=1)
         ttk.Label(timeline_box, text="一天的轨迹", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
-        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event, self.update_event_time)
+        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event, self.update_event_time,
+                                 self.timeline_context_menu)
         self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
         bottom.grid(row=2, column=0, sticky="nsew")
@@ -127,7 +141,7 @@ class App(tk.Tk):
         toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
         self.events_heading = ttk.Label(toolbar, text="事件明细", style="Heading.TLabel")
         self.events_heading.pack(side="left")
-        self.add_event_button = ttk.Button(toolbar, text="＋ 补录事件", command=self.add_event, style="Accent.TButton")
+        self.add_event_button = ttk.Button(toolbar, text="＋ 新增事件", command=self.add_event, style="Accent.TButton")
         self.add_event_button.pack(side="right")
         table_box = ttk.Frame(bottom)
         table_box.grid(row=1, column=0, sticky="nsew")
@@ -140,13 +154,14 @@ class App(tk.Tk):
             self.events_tree.heading(column, text=label)
             self.events_tree.column(column, width=width, minwidth=width, stretch=column in ("title", "tag"))
         self.events_tree.grid(row=0, column=0, sticky="nsew")
-        table_y = ttk.Scrollbar(table_box, command=lambda *args: self.scroll_events("y", *args))
+        table_y = AutoScrollbar(table_box, command=lambda *args: self.scroll_events("y", *args))
         table_y.grid(row=0, column=1, sticky="ns")
-        table_x = ttk.Scrollbar(table_box, orient="horizontal", command=lambda *args: self.scroll_events("x", *args))
+        table_x = AutoScrollbar(table_box, orient="horizontal", command=lambda *args: self.scroll_events("x", *args))
         table_x.grid(row=1, column=0, sticky="ew")
         self.events_tree.configure(yscrollcommand=table_y.set, xscrollcommand=table_x.set)
         self.events_tree.bind("<Double-1>", self.event_double_click)
         self.events_tree.bind("<Button-1>", self.event_press)
+        self.events_tree.bind("<ButtonRelease-1>", self.event_release)
         self.events_tree.bind("<Button-3>", self.event_context_menu)
         self.events_tree.bind("<<TreeviewSelect>>", lambda _: self.draw_timeline())
         self.events_tree.bind("<Configure>", lambda _: self.position_cell())
@@ -165,8 +180,11 @@ class App(tk.Tk):
 
     def refresh(self):
         self.cancel_cell()
+        if (self.draft_event is not None and self.draft_event.tag_id is not None
+                and self.draft_event.tag_id not in self.store.tags):
+            self.draft_event = replace(self.draft_event, tag_id=None)
         selected = self.events_tree.selection()
-        events = self.store.events_on(self.day)
+        events = self.visible_events()
         self.events_tree.delete(*self.events_tree.get_children())
         for event in events:
             interval = event.interval_on(self.day)
@@ -175,7 +193,7 @@ class App(tk.Tk):
             color_tag = f"event-color:{event.id}"
             self.events_tree.tag_configure(color_tag, background=tag_color(self.store, event.tag_id))
             self.events_tree.insert("", "end", iid=event.id, tags=(color_tag,), values=(
-                event.title, clock(event.start), clock(event.end) if event.end else "待补全",
+                event.title or "填写事件名称…", clock(event.start), clock(event.end) if event.end else "待补全",
                 self.store.tag_name(event.tag_id), duration_text((interval[1] - interval[0]).total_seconds()) if interval else "—",
             ))
         self.events_tree.selection_set([event_id for event_id in selected if self.events_tree.exists(event_id)])
@@ -184,14 +202,25 @@ class App(tk.Tk):
         self.weekday_label.configure(text="星期" + "一二三四五六日"[self.day.weekday()])
         self.draw_timeline()
 
+    def visible_events(self):
+        events = self.store.events_on(self.day)
+        if self.draft_event is not None and self.draft_event.interval_on(self.day):
+            events.append(self.draft_event)
+        return events
+
+    def get_event(self, event_id):
+        if self.draft_event is not None and event_id == self.draft_event.id:
+            return self.draft_event
+        return self.store.events.get(event_id)
+
     def draw_timeline(self):
         selected = set(self.events_tree.selection())
         for event_id in self.events_tree.get_children():
-            event = self.store.events[event_id]
+            event = self.get_event(event_id)
             self.events_tree.tag_configure(f"event-color:{event_id}",
                                            background=tag_color(self.store, event.tag_id, event_id in selected),
                                            font=(FONT, 10, "bold" if event_id in selected else "normal"))
-        self.timeline.update_events(self.store.events_on(self.day), self.day, selected)
+        self.timeline.update_events(self.visible_events(), self.day, selected)
 
     def clear_event_selection(self):
         if not self.commit_cell():
@@ -210,9 +239,37 @@ class App(tk.Tk):
             return
         self.clear_event_selection()
 
-    def event_press(self, pointer):
-        if not self.events_tree.identify_row(pointer.y):
+    def picker_dismissed(self, _):
+        if self.cell_editor is not None and self.grab_current() is None:
             self.clear_event_selection()
+
+    def event_press(self, pointer):
+        self._pressed_cell = None
+        event_id = self.events_tree.identify_row(pointer.y)
+        column_id = self.events_tree.identify_column(pointer.x)
+        selected = self.events_tree.selection() == (event_id,)
+        if not self.commit_cell():
+            return "break"
+        if not event_id:
+            self.clear_event_selection()
+            return "break"
+        if not pointer.state & (0x1 | 0x4) and self.events_tree.identify_region(pointer.x, pointer.y) == "cell":
+            if selected:
+                self._pressed_cell = (event_id, column_id, pointer.x, pointer.y)
+            self.events_tree.selection_set(event_id)
+            self.events_tree.focus(event_id)
+            self.events_tree.focus_set()
+            self.draw_timeline()
+            return "break"
+
+    def event_release(self, pointer):
+        pressed, self._pressed_cell = self._pressed_cell, None
+        if pressed is None or pointer.state & (0x1 | 0x4):
+            return
+        event_id, column_id, x, y = pressed
+        if abs(pointer.x - x) + abs(pointer.y - y) < 6 and column_id in ("#1", "#2", "#3", "#4"):
+            column = self.events_tree["columns"][int(column_id[1:]) - 1]
+            self.edit_cell(event_id, column)
             return "break"
 
     def delete_key(self, pointer):
@@ -343,6 +400,7 @@ class App(tk.Tk):
             messagebox.showerror("日期格式", "请使用 YYYY-MM-DD，例如 2026-10-07。", parent=self)
             self.date_picker.value.set(self.day.isoformat())
             return
+        self.draft_event = None
         self.refresh()
 
     def shift_day(self, delta):
@@ -350,6 +408,7 @@ class App(tk.Tk):
             return
         try:
             self.day += timedelta(days=delta)
+            self.draft_event = None
             self.refresh()
         except OverflowError:
             messagebox.showerror("日期范围", "已经到达日期范围边界。", parent=self)
@@ -358,11 +417,26 @@ class App(tk.Tk):
         if not self.commit_cell():
             return
         self.day = date.today()
+        self.draft_event = None
         self.refresh()
 
-    def add_event(self):
-        if self.commit_cell():
-            EventDialog(self, self.store, self.refresh, self.day)
+    def add_event(self, start=None):
+        if not self.commit_cell():
+            return "break"
+        if self.draft_event is None:
+            left, right = default_event_interval(self.day, start)
+            self.draft_event = Event(uuid4().hex, "", None, left, right)
+        event_id = self.draft_event.id
+        self.refresh()
+        self.select_event(event_id)
+        self.update_idletasks()
+        self.edit_cell(event_id, "title")
+        return "break"
+
+    def discard_draft(self):
+        self.cancel_cell()
+        self.draft_event = None
+        self.refresh()
 
     def select_event(self, event_id):
         if event_id is None:
@@ -382,43 +456,68 @@ class App(tk.Tk):
             EventDialog(self, self.store, self.refresh, self.day, self.store.events[event_id])
 
     def update_event_time(self, event):
-        saved = self.try_action(lambda: self.store.save_event(event))
+        if self.draft_event is not None and event.id == self.draft_event.id:
+            self.draft_event = event
+            saved = True
+        else:
+            saved = self.try_action(lambda: self.store.save_event(event))
         self.refresh()
         return saved
 
     def event_double_click(self, pointer):
         event_id = self.events_tree.identify_row(pointer.y)
-        column_id = self.events_tree.identify_column(pointer.x)
-        if event_id and column_id in ("#1", "#2", "#3", "#4") and self.events_tree.identify_region(pointer.x, pointer.y) == "cell":
-            column = self.events_tree["columns"][int(column_id[1:]) - 1]
-            self.edit_cell(event_id, column)
+        if event_id:
+            return self.event_press(pointer)
+        if self.events_tree.identify_region(pointer.x, pointer.y) == "nothing":
+            self.add_event()
         return "break"
 
     def edit_cell(self, event_id, column):
         if not self.commit_cell():
             return
-        if column not in ("title", "start", "end", "tag") or event_id not in self.store.events:
+        if column not in ("title", "start", "end", "tag") or (event := self.get_event(event_id)) is None:
             return
         bounds = self.events_tree.bbox(event_id, column)
         if not bounds:
             return
-        self.cell_editor = CellEditor(self.events_tree, self.store, self.store.events[event_id], column,
-                                      self.save_cell, self.cancel_cell)
+        on_cancel = self.cancel_cell
+        if self.draft_event is not None and event_id == self.draft_event.id and column == "title":
+            on_cancel = self.discard_draft
+        self.cell_editor = CellEditor(self.events_tree, self.store, event, column, self.save_cell, on_cancel,
+                                      self.next_cell)
         self.cell_editor.show(bounds)
 
     def save_cell(self, editor, value):
-        current = self.store.events[editor.event_id]
+        current = self.get_event(editor.event_id)
         field = "tag_id" if editor.column == "tag" else editor.column
         if field in ("start", "end") and (original := getattr(current, field)) is not None:
             if value == original.replace(second=0, microsecond=0):
                 value = original
         event = replace(current, **{field: value})
-        if event != current and not self.try_action(lambda: self.store.save_event(event)):
+        if self.draft_event is not None and event.id == self.draft_event.id:
+            if not event.title:
+                if not self.try_action(lambda: self.store.validate_event(replace(event, title="新事件"))):
+                    return False
+                self.draft_event = event
+            else:
+                if not self.try_action(lambda: self.store.save_event(event)):
+                    return False
+                self.draft_event = None
+        elif event != current and not self.try_action(lambda: self.store.save_event(event)):
             return False
         self.cancel_cell()
         self.refresh()
         self.select_event(event.id)
         return True
+
+    def next_cell(self, editor, backwards=False):
+        event_id, column = editor.event_id, editor.column
+        columns = ("title", "start", "end", "tag")
+        if editor.commit():
+            index = columns.index(column) + (-1 if backwards else 1)
+            if 0 <= index < len(columns):
+                self.edit_cell(event_id, columns[index])
+        return "break"
 
     def commit_cell(self):
         return self.cell_editor is None or self.cell_editor.commit()
@@ -459,11 +558,35 @@ class App(tk.Tk):
         finally:
             menu.grab_release()
 
+    def timeline_context_menu(self, pointer, event_id, start):
+        if not self.commit_cell():
+            return "break"
+        self.timeline.cancel_drag()
+        if event_id and self.events_tree.exists(event_id):
+            if event_id not in self.events_tree.selection():
+                self.select_event(event_id)
+            self.events_tree.focus(event_id)
+        if hasattr(self, "timeline_menu"):
+            self.timeline_menu.destroy()
+        self.timeline_menu = menu = tk.Menu(self, tearoff=False, bg="white", fg="#111111",
+                                            activebackground="#e5e7eb", activeforeground="#111111")
+        menu.add_command(label="在此新增事件", command=lambda: self.add_event(start))
+        if event_id:
+            menu.add_separator()
+            menu.add_command(label="删除", command=self.delete_events)
+        try:
+            menu.tk_popup(pointer.x_root, pointer.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
     def delete_events(self):
         selected = list(self.events_tree.selection())
-        if selected and messagebox.askyesno("删除事件", f"删除所选的 {len(selected)} 个事件？", parent=self):
-            if self.try_action(lambda: self.store.delete_events(selected)):
-                self.refresh()
+        if self.draft_event is not None and self.draft_event.id in selected:
+            selected.remove(self.draft_event.id)
+            self.discard_draft()
+        if selected and self.try_action(lambda: self.store.delete_events(selected)):
+            self.refresh()
 
     def try_action(self, action):
         try:

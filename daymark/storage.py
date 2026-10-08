@@ -128,7 +128,7 @@ class Store:
         except (ValueError, TypeError, KeyError, RecursionError) as error:
             raise DataError(f"无法读取 {self.tags_path}：{error}") from error
 
-    def _validate_event(self, event: Event, allow_incomplete: bool = False):
+    def validate_event(self, event: Event, allow_incomplete: bool = False):
         if not isinstance(event.id, str) or not event.id:
             raise ValueError("事件 ID 不能为空。")
         if not isinstance(event.title, str) or not event.title.strip():
@@ -163,7 +163,7 @@ class Store:
                             datetime.fromisoformat(row["end"]) if row["end"] else None,
                             row["notes"],
                         )
-                        self._validate_event(event, allow_incomplete=True)
+                        self.validate_event(event, allow_incomplete=True)
                         if event.id in events:
                             raise ValueError("事件 ID 重复。")
                         events[event.id] = event
@@ -221,7 +221,7 @@ class Store:
         self.tags = tags
 
     def save_event(self, event: Event):
-        self._validate_event(event)
+        self.validate_event(event)
         events = {**self.events, event.id: event}
         self._write_events(events)
         self.events = events

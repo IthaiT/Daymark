@@ -13,6 +13,7 @@ from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
 from daymark.timeline import tag_color
+from daymark.widgets import AutoScrollbar
 
 
 @unittest.skipUnless(os.environ.get("DAYMARK_UI_TESTS") == "1", "Set DAYMARK_UI_TESTS=1 to open test windows")
@@ -113,8 +114,8 @@ class AppTests(unittest.TestCase):
     def test_event_selection_matches_both_panels_and_background_click_clears_it(self):
         event = self.cell_event()
         tree, canvas = self.app.events_tree, self.app.timeline.canvas
-        x, y, width, height = tree.bbox(event.id)
-        self.click(tree, x + 100, y + height // 2)
+        x, y, width, height = tree.bbox(event.id, "duration")
+        self.click(tree, x + width // 2, y + height // 2)
         selected_color = tag_color(self.store, event.tag_id, selected=True)
         row_tag = tree.item(event.id, "tags")[0]
         self.assertEqual(self.app.timeline.selected, {event.id})
@@ -124,7 +125,7 @@ class AppTests(unittest.TestCase):
             handle = canvas.find_withtag(f"resize:{edge}:{event.id}")[0]
             self.assertEqual(canvas.type(handle), "line")
             self.assertEqual(canvas.itemcget(handle, "fill"), "#111111")
-            self.assertEqual(canvas.itemcget(handle, "arrow"), "last")
+            self.assertEqual(canvas.itemcget(handle, "arrow"), "none")
         for widget, xpos, ypos in ((canvas, 12, 25), (tree, 100, tree.winfo_height() - 10),
                                    (self.app.events_heading, 10, 10)):
             self.app.select_event(event.id)
@@ -136,37 +137,35 @@ class AppTests(unittest.TestCase):
             self.assertFalse(canvas.find_withtag(f"resize:end:{event.id}"))
             self.assertEqual(str(tree.tag_configure(row_tag, "background")), tag_color(self.store, event.tag_id))
         self.click_timeline_event(event.id)
-        self.assertEqual(tree.selection(), (event.id,))
-        self.assertEqual(str(tree.tag_configure(row_tag, "background")), selected_color)
+        self.assertEqual(tree.selection(), ())
+        self.assertEqual(str(tree.tag_configure(row_tag, "background")), tag_color(self.store, event.tag_id))
 
-    def test_delete_key_works_in_both_panels_and_respects_cancel_and_multiselection(self):
+    def test_delete_key_deletes_selection_without_confirmation_and_supports_multiselection(self):
         event = self.cell_event()
         for key, hours in (("second", 2), ("third", 4)):
             self.store.save_event(Event(key, key, "explore", event.start + timedelta(hours=hours), event.end + timedelta(hours=hours)))
         self.app.refresh()
-        self.click_timeline_event(event.id)
-        original = self.store.events_path.read_bytes()
-        with patch("tkinter.messagebox.askyesno", return_value=False) as confirm:
+        self.app.select_event(event.id)
+        self.app.timeline.canvas.focus_force()
+        self.app.update()
+        with patch("tkinter.messagebox.askyesno") as confirm:
             self.type_key("Delete")
-            confirm.assert_called_once()
-        self.assertEqual(self.store.events_path.read_bytes(), original)
-        with patch("tkinter.messagebox.askyesno", return_value=True):
-            self.type_key("Delete")
+            confirm.assert_not_called()
         self.assertNotIn(event.id, Store(self.store.directory).events)
         self.assertFalse(self.app.timeline.selected)
         self.app.events_tree.selection_set(("second", "third"))
         self.app.events_tree.focus_force()
         self.app.update()
-        with patch("tkinter.messagebox.askyesno", return_value=True) as confirm:
+        with patch("tkinter.messagebox.askyesno") as confirm:
             self.type_key("Delete")
-            confirm.assert_called_once()
+            confirm.assert_not_called()
         self.assertFalse(Store(self.store.directory).events)
         self.assertFalse(self.app.events_tree.get_children())
         self.assertIsNone(self.app.grab_current())
 
     def test_delete_key_in_an_inline_editor_only_deletes_text(self):
         event = self.cell_event()
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         self.fill(editor.entry, "abc")
         editor.entry.selection_clear()
         editor.entry.icursor(1)
@@ -177,27 +176,335 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.store.events[event.id], event)
         self.type_key("Escape")
 
-    def double_click_cell(self, event_id, column):
+    def click_cell(self, event_id, column):
         tree = self.app.events_tree
+        self.app.select_event(event_id)
         tree.see(event_id)
         self.app.update()
         x, y, width, height = tree.bbox(event_id, column)
-        self.click(tree, x + width // 2, y + height // 2)
         self.click(tree, x + width // 2, y + height // 2)
         self.assertIsNotNone(self.app.cell_editor)
         self.assertEqual(self.app.cell_editor.column, column)
         return self.app.cell_editor
 
+    def test_first_click_selects_a_row_and_next_click_edits_its_cell(self):
+        event = self.cell_event()
+        tree = self.app.events_tree
+        for column in ("title", "start", "end", "tag"):
+            with self.subTest(column=column):
+                self.app.clear_event_selection()
+                self.app.update()
+                x, y, width, height = tree.bbox(event.id, column)
+                self.click(tree, x + width // 2, y + height // 2)
+                self.assertEqual(tree.selection(), (event.id,))
+                self.assertIsNone(self.app.cell_editor)
+                self.click(tree, x + width // 2, y + height // 2)
+                self.assertEqual(self.app.cell_editor.column, column)
+                self.app.cancel_cell()
+
+    def test_single_blank_click_finishes_title_and_picker_editing(self):
+        event = self.cell_event()
+        tree = self.app.events_tree
+        for column in ("title", "start", "end", "tag"):
+            with self.subTest(column=column):
+                editor = self.click_cell(event.id, column)
+                if column == "title":
+                    self.fill(editor.entry, "离开即保存")
+                    self.click(tree, 20, tree.winfo_height() - 10)
+                else:
+                    popup = editor.input.popup
+                    root_x = tree.winfo_rootx() + 20
+                    root_y = tree.winfo_rooty() + tree.winfo_height() - 10
+                    popup.event_generate("<ButtonPress-1>", x=root_x - popup.winfo_rootx(),
+                                         y=root_y - popup.winfo_rooty(), rootx=root_x, rooty=root_y)
+                    self.app.update()
+                self.assertIsNone(self.app.cell_editor)
+                self.assertIsNone(self.app.grab_current())
+                self.assertEqual(tree.selection(), ())
+        self.assertEqual(Store(self.store.directory).events[event.id].title, "离开即保存")
+
+    def test_single_blank_click_closes_nested_time_picker_and_inline_editor(self):
+        event = self.cell_event()
+        editor = self.click_cell(event.id, "end")
+        outer = editor.input.popup
+        self.click(outer.time.entry)
+        popup = outer.time.popup
+        tree = self.app.events_tree
+        root_x = tree.winfo_rootx() + 20
+        root_y = tree.winfo_rooty() + tree.winfo_height() - 10
+        popup.event_generate("<ButtonPress-1>", x=root_x - popup.winfo_rootx(),
+                             y=root_y - popup.winfo_rooty(), rootx=root_x, rooty=root_y)
+        self.app.update()
+        self.assertIsNone(self.app.cell_editor)
+        self.assertIsNone(self.app.grab_current())
+        self.assertEqual(tree.selection(), ())
+
+    def test_timeline_click_and_resize_release_clear_selection(self):
+        event = self.cell_event()
+        self.click_timeline_event(event.id)
+        self.assertEqual(self.app.events_tree.selection(), ())
+        pointer = self.begin_resize(event.id, "end", event.end + timedelta(minutes=30))
+        self.assertEqual(self.app.timeline.selected, {event.id})
+        self.finish_resize(pointer)
+        self.assertFalse(self.app.timeline.selected)
+        self.assertEqual(self.app.events_tree.selection(), ())
+        self.assertFalse(self.app.timeline.canvas.find_withtag(f"resize:end:{event.id}"))
+
+    def test_events_toolbar_only_contains_heading_and_add_button(self):
+        self.assertEqual(self.app.events_heading.master.winfo_children(),
+                         [self.app.events_heading, self.app.add_event_button])
+
+    def test_add_button_and_shortcut_create_inline_drafts_and_save_on_enter(self):
+        self.app.day = date(2000, 1, 1)
+        self.app.refresh()
+        for shortcut in (False, True):
+            original = self.store.events_path.read_bytes()
+            with patch("daymark.app.EventDialog") as dialog:
+                if shortcut:
+                    self.app.events_tree.focus_force()
+                    self.app.events_tree.event_generate("<Control-n>")
+                    self.app.update()
+                else:
+                    self.click(self.app.add_event_button)
+                dialog.assert_not_called()
+            draft = self.app.draft_event
+            self.assertIsNotNone(draft)
+            self.assertEqual(self.app.cell_editor.event_id, draft.id)
+            self.assertEqual(self.app.cell_editor.entry.get(), "")
+            self.assertEqual((draft.start.hour, draft.end.hour), (9, 10))
+            self.assertEqual(self.store.events_path.read_bytes(), original)
+            self.fill(self.app.cell_editor.entry, "直接新增")
+            self.type_key("Return")
+            self.assertIsNone(self.app.draft_event)
+            self.assertEqual(Store(self.store.directory).events[draft.id].title, "直接新增")
+            self.assertEqual(self.app.events_tree.selection(), (draft.id,))
+
+    def test_draft_can_move_before_naming_and_escape_discards_it(self):
+        self.app.day = date(2000, 1, 1)
+        self.app.refresh()
+        self.click(self.app.add_event_button)
+        draft = self.app.draft_event
+        original = self.store.events_path.read_bytes()
+        self.finish_resize(self.begin_move(draft.id, 60))
+        self.assertEqual(self.app.draft_event.start, draft.start + timedelta(hours=1))
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.click(self.app.add_event_button)
+        self.assertEqual(self.app.draft_event.id, draft.id)
+        self.type_key("Escape")
+        self.assertIsNone(self.app.draft_event)
+        self.assertFalse(self.app.events_tree.get_children())
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+
+    def test_draft_failed_save_keeps_input_and_tab_moves_to_next_cell(self):
+        self.click(self.app.add_event_button)
+        draft = self.app.draft_event
+        editor = self.app.cell_editor
+        original = self.store.events_path.read_bytes()
+        self.fill(editor.entry, "新记录")
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.type_key("Return")
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(self.app.draft_event, draft)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Tab")
+        self.assertEqual(self.app.cell_editor.column, "start")
+        self.assertEqual(Store(self.store.directory).events[draft.id].title, "新记录")
+        self.type_key("Escape")
+        self.type_key("Escape")
+
+    def test_deleting_a_draft_tag_keeps_the_draft_unclassified(self):
+        self.click(self.app.add_event_button)
+        draft = self.app.draft_event
+        self.app.commit_cell()
+        editor = self.click_cell(draft.id, "tag")
+        tree = editor.input.popup.tree
+        tree.see("tag:linux")
+        self.app.update()
+        x, y, width, height = tree.bbox("tag:linux")
+        self.click(tree, x + 110, y + height // 2)
+        self.assertEqual(self.app.draft_event.tag_id, "linux")
+        self.app.tags_tree.selection_set("linux")
+        with patch("tkinter.messagebox.askyesno", return_value=True):
+            self.app.delete_tag()
+        self.app.update()
+        self.assertEqual(self.app.draft_event.id, draft.id)
+        self.assertIsNone(self.app.draft_event.tag_id)
+        self.assertEqual(self.app.events_tree.item(draft.id, "values")[3], "未分类")
+        self.assertFalse(self.store.events)
+
+    def test_double_click_empty_table_adds_a_draft_and_modifier_clicks_keep_multiselection(self):
+        event = self.cell_event()
+        second = Event("second", "第二条", None, event.end, event.end + timedelta(hours=1))
+        self.store.save_event(second)
+        self.app.refresh()
+        tree = self.app.events_tree
+        for index, event_id in enumerate((event.id, second.id)):
+            self.app.update()
+            x, y, width, height = tree.bbox(event_id, "title")
+            state = 0 if index == 0 else 0x4
+            tree.event_generate("<ButtonPress-1>", x=x + 40, y=y + height // 2, state=state)
+            tree.event_generate("<ButtonRelease-1>", x=x + 40, y=y + height // 2, state=state)
+            self.app.update()
+        self.assertEqual(set(tree.selection()), {event.id, second.id})
+        self.assertIsNone(self.app.cell_editor)
+        self.click(tree, 100, tree.winfo_height() - 10)
+        self.click(tree, 100, tree.winfo_height() - 10)
+        self.assertIsNotNone(self.app.draft_event)
+        self.assertEqual(self.app.cell_editor.column, "title")
+        self.type_key("Escape")
+
+    def test_new_draft_is_scrolled_into_view_when_table_is_full(self):
+        origin = datetime.combine(self.app.day, datetime.min.time())
+        for index in range(25):
+            self.store.save_event(Event(str(index), str(index), None, origin, origin + timedelta(hours=1)))
+        self.app.refresh()
+        self.click(self.app.add_event_button)
+        self.assertTrue(self.app.events_tree.bbox(self.app.draft_event.id))
+        self.assertEqual(self.app.focus_get(), self.app.cell_editor.entry)
+        self.type_key("Escape")
+
+    def test_scrollbars_have_no_grip_or_arrows_and_only_show_on_overflow(self):
+        self.app.geometry("1360x900")
+        self.app.update()
+        def scrollbars(widget):
+            return [child for child in widget.winfo_children() if isinstance(child, AutoScrollbar)] + [
+                bar for child in widget.winfo_children() for bar in scrollbars(child)]
+        bars = scrollbars(self.app)
+        self.assertTrue(bars)
+        self.assertFalse(any(bar.winfo_ismapped() for bar in bars))
+        for direction in ("Horizontal", "Vertical"):
+            layout = str(self.app.tk.call("ttk::style", "layout", direction + ".TScrollbar"))
+            self.assertNotIn("grip", layout)
+            self.assertNotIn("arrow", layout)
+        self.wheel(120, state=0x4)
+        self.assertTrue(any(bar.winfo_ismapped() for bar in scrollbars(self.app.timeline)))
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        self.app.timeline.canvas.xview_moveto(0)
+        self.app.update()
+        bar = next(bar for bar in scrollbars(self.app.timeline) if str(bar.cget("orient")) == "horizontal")
+        thumb = [x for x in range(bar.winfo_width()) if bar.identify(x, bar.winfo_height() // 2) == "thumb"]
+        self.assertTrue(thumb)
+        x, y = thumb[len(thumb) // 2], bar.winfo_height() // 2
+        initial = self.app.timeline.canvas.xview()[0]
+        bar.event_generate("<ButtonPress-1>", x=x, y=y)
+        bar.event_generate("<B1-Motion>", x=x + 100, y=y)
+        bar.event_generate("<ButtonRelease-1>", x=x + 100, y=y)
+        self.app.update()
+        self.assertGreater(self.app.timeline.canvas.xview()[0], initial)
+
+    def timeline_menu_for(self, x, y):
+        canvas = self.app.timeline.canvas
+        with patch("tkinter.Menu.tk_popup") as post:
+            canvas.event_generate("<Button-3>", x=x, y=y,
+                                  rootx=canvas.winfo_rootx() + x, rooty=canvas.winfo_rooty() + y)
+            self.app.update()
+            post.assert_called_once()
+        return self.app.timeline_menu
+
+    def test_timeline_right_click_creates_at_pointer_and_can_delete(self):
+        event = self.cell_event()
+        canvas = self.app.timeline.canvas
+        ticks = canvas.find_withtag("time-tick")
+        x = round(canvas.coords(ticks[0])[0] + (canvas.coords(ticks[-1])[0] - canvas.coords(ticks[0])[0]) * 13 / 24)
+        menu = self.timeline_menu_for(x, 80)
+        self.assertEqual(menu.entrycget(0, "label"), "在此新增事件")
+        menu.invoke(0)
+        self.app.update()
+        draft = self.app.draft_event
+        self.assertLessEqual(abs((draft.start - event.start.replace(hour=13)).total_seconds()), 60)
+        self.fill(self.app.cell_editor.entry, "轨迹新增")
+        self.type_key("Return")
+        body = canvas.find_withtag(f"event:{draft.id}")[0]
+        left, top, right, bottom = canvas.bbox(body)
+        menu = self.timeline_menu_for(round((left + right) / 2), round((top + bottom) / 2))
+        with patch("tkinter.messagebox.askyesno") as confirm:
+            menu.invoke(2)
+            confirm.assert_not_called()
+        self.assertNotIn(draft.id, Store(self.store.directory).events)
+        self.assertIn(event.id, self.store.events)
+
+    def test_unselected_edges_resize_and_drag_shows_scale_times_and_alignment(self):
+        event = self.cell_event()
+        canvas = self.app.timeline.canvas
+        self.app.clear_event_selection()
+        self.app.update()
+        body = canvas.find_withtag(f"event:{event.id}")[0]
+        left, top, right, bottom = canvas.coords(body)
+        x, y = round(right), round((top + bottom) / 2)
+        canvas.event_generate("<Motion>", x=x, y=y)
+        self.assertEqual(canvas.cget("cursor"), "sb_h_double_arrow")
+        canvas.event_generate("<ButtonPress-1>", x=x, y=y)
+        self.app.update()
+        self.assertEqual(self.app.timeline._drag["edge"], "end")
+        ticks = canvas.find_withtag("time-tick")
+        span = canvas.coords(ticks[-1])[0] - canvas.coords(ticks[0])[0]
+        x += round(span * 29 / 1440)
+        canvas.event_generate("<B1-Motion>", x=x, y=y)
+        self.app.update()
+        self.assertTrue(canvas.find_withtag("drag-scale"))
+        self.assertEqual([canvas.itemcget(item, "text") for item in canvas.find_withtag("drag-time") if canvas.type(item) == "text"],
+                         ["09:00", "10:30"])
+        self.assertTrue(canvas.find_withtag("snap-guide"))
+        self.finish_resize((canvas, x, y))
+        self.assertEqual(self.store.events[event.id].end, event.end + timedelta(minutes=30))
+        self.assertFalse(canvas.find_withtag("drag-guide"))
+        pointer = self.begin_move(event.id, 29)
+        self.assertTrue(canvas.find_withtag("drag-time"))
+        self.finish_resize(pointer)
+        self.assertEqual(self.store.events[event.id].start, event.start + timedelta(minutes=30))
+
+    def test_drag_snaps_to_other_event_boundary_and_alt_allows_free_minutes(self):
+        event = self.cell_event()
+        other = Event("alignment", "对齐目标", None, event.end.replace(hour=11, minute=23), event.end.replace(hour=12))
+        self.store.save_event(other)
+        self.app.refresh()
+        pointer = self.begin_resize(event.id, "end", other.start - timedelta(minutes=1))
+        self.assertEqual(self.app.timeline._drag["preview"].end, other.start)
+        self.assertEqual(self.app.timeline._drag["snap"], other.start)
+        self.finish_resize(pointer)
+        self.app.timeline.zoom = 4
+        self.app.timeline.draw()
+        self.app.timeline.canvas.xview_moveto(0.35)
+        target = other.start + timedelta(minutes=7)
+        canvas, x, y = self.begin_resize(event.id, "end", target)
+        canvas.event_generate("<B1-Motion>", x=x, y=y, state=0x20100)
+        self.app.update()
+        self.assertIsNone(self.app.timeline._drag["snap"])
+        self.finish_resize((canvas, x, y))
+        self.assertEqual(self.store.events[event.id].end, target)
+
+    def test_switching_time_cells_preserves_clicked_record_after_sort_changes(self):
+        first = self.cell_event()
+        second = Event("following", "后一条", None, first.end, first.end + timedelta(hours=1))
+        self.store.save_event(second)
+        self.app.refresh()
+        editor = self.click_cell(first.id, "start")
+        editor.input.popup.close()
+        self.fill(editor.input, "10:30")
+        # Move the end as well before editing start so the change is valid.
+        self.store.save_event(Event(first.id, first.title, first.tag_id, first.start, first.end + timedelta(hours=3), first.notes))
+        tree = self.app.events_tree
+        x, y, width, height = tree.bbox(second.id, "title")
+        self.click(tree, x + width // 2, y + height // 2)
+        self.assertEqual(self.store.events[first.id].start.hour, 10)
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(tree.selection(), (second.id,))
+        self.click_cell(second.id, "title")
+        self.assertEqual(self.app.cell_editor.event_id, second.id)
+        self.type_key("Escape")
+
     def test_inline_title_saves_on_enter_and_escape_discards_changes(self):
         event = self.cell_event()
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         self.assertIsNone(self.app.grab_current())
         self.type_key("x")
         self.type_key("Return")
         self.assertIsNone(self.app.cell_editor)
         self.assertEqual(Store(self.store.directory).events[event.id].title, "x")
         self.assertEqual(self.store.events[event.id].notes, event.notes)
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         self.fill(editor.entry, "取消修改")
         self.type_key("Escape")
         self.assertIsNone(self.app.cell_editor)
@@ -206,7 +513,7 @@ class AppTests(unittest.TestCase):
     def test_inline_tag_can_select_a_parent_or_unclassified(self):
         event = self.cell_event()
         for tag_id in ("embedded", None):
-            editor = self.double_click_cell(event.id, "tag")
+            editor = self.click_cell(event.id, "tag")
             tree = editor.input.popup.tree
             row = f"tag:{tag_id}" if tag_id else "none"
             tree.see(row)
@@ -220,7 +527,7 @@ class AppTests(unittest.TestCase):
     def test_inline_timestamp_uses_nested_pickers_and_recalculates_daily_duration(self):
         self.app.day = date(2026, 10, 7)
         event = self.cell_event()
-        editor = self.double_click_cell(event.id, "end")
+        editor = self.click_cell(event.id, "end")
         popup = editor.input.popup
         self.click(popup.date.entry)
         self.click(popup.date.popup.day_buttons[8])
@@ -248,7 +555,7 @@ class AppTests(unittest.TestCase):
     def test_inline_invalid_time_and_failed_writes_keep_data_and_editor(self):
         event = self.cell_event()
         original = self.store.events_path.read_bytes()
-        editor = self.double_click_cell(event.id, "end")
+        editor = self.click_cell(event.id, "end")
         editor.input.popup.close()
         self.fill(editor.input, "08:00")
         with patch("tkinter.messagebox.showerror") as error:
@@ -257,7 +564,7 @@ class AppTests(unittest.TestCase):
         self.assertIs(self.app.cell_editor, editor)
         self.assertEqual(self.store.events_path.read_bytes(), original)
         self.type_key("Escape")
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         self.fill(editor.entry, "写入失败")
         with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
             self.type_key("Return")
@@ -274,14 +581,14 @@ class AppTests(unittest.TestCase):
         self.store.save_event(event)
         self.app.refresh()
         original = self.store.events_path.read_bytes()
-        editor = self.double_click_cell(event.id, "start")
+        editor = self.click_cell(event.id, "start")
         self.click(editor.input.popup.confirm)
         self.assertEqual(self.store.events[event.id], event)
         self.assertEqual(self.store.events_path.read_bytes(), original)
 
     def test_cancelling_inline_picker_unlocks_main_calendar(self):
         event = self.cell_event()
-        self.double_click_cell(event.id, "tag")
+        self.click_cell(event.id, "tag")
         self.app.cancel_cell()
         self.assertIsNone(self.app.grab_current())
         self.click(self.app.date_picker.entry)
@@ -310,7 +617,7 @@ class AppTests(unittest.TestCase):
 
     def test_inline_title_blur_commits_before_resizing_the_event(self):
         event = self.cell_event()
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         self.fill(editor.entry, "新名称")
         self.app.timeline.zoom = 4
         self.app.timeline.draw()
@@ -323,7 +630,7 @@ class AppTests(unittest.TestCase):
 
     def test_inline_title_commit_preserves_requested_day_navigation(self):
         event = self.cell_event()
-        editor = self.double_click_cell(event.id, "title")
+        editor = self.click_cell(event.id, "title")
         target = self.app.day + timedelta(days=1)
         self.fill(editor.entry, "")
         self.app.date_picker.value.set(target.isoformat())
@@ -385,7 +692,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual((moved.title, moved.tag_id, moved.notes), (event.title, event.tag_id, event.notes))
         self.assertEqual(self.app.events_tree.item(event.id, "values")[1:3], ("10:30", "11:30"))
         self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 00 分")
-        self.assertEqual(self.app.timeline.selected, {event.id})
+        self.assertFalse(self.app.timeline.selected)
+        self.assertEqual(self.app.events_tree.selection(), ())
         self.assertIsNone(self.app.grab_current())
 
     def test_body_drag_can_cancel_and_failed_writes_restore_the_original(self):
@@ -580,7 +888,7 @@ class AppTests(unittest.TestCase):
         rectangle = canvas.find_withtag(f"event:{event.id}")[0]
         left, top, right, bottom = canvas.coords(rectangle)
         pointer_x = int((left + right) / 2)
-        self.click(canvas, pointer_x, int((top + bottom) / 2))
+        self.app.select_event(event.id)
         self.assertEqual(self.app.events_tree.selection(), (event.id,))
         fraction = (canvas.canvasx(pointer_x) - left) / (right - left)
         for _ in range(6):
@@ -596,7 +904,7 @@ class AppTests(unittest.TestCase):
         self.app.update()
         # Use a different point in the record so Tk does not treat this as a double-click.
         self.click(canvas, pointer_x + 12, int((top + bottom) / 2))
-        self.assertEqual(self.app.events_tree.selection(), (event.id,))
+        self.assertEqual(self.app.events_tree.selection(), ())
 
     def test_normal_and_shift_wheel_scroll_without_changing_zoom(self):
         start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
@@ -651,8 +959,13 @@ class AppTests(unittest.TestCase):
             for hour, share, expected in ((13.5, 0.25, "cooking"), (13.5, 0.75, "podcast"),
                                           (14.5, 0.25, "cooking"), (14.5, 0.75, "cooking")):
                 x = int(left + (right - left) * hour / 24 - canvas.canvasx(0))
-                self.click(canvas, x, int(50 + height * share))
+                y = int(50 + height * share)
+                canvas.event_generate("<ButtonPress-1>", x=x, y=y)
+                self.app.update()
                 self.assertEqual(self.app.events_tree.selection(), (expected,))
+                canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
+                self.app.update()
+                self.assertEqual(self.app.events_tree.selection(), ())
 
     def test_single_mouse_click_selects_a_tag_and_returns_to_notes(self):
         editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))
@@ -756,7 +1069,7 @@ class AppTests(unittest.TestCase):
             post.assert_called_once()
         return self.app.event_menu
 
-    def test_event_context_menu_keeps_multiselection_and_confirms_deletion(self):
+    def test_event_context_menu_keeps_multiselection_and_deletes_without_confirmation(self):
         start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
         for key in ("a", "b", "c"):
             self.store.save_event(Event(key, key, "linux", start, start + timedelta(hours=1)))
@@ -765,11 +1078,9 @@ class AppTests(unittest.TestCase):
         menu = self.event_menu_for("b")
         self.assertEqual(set(self.app.events_tree.selection()), {"a", "b"})
         self.assertEqual(menu.entrycget(0, "label"), "删除")
-        with patch("tkinter.messagebox.askyesno", return_value=False):
+        with patch("tkinter.messagebox.askyesno") as confirm:
             menu.invoke(0)
-        self.assertEqual(set(self.store.events), {"a", "b", "c"})
-        with patch("tkinter.messagebox.askyesno", return_value=True):
-            menu.invoke(0)
+            confirm.assert_not_called()
         self.assertEqual(set(Store(self.store.directory).events), {"c"})
         self.assertIsNone(self.app.grab_current())
 
@@ -782,8 +1093,9 @@ class AppTests(unittest.TestCase):
         tree.selection_set("a")
         menu = self.event_menu_for("b")
         self.assertEqual(tree.selection(), ("b",))
-        with patch("tkinter.messagebox.askyesno", return_value=True):
+        with patch("tkinter.messagebox.askyesno") as confirm:
             menu.invoke(0)
+            confirm.assert_not_called()
         self.assertEqual(set(self.store.events), {"a"})
         self.app.update()
         with patch("tkinter.Menu.tk_popup") as post:
@@ -832,8 +1144,7 @@ class AppTests(unittest.TestCase):
         self.app.select_event(event.id)
         self.app.update()
         self.assertEqual(self.store.events[event.id].tag_id, "explore")
-        with patch("tkinter.messagebox.askyesno", return_value=True):
-            self.app.delete_events()
+        self.app.delete_events()
         self.assertEqual(Store(self.store.directory).events, {})
 
     def test_sidebar_selection_keeps_all_events_visible(self):

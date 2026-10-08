@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from daymark.model import Event, move_event_on_day, timeline_segments
+from daymark.model import Event, default_event_interval, move_event_on_day, timeline_segments
 from daymark.storage import DataError, Store
 
 
@@ -29,6 +29,23 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(restored.events[event.id], event)
         with restored.events_path.open(encoding="utf-8-sig", newline="") as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 1)
+
+    def test_default_event_interval_stays_in_day_and_uses_minute_precision(self):
+        day = date(2026, 10, 7)
+        self.assertEqual(default_event_interval(day, now=datetime(2026, 10, 8, 12)),
+                         (datetime(2026, 10, 7, 9), datetime(2026, 10, 7, 10)))
+        self.assertEqual(default_event_interval(day, now=datetime(2026, 10, 7, 12, 34, 56)),
+                         (datetime(2026, 10, 7, 11, 34), datetime(2026, 10, 7, 12, 34)))
+        self.assertEqual(default_event_interval(day, now=datetime(2026, 10, 7, 0, 10)),
+                         (datetime(2026, 10, 7), datetime(2026, 10, 7, 1)))
+        self.assertEqual(default_event_interval(day, datetime(2026, 10, 7, 23, 55)),
+                         (datetime(2026, 10, 7, 23), datetime(2026, 10, 8)))
+        for boundary in (datetime.min, datetime.max):
+            for start in (None, boundary):
+                left, right = default_event_interval(boundary.date(), start, now=boundary)
+                self.assertEqual(left.date(), boundary.date())
+                self.assertEqual(right - left, timedelta(hours=1))
+                self.assertEqual((left.second, right.second, left.microsecond, right.microsecond), (0, 0, 0, 0))
 
     def test_moves_preserve_seconds_and_duration_at_datetime_limits(self):
         for start, end, blocked, allowed in (

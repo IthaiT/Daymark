@@ -8,6 +8,17 @@ from tkinter import messagebox, ttk
 FONT = "Microsoft YaHei UI"
 
 
+class AutoScrollbar(ttk.Scrollbar):
+    """Show a grid-managed scrollbar only while its content overflows."""
+
+    def set(self, first, last):
+        if float(first) <= 0 and float(last) >= 1:
+            self.grid_remove()
+        else:
+            self.grid()
+        super().set(first, last)
+
+
 class Popup(tk.Toplevel):
     def __init__(self, owner):
         super().__init__(owner)
@@ -40,9 +51,16 @@ class Popup(tk.Toplevel):
         focus.focus_force()
 
     def _outside_click(self, event):
-        if not (self.winfo_rootx() <= event.x_root < self.winfo_rootx() + self.winfo_width()
-                and self.winfo_rooty() <= event.y_root < self.winfo_rooty() + self.winfo_height()):
-            self.close()
+        popup = self
+        while isinstance(popup, Popup):
+            if (popup.winfo_rootx() <= event.x_root < popup.winfo_rootx() + popup.winfo_width()
+                    and popup.winfo_rooty() <= event.y_root < popup.winfo_rooty() + popup.winfo_height()):
+                break
+            previous, owner = popup.previous_grab, popup.owner
+            popup.close()
+            owner.event_generate("<<PickerDismissed>>")
+            popup = previous
+        if popup is not self:
             return "break"
 
     def close(self):

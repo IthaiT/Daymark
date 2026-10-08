@@ -38,6 +38,23 @@ def duration_text(seconds: float) -> str:
     return f"{hours} 小时 {minutes:02d} 分" if hours else f"{minutes} 分钟"
 
 
+def default_event_interval(day: date, start: datetime | None = None,
+                           now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Choose a one-hour draft interval within the displayed day."""
+    origin = datetime.combine(day, time.min)
+    limit = datetime.max if day == date.max else origin + timedelta(days=1)
+    if start is None:
+        now = now or datetime.now()
+        if day == now.date():
+            end = now.replace(second=0, microsecond=0)
+            start = end - min(timedelta(hours=1), end - origin)
+        else:
+            start = origin + timedelta(hours=9)
+    latest = (limit - timedelta(hours=1)).replace(second=0, microsecond=0)
+    start = min(latest, max(origin, start.replace(second=0, microsecond=0)))
+    return start, start + timedelta(hours=1)
+
+
 def move_event_on_day(event: Event, day: date, minutes: int) -> Event:
     """Shift both endpoints equally, keeping the visible interval inside the day."""
     interval = event.interval_on(day)

@@ -7,7 +7,7 @@ from .widgets import DateTimePicker, TagPicker
 
 
 class CellEditor(ttk.Frame):
-    def __init__(self, parent, store, event, column, on_save, on_cancel):
+    def __init__(self, parent, store, event, column, on_save, on_cancel, on_next):
         super().__init__(parent)
         self.event_id, self.column = event.id, column
         self.on_save, self.on_cancel = on_save, on_cancel
@@ -32,6 +32,8 @@ class CellEditor(ttk.Frame):
         self.entry.bind("<Return>", lambda _: self._commit_key())
         self.entry.bind("<Escape>", lambda _: self._cancel_key())
         self.entry.bind("<FocusOut>", self._focus_out)
+        self.entry.bind("<Tab>", lambda _: on_next(self))
+        self.entry.bind("<Shift-Tab>", lambda _: on_next(self, True))
 
     def show(self, bounds):
         x, y, width, height = bounds
@@ -53,6 +55,9 @@ class CellEditor(ttk.Frame):
     def _check_focus(self):
         self._focus_job = None
         if self._closed or self._saving:
+            return
+        grabbed = self.grab_current()
+        if grabbed is not None and str(grabbed).startswith(str(self) + "."):
             return
         focused = self.focus_get()
         if focused is not None and not str(focused).startswith(str(self) + "."):
