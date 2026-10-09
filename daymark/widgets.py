@@ -25,7 +25,6 @@ class Popup(tk.Toplevel):
         self.withdraw()
         self.owner = owner
         self.previous_grab = owner.grab_current()
-        self.previous_focus = owner.focus_get()
         self.overrideredirect(True)
         self.transient(owner.winfo_toplevel())
         self.configure(bg="#d4d4d4", padx=1, pady=1)
@@ -58,7 +57,8 @@ class Popup(tk.Toplevel):
                 break
             previous, owner = popup.previous_grab, popup.owner
             popup.close()
-            owner.event_generate("<<PickerDismissed>>")
+            owner.event_generate("<<PickerDismissed>>", rootx=event.x_root,
+                                 rooty=event.y_root, state=event.state, time=event.time)
             popup = previous
         if popup is not self:
             return "break"
@@ -70,9 +70,7 @@ class Popup(tk.Toplevel):
         self.destroy()
         if self.previous_grab is not None and self.previous_grab.winfo_exists():
             self.previous_grab.grab_set()
-        target = self.previous_focus
-        if target is None or not target.winfo_exists() or not target.winfo_viewable():
-            target = self.owner.entry
+        target = self.owner.entry
         if target.winfo_exists() and target.winfo_viewable():
             target.focus_force()
 

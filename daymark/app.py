@@ -239,9 +239,19 @@ class App(tk.Tk):
             return
         self.clear_event_selection()
 
-    def picker_dismissed(self, _):
-        if self.cell_editor is not None and self.grab_current() is None:
+    def picker_dismissed(self, pointer):
+        if self.cell_editor is None or self.grab_current() is not None:
+            return
+        target = self.winfo_containing(pointer.x_root, pointer.y_root)
+        if target is None or target.winfo_toplevel() is not self:
             self.clear_event_selection()
+            return
+        # The popup consumed the press. Deliver it to the clicked widget;
+        # the normal mouse release will complete selection or cell editing.
+        target.event_generate("<ButtonPress-1>", x=pointer.x_root - target.winfo_rootx(),
+                              y=pointer.y_root - target.winfo_rooty(),
+                              rootx=pointer.x_root, rooty=pointer.y_root,
+                              state=pointer.state, time=pointer.time)
 
     def event_press(self, pointer):
         self._pressed_cell = None

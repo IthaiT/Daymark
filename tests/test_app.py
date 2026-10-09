@@ -13,7 +13,7 @@ from daymark.instance import InstanceLock
 from daymark.model import Event
 from daymark.storage import Store
 from daymark.timeline import tag_color
-from daymark.widgets import AutoScrollbar
+from daymark.widgets import AutoScrollbar, Popup
 
 
 @unittest.skipUnless(os.environ.get("DAYMARK_UI_TESTS") == "1", "Set DAYMARK_UI_TESTS=1 to open test windows")
@@ -26,6 +26,12 @@ class AppTests(unittest.TestCase):
         self.store = Store(Path(self.directory.name))
         self.app = App(self.store)
         self.addCleanup(self.app.close)
+        self.app.update()
+        # Coordinate hit testing requires the test window to be visible above
+        # the host app, just as it is when a user clicks it.
+        self.app.attributes("-topmost", True)
+        self.app.lift()
+        self.app.focus_force()
         self.app.update()
         errors = patch("tkinter.messagebox.showerror", side_effect=AssertionError("Unexpected UI error"))
         errors.start()
@@ -56,7 +62,15 @@ class AppTests(unittest.TestCase):
         coordinates = {"x": x, "y": y, "rootx": widget.winfo_rootx() + x, "rooty": widget.winfo_rooty() + y}
         widget.event_generate("<Enter>", **coordinates)
         widget.event_generate("<Motion>", **coordinates)
-        widget.event_generate("<ButtonPress-1>", **coordinates)
+        grabbed = self.app.grab_current()
+        if isinstance(grabbed, Popup) and widget is not grabbed and not str(widget).startswith(str(grabbed) + "."):
+            # A real outside press goes to the grabbed popup; after dismissal,
+            # the release goes to the widget under the pointer.
+            grabbed.event_generate("<ButtonPress-1>", x=coordinates["rootx"] - grabbed.winfo_rootx(),
+                                   y=coordinates["rooty"] - grabbed.winfo_rooty(),
+                                   rootx=coordinates["rootx"], rooty=coordinates["rooty"])
+        else:
+            widget.event_generate("<ButtonPress-1>", **coordinates)
         self.app.update()
         widget.event_generate("<ButtonRelease-1>", **coordinates)
         self.app.update()
@@ -137,8 +151,9 @@ class AppTests(unittest.TestCase):
             self.assertFalse(canvas.find_withtag(f"resize:end:{event.id}"))
             self.assertEqual(str(tree.tag_configure(row_tag, "background")), tag_color(self.store, event.tag_id))
         self.click_timeline_event(event.id)
-        self.assertEqual(tree.selection(), ())
-        self.assertEqual(str(tree.tag_configure(row_tag, "background")), tag_color(self.store, event.tag_id))
+        self.assertEqual(tree.selection(), (event.id,))
+        self.assertEqual(self.app.timeline.selected, {event.id})
+        self.assertEqual(str(tree.tag_configure(row_tag, "background")), selected_color)
 
     def test_delete_key_deletes_selection_without_confirmation_and_supports_multiselection(self):
         event = self.cell_event()
@@ -223,6 +238,118 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(tree.selection(), ())
         self.assertEqual(Store(self.store.directory).events[event.id].title, "离开即保存")
 
+    def test_editing_switches_directly_between_all_editable_cells(self):
+        event = self.cell_event()
+        tree = self.app.events_tree
+        editor = self.click_cell(event.id, "title")
+        columns = ("start", "title", "end", "title", "tag", "start",
+                   "end", "start", "tag", "end", "tag", "title")
+        for index, column in enumerate(columns):
+            with self.subTest(previous=editor.column, next=column):
+                previous = editor
+                if editor.column == "title":
+                    self.fill(editor.entry, f"切换保存 {index}")
+                elif editor.column in ("start", "end"):
+                    self.fill(editor.input, "08:45" if editor.column == "start" else "10:15")
+                else:
+                    editor.input.set_tag("embedded")
+                value = editor.entry.get()
+                x, y, width, height = tree.bbox(event.id, column)
+                self.click(tree, x + width // 2, y + height // 2)
+                editor = self.app.cell_editor
+                self.assertIsNotNone(editor)
+                self.assertIsNot(editor, previous)
+                self.assertEqual((editor.event_id, editor.column), (event.id, column))
+                self.assertEqual(tree.selection(), (event.id,))
+                restored = Store(self.store.directory).events[event.id]
+                if previous.column == "title":
+                    self.assertEqual(restored.title, value)
+                elif previous.column in ("start", "end"):
+                    self.assertEqual(getattr(restored, previous.column).strftime("%H:%M"), value)
+                else:
+                    self.assertEqual(restored.tag_id, "embedded")
+        self.type_key("Escape")
+
+    def test_clicking_another_row_while_editing_selects_before_editing(self):
+        first = self.cell_event()
+        second = Event("second", "第二条", None, first.end, first.end + timedelta(hours=1))
+        self.store.save_event(second)
+        self.app.refresh()
+        tree = self.app.events_tree
+        for column in ("title", "start", "end", "tag"):
+            with self.subTest(column=column):
+                self.click_cell(first.id, column)
+                x, y, width, height = tree.bbox(second.id, "title")
+                self.click(tree, x + width // 2, y + height // 2)
+                self.assertEqual(tree.selection(), (second.id,))
+                self.assertIsNone(self.app.cell_editor)
+                self.click(tree, x + width // 2, y + height // 2)
+                self.assertEqual((self.app.cell_editor.event_id, self.app.cell_editor.column),
+                                 (second.id, "title"))
+                self.type_key("Escape")
+
+    def test_failed_commit_blocks_cell_switch_and_preserves_input_and_selection(self):
+        event = self.cell_event()
+        tree = self.app.events_tree
+        original = self.store.events_path.read_bytes()
+        editor = self.click_cell(event.id, "end")
+        self.fill(editor.input, "08:00")
+        x, y, width, height = tree.bbox(event.id, "title")
+        with patch("tkinter.messagebox.showerror") as error:
+            self.click(tree, x + width // 2, y + height // 2)
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(editor.entry.get(), "08:00")
+        self.assertEqual(tree.selection(), (event.id,))
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Escape")
+        editor = self.click_cell(event.id, "title")
+        self.fill(editor.entry, "保存失败仍保留")
+        x, y, width, height = tree.bbox(event.id, "tag")
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.click(tree, x + width // 2, y + height // 2)
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(editor.entry.get(), "保存失败仍保留")
+        self.assertEqual(tree.selection(), (event.id,))
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Escape")
+
+    def test_nested_picker_dismissal_switches_to_clicked_cell(self):
+        event = self.cell_event()
+        editor = self.click_cell(event.id, "end")
+        self.click(editor.input.popup.time.entry)
+        tree = self.app.events_tree
+        x, y, width, height = tree.bbox(event.id, "start")
+        self.click(tree, x + width // 2, y + height // 2)
+        self.assertEqual((self.app.cell_editor.event_id, self.app.cell_editor.column), (event.id, "start"))
+        self.assertEqual(tree.selection(), (event.id,))
+        self.assertIs(self.app.grab_current(), self.app.cell_editor.input.popup)
+
+    def test_closing_inline_picker_restores_its_input_focus(self):
+        event = self.cell_event()
+        editor = self.click_cell(event.id, "end")
+        editor.input.popup.close()
+        self.app.update()
+        self.app.events_tree.focus_force()
+        editor.input.open_popup()
+        outer = editor.input.popup
+        self.app.update()
+        self.click(outer.time.entry)
+        outer.time.popup.close()
+        self.app.update()
+        self.assertIs(self.app.focus_get(), outer.time.entry)
+        self.assertIs(self.app.grab_current(), outer)
+        outer.close()
+        self.app.update()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertIs(self.app.focus_get(), editor.entry)
+        self.assertIsNone(self.app.grab_current())
+        self.fill(editor.input, "10:30")
+        self.type_key("Return")
+        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(self.store.events[event.id].end, event.end + timedelta(minutes=30))
+
     def test_single_blank_click_closes_nested_time_picker_and_inline_editor(self):
         event = self.cell_event()
         editor = self.click_cell(event.id, "end")
@@ -239,10 +366,10 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(self.app.grab_current())
         self.assertEqual(tree.selection(), ())
 
-    def test_timeline_click_and_resize_release_clear_selection(self):
+    def test_timeline_click_keeps_selection_but_resize_release_clears_it(self):
         event = self.cell_event()
         self.click_timeline_event(event.id)
-        self.assertEqual(self.app.events_tree.selection(), ())
+        self.assertEqual(self.app.events_tree.selection(), (event.id,))
         pointer = self.begin_resize(event.id, "end", event.end + timedelta(minutes=30))
         self.assertEqual(self.app.timeline.selected, {event.id})
         self.finish_resize(pointer)
@@ -904,7 +1031,7 @@ class AppTests(unittest.TestCase):
         self.app.update()
         # Use a different point in the record so Tk does not treat this as a double-click.
         self.click(canvas, pointer_x + 12, int((top + bottom) / 2))
-        self.assertEqual(self.app.events_tree.selection(), ())
+        self.assertEqual(self.app.events_tree.selection(), (event.id,))
 
     def test_normal_and_shift_wheel_scroll_without_changing_zoom(self):
         start = datetime.combine(self.app.day, datetime.min.time()).replace(hour=9)
@@ -965,7 +1092,7 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(self.app.events_tree.selection(), (expected,))
                 canvas.event_generate("<ButtonRelease-1>", x=x, y=y)
                 self.app.update()
-                self.assertEqual(self.app.events_tree.selection(), ())
+                self.assertEqual(self.app.events_tree.selection(), (expected,))
 
     def test_single_mouse_click_selects_a_tag_and_returns_to_notes(self):
         editor = EventDialog(self.app, self.store, self.app.refresh, date(2026, 10, 7))

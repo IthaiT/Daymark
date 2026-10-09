@@ -334,7 +334,8 @@ class Timeline(ttk.Frame):
         if state["moved"] and state["preview"] != state["original"]:
             self.on_change(state["preview"])
         self.canvas.configure(cursor="")
-        self.on_select(None)
+        if state["moved"]:
+            self.on_select(None)
         return "break"
 
     def cancel_drag(self):
