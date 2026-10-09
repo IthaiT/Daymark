@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from daymark.model import Event, default_event_interval, move_event_on_day, timeline_segments
+from daymark.model import Event, default_event_interval, move_event_on_day, timeline_segments, undefined_events
 from daymark.storage import DataError, Store
 
 
@@ -60,6 +60,42 @@ class StorageTests(unittest.TestCase):
                 self.assertEqual(moved.end, end + timedelta(minutes=allowed))
                 self.assertEqual(moved.end - moved.start, end - start)
                 self.assertEqual((moved.id, moved.title, moved.tag_id, moved.notes), (event.id, event.title, event.tag_id, event.notes))
+
+    def test_undefined_events_only_fill_internal_gaps_and_merge_overlaps(self):
+        day = date(2026, 10, 7)
+        events = [self.event("a", end="2026-10-07T11:00:00"),
+                  self.event("b", start="2026-10-07T10:00:00", end="2026-10-07T12:00:00"),
+                  self.event("nested", start="2026-10-07T10:30:00", end="2026-10-07T11:30:00"),
+                  self.event("c", start="2026-10-07T13:00:00", end="2026-10-07T14:00:00"),
+                  self.event("touching", start="2026-10-07T14:00:00", end="2026-10-07T15:00:00")]
+        gaps = undefined_events(events, day)
+        self.assertEqual([(gap.start, gap.end, gap.tag_id) for gap in gaps],
+                         [(datetime(2026, 10, 7, 12), datetime(2026, 10, 7, 13), None)])
+        self.assertEqual(gaps, undefined_events(list(reversed(events)), day))
+        self.assertFalse(undefined_events([], day))
+        self.assertFalse(undefined_events(events[:1], day))
+
+    def test_undefined_boundaries_follow_neighbors_with_stable_identity(self):
+        day = date(2026, 10, 7)
+        first = self.event("a")
+        second = self.event("b", start="2026-10-07T12:00:00", end="2026-10-07T13:00:00")
+        gap = undefined_events([first, second], day)[0]
+        moved = move_event_on_day(first, day, 30)
+        updated = undefined_events([moved, second], day)[0]
+        self.assertEqual(updated.id, gap.id)
+        self.assertEqual((updated.start, updated.end), (moved.end, second.start))
+        self.assertFalse(undefined_events([move_event_on_day(first, day, 120), second], day))
+
+    def test_undefined_events_clip_midnight_and_ignore_unfinished_or_other_days(self):
+        day = date(2026, 10, 7)
+        events = [self.event("night", start="2026-10-06T23:00:00", end="2026-10-07T02:00:00"),
+                  self.event("late", start="2026-10-07T23:00:00", end="2026-10-08T02:00:00"),
+                  self.event("unfinished", start="2026-10-07T06:00:00", end=None),
+                  self.event("outside", start="2026-10-08T09:00:00", end="2026-10-08T10:00:00")]
+        gaps = undefined_events(events, day)
+        self.assertEqual([(gap.start, gap.end) for gap in gaps],
+                         [(datetime(2026, 10, 7, 2), datetime(2026, 10, 7, 23))])
+        self.assertFalse(undefined_events(events[:1], date(2026, 10, 6)))
 
     def test_events_accept_any_tag_level_and_unclassified_records(self):
         events = [self.event(f"event-{index}", tag=tag)

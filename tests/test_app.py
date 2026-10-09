@@ -46,7 +46,8 @@ class AppTests(unittest.TestCase):
             entry.insert(0, value)
 
     def choose_tag(self, picker, tag_id):
-        self.click(picker.button)
+        if picker.popup is None or not picker.popup.winfo_exists():
+            self.click(picker.button)
         tree = picker.popup.tree
         item = f"tag:{tag_id}" if tag_id else "none"
         tree.see(item)
@@ -117,6 +118,151 @@ class AppTests(unittest.TestCase):
         self.app.refresh()
         self.app.update()
         return event
+
+    def latest_draft(self):
+        return next(reversed(self.app.drafts.values()), None)
+
+    def events_with_gap(self):
+        first = self.cell_event()
+        second = Event("following", "后续事件", "life", first.end + timedelta(hours=1), first.end + timedelta(hours=2))
+        self.store.save_event(second)
+        self.app.refresh()
+        self.app.update()
+        return first, second, next(iter(self.app.undefined.values()))
+
+    def test_multiple_unnamed_drafts_can_move_and_be_named_independently(self):
+        self.app.day = date(2000, 1, 1)
+        self.app.refresh()
+        original = self.store.events_path.read_bytes()
+        drafts = []
+        for offset in (120, 300, 0):
+            self.click(self.app.add_event_button)
+            draft = self.latest_draft()
+            drafts.append(draft)
+            if offset:
+                self.finish_resize(self.begin_move(draft.id, offset))
+        self.assertEqual(len(self.app.drafts), 3)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        for index, draft in enumerate(drafts):
+            current = self.app.drafts[draft.id]
+            self.app.rename_event(draft.id)
+            self.app.update()
+            self.assertIs(self.app.cell_editor.master, self.app.timeline.canvas)
+            self.fill(self.app.cell_editor.entry, f"分别命名 {index}")
+            self.type_key("Return")
+            restored = Store(self.store.directory).events[draft.id]
+            self.assertEqual((restored.title, restored.start, restored.end),
+                             (f"分别命名 {index}", current.start, current.end))
+        self.assertFalse(self.app.drafts)
+        self.assertEqual(len(self.store.events), 3)
+
+    def test_deleting_selected_drafts_and_saved_events_preserves_other_drafts(self):
+        saved = self.cell_event()
+        self.app.add_event(saved.start + timedelta(hours=2))
+        first = self.latest_draft()
+        self.app.add_event(saved.start + timedelta(hours=4))
+        second = self.latest_draft()
+        self.app.events_tree.selection_set((saved.id, first.id))
+        with patch("tkinter.messagebox.askyesno") as confirmation:
+            self.app.delete_events()
+            confirmation.assert_not_called()
+        self.assertFalse(Store(self.store.directory).events)
+        self.assertEqual(set(self.app.drafts), {second.id})
+        self.assertEqual(self.app.events_tree.get_children(), (second.id,))
+
+    def test_undefined_gap_updates_during_drag_and_after_save_or_delete(self):
+        first, second, gap = self.events_with_gap()
+        original = self.store.events_path.read_bytes()
+        self.assertIn(gap.id, self.app.events_tree.get_children())
+        pointer = self.begin_resize(first.id, "end", first.end + timedelta(minutes=30))
+        preview = self.app.timeline.undefined[gap.id]
+        self.assertEqual((preview.start, preview.end), (first.end + timedelta(minutes=30), second.start))
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.finish_resize(pointer)
+        self.assertEqual(self.app.undefined[gap.id], preview)
+        self.assertEqual(self.app.events_tree.item(gap.id, "values")[-1], "30 分钟")
+        self.app.select_event(second.id)
+        self.app.delete_events()
+        self.assertFalse(self.app.undefined)
+        self.assertFalse(self.app.timeline.undefined)
+
+    def test_undefined_gap_name_does_not_define_it_and_follows_changed_boundaries(self):
+        first, second, gap = self.events_with_gap()
+        original = self.store.events_path.read_bytes()
+        self.app.rename_event(gap.id)
+        self.app.update()
+        self.fill(self.app.cell_editor.entry, "待分类时段")
+        self.type_key("Return")
+        self.assertEqual(self.app.undefined[gap.id].title, "待分类时段")
+        self.assertIsNone(self.app.undefined[gap.id].tag_id)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.assertFalse(self.app.drafts)
+        self.finish_resize(self.begin_resize(first.id, "end", first.end + timedelta(minutes=15)))
+        updated = self.app.undefined[gap.id]
+        self.assertEqual((updated.title, updated.start, updated.end),
+                         ("待分类时段", first.end + timedelta(minutes=15), second.start))
+        self.assertNotIn(gap.id, Store(self.store.directory).events)
+
+    def test_only_assigning_a_tag_defines_an_automatic_gap(self):
+        first, second, gap = self.events_with_gap()
+        original = self.store.events_path.read_bytes()
+        self.app.edit_cell(gap.id, "start")
+        self.assertIsNone(self.app.cell_editor)
+        editor = self.click_cell(gap.id, "tag")
+        self.choose_tag(editor.input, None)
+        self.assertIn(gap.id, self.app.undefined)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        editor = self.click_cell(gap.id, "tag")
+        self.choose_tag(editor.input, "embedded")
+        self.assertFalse(self.app.undefined)
+        self.assertFalse(self.app.drafts)
+        recorded = next(event for key, event in self.store.events.items() if key not in (first.id, second.id))
+        self.assertEqual((recorded.tag_id, recorded.start, recorded.end), ("embedded", first.end, second.start))
+        self.assertEqual(recorded.title, "未定义")
+        self.assertEqual(Store(self.store.directory).events[recorded.id], recorded)
+
+    def test_failed_gap_definition_keeps_the_gap_and_tag_input_for_retry(self):
+        first, second, gap = self.events_with_gap()
+        original = self.store.events_path.read_bytes()
+        editor = self.click_cell(gap.id, "tag")
+        with patch.object(self.store, "_write_events", side_effect=OSError("无法保存")), patch("tkinter.messagebox.showerror") as error:
+            self.choose_tag(editor.input, "linux")
+            error.assert_called_once()
+        self.assertIs(self.app.cell_editor, editor)
+        self.assertEqual(editor.input.tag_id(), "linux")
+        self.assertEqual(self.app.undefined[gap.id].tag_id, None)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.type_key("Return")
+        self.assertFalse(self.app.undefined)
+        self.assertEqual(len(Store(self.store.directory).events), 3)
+
+    def test_undefined_appearance_depends_on_tag_instead_of_name(self):
+        event = self.cell_event()
+        self.app.select_event(event.id)
+        editor = self.click_cell(event.id, "tag")
+        self.choose_tag(editor.input, None)
+        canvas = self.app.timeline.canvas
+        item = canvas.find_withtag(f"event:{event.id}")[0]
+        self.assertTrue(canvas.itemcget(item, "dash"))
+        self.assertEqual(self.store.events[event.id].title, event.title)
+        editor = self.click_cell(event.id, "tag")
+        self.choose_tag(editor.input, "linux")
+        item = canvas.find_withtag(f"event:{event.id}")[0]
+        self.assertFalse(canvas.itemcget(item, "dash"))
+        self.assertEqual(self.store.events[event.id].title, event.title)
+
+    def test_undefined_gap_does_not_drag_and_context_menu_sets_its_tag(self):
+        _, _, gap = self.events_with_gap()
+        self.click_timeline_event(gap.id)
+        self.assertIsNone(self.app.timeline._drag)
+        canvas = self.app.timeline.canvas
+        self.assertFalse(canvas.find_withtag(f"resize:start:{gap.id}"))
+        left, top, right, bottom = canvas.bbox(canvas.find_withtag(f"event:{gap.id}")[0])
+        menu = self.timeline_menu_for(round((left + right) / 2), round((top + bottom) / 2))
+        self.assertEqual(menu.entrycget(1, "label"), "设置标签")
+        menu.invoke(1)
+        self.app.update()
+        self.assertEqual((self.app.cell_editor.event_id, self.app.cell_editor.column), (gap.id, "tag"))
 
     def click_timeline_event(self, event_id):
         canvas = self.app.timeline.canvas
@@ -394,7 +540,7 @@ class AppTests(unittest.TestCase):
                 else:
                     self.click(self.app.add_event_button)
                 dialog.assert_not_called()
-            draft = self.app.draft_event
+            draft = self.latest_draft()
             self.assertIsNotNone(draft)
             self.assertEqual(self.app.cell_editor.event_id, draft.id)
             self.assertEqual(self.app.cell_editor.entry.get(), "")
@@ -402,29 +548,33 @@ class AppTests(unittest.TestCase):
             self.assertEqual(self.store.events_path.read_bytes(), original)
             self.fill(self.app.cell_editor.entry, "直接新增")
             self.type_key("Return")
-            self.assertIsNone(self.app.draft_event)
+            self.assertIsNone(self.latest_draft())
             self.assertEqual(Store(self.store.directory).events[draft.id].title, "直接新增")
             self.assertEqual(self.app.events_tree.selection(), (draft.id,))
 
-    def test_draft_can_move_before_naming_and_escape_discards_it(self):
+    def test_multiple_drafts_can_move_before_naming_and_escape_discards_only_current(self):
         self.app.day = date(2000, 1, 1)
         self.app.refresh()
         self.click(self.app.add_event_button)
-        draft = self.app.draft_event
+        first = self.latest_draft()
         original = self.store.events_path.read_bytes()
-        self.finish_resize(self.begin_move(draft.id, 60))
-        self.assertEqual(self.app.draft_event.start, draft.start + timedelta(hours=1))
-        self.assertEqual(self.store.events_path.read_bytes(), original)
+        self.finish_resize(self.begin_move(first.id, 60))
+        self.assertEqual(self.app.drafts[first.id].start, first.start + timedelta(hours=1))
         self.click(self.app.add_event_button)
-        self.assertEqual(self.app.draft_event.id, draft.id)
+        second = self.latest_draft()
+        self.assertNotEqual(second.id, first.id)
+        self.assertEqual(len(self.app.drafts), 2)
         self.type_key("Escape")
-        self.assertIsNone(self.app.draft_event)
+        self.assertEqual(set(self.app.drafts), {first.id})
+        self.click_cell(first.id, "title")
+        self.type_key("Escape")
+        self.assertFalse(self.app.drafts)
         self.assertFalse(self.app.events_tree.get_children())
         self.assertEqual(self.store.events_path.read_bytes(), original)
 
     def test_draft_failed_save_keeps_input_and_tab_moves_to_next_cell(self):
         self.click(self.app.add_event_button)
-        draft = self.app.draft_event
+        draft = self.latest_draft()
         editor = self.app.cell_editor
         original = self.store.events_path.read_bytes()
         self.fill(editor.entry, "新记录")
@@ -432,7 +582,7 @@ class AppTests(unittest.TestCase):
             self.type_key("Return")
             error.assert_called_once()
         self.assertIs(self.app.cell_editor, editor)
-        self.assertEqual(self.app.draft_event, draft)
+        self.assertEqual(self.latest_draft(), draft)
         self.assertEqual(self.store.events_path.read_bytes(), original)
         self.type_key("Tab")
         self.assertEqual(self.app.cell_editor.column, "start")
@@ -442,7 +592,7 @@ class AppTests(unittest.TestCase):
 
     def test_deleting_a_draft_tag_keeps_the_draft_unclassified(self):
         self.click(self.app.add_event_button)
-        draft = self.app.draft_event
+        draft = self.latest_draft()
         self.app.commit_cell()
         editor = self.click_cell(draft.id, "tag")
         tree = editor.input.popup.tree
@@ -450,13 +600,13 @@ class AppTests(unittest.TestCase):
         self.app.update()
         x, y, width, height = tree.bbox("tag:linux")
         self.click(tree, x + 110, y + height // 2)
-        self.assertEqual(self.app.draft_event.tag_id, "linux")
+        self.assertEqual(self.latest_draft().tag_id, "linux")
         self.app.tags_tree.selection_set("linux")
         with patch("tkinter.messagebox.askyesno", return_value=True):
             self.app.delete_tag()
         self.app.update()
-        self.assertEqual(self.app.draft_event.id, draft.id)
-        self.assertIsNone(self.app.draft_event.tag_id)
+        self.assertEqual(self.latest_draft().id, draft.id)
+        self.assertIsNone(self.latest_draft().tag_id)
         self.assertEqual(self.app.events_tree.item(draft.id, "values")[3], "未分类")
         self.assertFalse(self.store.events)
 
@@ -477,7 +627,7 @@ class AppTests(unittest.TestCase):
         self.assertIsNone(self.app.cell_editor)
         self.click(tree, 100, tree.winfo_height() - 10)
         self.click(tree, 100, tree.winfo_height() - 10)
-        self.assertIsNotNone(self.app.draft_event)
+        self.assertIsNotNone(self.latest_draft())
         self.assertEqual(self.app.cell_editor.column, "title")
         self.type_key("Escape")
 
@@ -487,7 +637,7 @@ class AppTests(unittest.TestCase):
             self.store.save_event(Event(str(index), str(index), None, origin, origin + timedelta(hours=1)))
         self.app.refresh()
         self.click(self.app.add_event_button)
-        self.assertTrue(self.app.events_tree.bbox(self.app.draft_event.id))
+        self.assertTrue(self.app.events_tree.bbox(self.latest_draft().id))
         self.assertEqual(self.app.focus_get(), self.app.cell_editor.entry)
         self.type_key("Escape")
 
@@ -539,7 +689,7 @@ class AppTests(unittest.TestCase):
         self.assertEqual(menu.entrycget(0, "label"), "在此新增事件")
         menu.invoke(0)
         self.app.update()
-        draft = self.app.draft_event
+        draft = self.latest_draft()
         self.assertLessEqual(abs((draft.start - event.start.replace(hour=13)).total_seconds()), 60)
         self.fill(self.app.cell_editor.entry, "轨迹新增")
         self.type_key("Return")
@@ -839,20 +989,29 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.events_tree.item(event.id, "values")[1:3], ("09:00", "10:00"))
         self.assertIsNone(self.app.grab_current())
 
-    def test_timeline_double_click_still_opens_editor_without_an_active_drag(self):
+    def test_timeline_double_click_renames_on_canvas_without_a_dialog(self):
         event = self.cell_event()
-        self.click_timeline_event(event.id)
-        self.click_timeline_event(event.id)
-        dialog = self.app.grab_current()
-        self.assertIsInstance(dialog, EventDialog)
+        with patch("daymark.app.EventDialog") as dialog:
+            self.click_timeline_event(event.id)
+            self.click_timeline_event(event.id)
+            dialog.assert_not_called()
+        editor = self.app.cell_editor
+        self.assertIsNotNone(editor)
+        self.assertIs(editor.master, self.app.timeline.canvas)
+        self.assertEqual((editor.event_id, editor.column), (event.id, "title"))
         self.assertIsNone(self.app.timeline._drag)
-        self.assertEqual(dialog.notes.get("1.0", "end-1c"), event.notes)
-        self.click(dialog.notes)
-        self.type_key("x")
-        self.assertIn("x", dialog.notes.get("1.0", "end-1c"))
-        dialog.destroy()
         self.assertIsNone(self.app.grab_current())
-        self.assertEqual(self.store.events[event.id], event)
+        self.fill(editor.entry, "轨迹内改名")
+        self.type_key("Return")
+        restored = Store(self.store.directory).events[event.id]
+        self.assertEqual(restored.title, "轨迹内改名")
+        self.assertEqual((restored.start, restored.end, restored.tag_id, restored.notes),
+                         (event.start, event.end, event.tag_id, event.notes))
+        self.app.rename_event(event.id)
+        self.app.update()
+        self.fill(self.app.cell_editor.entry, "取消改名")
+        self.type_key("Escape")
+        self.assertEqual(self.store.events[event.id].title, "轨迹内改名")
 
     def test_body_drag_keeps_events_within_day_edges_and_moves_cross_day_endpoints_together(self):
         event = self.cell_event()

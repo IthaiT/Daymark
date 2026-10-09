@@ -81,10 +81,10 @@ class Picker(ttk.Frame):
         self.value = tk.StringVar()
         self.entry = ttk.Entry(self, textvariable=self.value, width=width,
                                state="normal" if editable else "readonly")
-        self.entry.pack(side="left", fill="x", expand=True)
         if symbol is not None:
             self.button = ttk.Button(self, text=symbol, width=2, style="Icon.TButton", command=self.open_popup)
-            self.button.pack(side="left", padx=(4, 0))
+            self.button.pack(side="right", padx=(4, 0))
+        self.entry.pack(side="left", fill="x", expand=True)
         # Open after mouse release, so the entry's press binding cannot steal
         # focus from the new popup or keep the pointer captured by the entry.
         self.entry.bind("<ButtonRelease-1>", lambda _: self.open_popup())

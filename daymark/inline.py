@@ -38,6 +38,7 @@ class CellEditor(ttk.Frame):
     def show(self, bounds):
         x, y, width, height = bounds
         self.place(x=x, y=y, width=width, height=height)
+        self.update_idletasks()
         self.entry.focus_force()
         self.entry.selection_range(0, "end")
         if self.column != "title":

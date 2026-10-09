@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from .dialogs import EventDialog, TagDialog
 from .inline import CellEditor
-from .model import Event, default_event_interval, duration_text
+from .model import Event, default_event_interval, duration_text, undefined_events
 from .timeline import Timeline, tag_color
 from .widgets import AutoScrollbar, DatePicker
 
@@ -28,7 +28,9 @@ class App(tk.Tk):
         self.minsize(1100, 740)
         self.day = date.today()
         self.cell_editor = None
-        self.draft_event = None
+        self.drafts = {}
+        self.undefined = {}
+        self.undefined_names = {}
         self._pressed_cell = None
         self._drag_source = None
         self._drag_active = False
@@ -130,8 +132,8 @@ class App(tk.Tk):
         timeline_box.columnconfigure(0, weight=1)
         timeline_box.rowconfigure(1, weight=1)
         ttk.Label(timeline_box, text="一天的轨迹", style="Heading.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 12))
-        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.edit_event, self.update_event_time,
-                                 self.timeline_context_menu)
+        self.timeline = Timeline(timeline_box, self.store, self.select_event, self.rename_event, self.update_event_time,
+                                 self.timeline_context_menu, self.position_cell)
         self.timeline.grid(row=1, column=0, sticky="nsew")
         bottom = ttk.Frame(main)
         bottom.grid(row=2, column=0, sticky="nsew")
@@ -180,18 +182,23 @@ class App(tk.Tk):
 
     def refresh(self):
         self.cancel_cell()
-        if (self.draft_event is not None and self.draft_event.tag_id is not None
-                and self.draft_event.tag_id not in self.store.tags):
-            self.draft_event = replace(self.draft_event, tag_id=None)
+        self.drafts = {event_id: replace(event, tag_id=None) if event.tag_id is not None and event.tag_id not in self.store.tags else event
+                       for event_id, event in self.drafts.items()}
         selected = self.events_tree.selection()
         events = self.visible_events()
+        gaps = undefined_events(events, self.day)
+        self.undefined = {event.id: replace(event, title=self.undefined_names.get(event.id, event.title))
+                          for event in gaps}
+        self.undefined_names = {event_id: title for event_id, title in self.undefined_names.items()
+                                if event_id in self.undefined}
+        events = sorted([*events, *self.undefined.values()], key=lambda event: (event.start, event.id))
         self.events_tree.delete(*self.events_tree.get_children())
         for event in events:
             interval = event.interval_on(self.day)
             def clock(moment):
                 return moment.strftime("%H:%M") if moment.date() == self.day else moment.strftime("%m-%d %H:%M")
             color_tag = f"event-color:{event.id}"
-            self.events_tree.tag_configure(color_tag, background=tag_color(self.store, event.tag_id))
+            self.events_tree.tag_configure(color_tag, background=self.event_color(event))
             self.events_tree.insert("", "end", iid=event.id, tags=(color_tag,), values=(
                 event.title or "填写事件名称…", clock(event.start), clock(event.end) if event.end else "待补全",
                 self.store.tag_name(event.tag_id), duration_text((interval[1] - interval[0]).total_seconds()) if interval else "—",
@@ -204,23 +211,25 @@ class App(tk.Tk):
 
     def visible_events(self):
         events = self.store.events_on(self.day)
-        if self.draft_event is not None and self.draft_event.interval_on(self.day):
-            events.append(self.draft_event)
-        return events
+        events.extend(event for event in self.drafts.values() if event.interval_on(self.day))
+        return sorted(events, key=lambda event: (event.start, event.id))
 
     def get_event(self, event_id):
-        if self.draft_event is not None and event_id == self.draft_event.id:
-            return self.draft_event
-        return self.store.events.get(event_id)
+        return self.drafts.get(event_id) or self.store.events.get(event_id) or self.undefined.get(event_id)
+
+    def event_color(self, event, selected=False):
+        if event.tag_id is None and not selected:
+            return "#f5f6f7"
+        return tag_color(self.store, event.tag_id, selected)
 
     def draw_timeline(self):
         selected = set(self.events_tree.selection())
         for event_id in self.events_tree.get_children():
             event = self.get_event(event_id)
             self.events_tree.tag_configure(f"event-color:{event_id}",
-                                           background=tag_color(self.store, event.tag_id, event_id in selected),
+                                           background=self.event_color(event, event_id in selected),
                                            font=(FONT, 10, "bold" if event_id in selected else "normal"))
-        self.timeline.update_events(self.visible_events(), self.day, selected)
+        self.timeline.update_events(self.visible_events(), self.day, selected, self.undefined_names)
 
     def clear_event_selection(self):
         if not self.commit_cell():
@@ -410,7 +419,8 @@ class App(tk.Tk):
             messagebox.showerror("日期格式", "请使用 YYYY-MM-DD，例如 2026-10-07。", parent=self)
             self.date_picker.value.set(self.day.isoformat())
             return
-        self.draft_event = None
+        self.drafts.clear()
+        self.undefined_names.clear()
         self.refresh()
 
     def shift_day(self, delta):
@@ -418,7 +428,8 @@ class App(tk.Tk):
             return
         try:
             self.day += timedelta(days=delta)
-            self.draft_event = None
+            self.drafts.clear()
+            self.undefined_names.clear()
             self.refresh()
         except OverflowError:
             messagebox.showerror("日期范围", "已经到达日期范围边界。", parent=self)
@@ -427,25 +438,26 @@ class App(tk.Tk):
         if not self.commit_cell():
             return
         self.day = date.today()
-        self.draft_event = None
+        self.drafts.clear()
+        self.undefined_names.clear()
         self.refresh()
 
     def add_event(self, start=None):
         if not self.commit_cell():
             return "break"
-        if self.draft_event is None:
-            left, right = default_event_interval(self.day, start)
-            self.draft_event = Event(uuid4().hex, "", None, left, right)
-        event_id = self.draft_event.id
+        left, right = default_event_interval(self.day, start)
+        event = Event(uuid4().hex, "", None, left, right)
+        self.drafts[event.id] = event
+        event_id = event.id
         self.refresh()
         self.select_event(event_id)
         self.update_idletasks()
         self.edit_cell(event_id, "title")
         return "break"
 
-    def discard_draft(self):
+    def discard_draft(self, event_id):
         self.cancel_cell()
-        self.draft_event = None
+        self.drafts.pop(event_id, None)
         self.refresh()
 
     def select_event(self, event_id):
@@ -465,9 +477,14 @@ class App(tk.Tk):
         if self.commit_cell() and self.grab_current() is None and event_id in self.store.events:
             EventDialog(self, self.store, self.refresh, self.day, self.store.events[event_id])
 
+    def rename_event(self, event_id):
+        if self.select_event(event_id):
+            self.update_idletasks()
+            self.edit_cell(event_id, "title", self.timeline.canvas)
+
     def update_event_time(self, event):
-        if self.draft_event is not None and event.id == self.draft_event.id:
-            self.draft_event = event
+        if event.id in self.drafts:
+            self.drafts[event.id] = event
             saved = True
         else:
             saved = self.try_action(lambda: self.store.save_event(event))
@@ -482,18 +499,21 @@ class App(tk.Tk):
             self.add_event()
         return "break"
 
-    def edit_cell(self, event_id, column):
+    def edit_cell(self, event_id, column, parent=None):
         if not self.commit_cell():
             return
         if column not in ("title", "start", "end", "tag") or (event := self.get_event(event_id)) is None:
             return
-        bounds = self.events_tree.bbox(event_id, column)
+        if event_id in self.undefined and column not in ("title", "tag"):
+            return
+        parent = self.events_tree if parent is None else parent
+        bounds = self.timeline.title_bounds(event_id) if parent is self.timeline.canvas else self.events_tree.bbox(event_id, column)
         if not bounds:
             return
         on_cancel = self.cancel_cell
-        if self.draft_event is not None and event_id == self.draft_event.id and column == "title":
-            on_cancel = self.discard_draft
-        self.cell_editor = CellEditor(self.events_tree, self.store, event, column, self.save_cell, on_cancel,
+        if event_id in self.drafts and column == "title":
+            on_cancel = lambda: self.discard_draft(event_id)
+        self.cell_editor = CellEditor(parent, self.store, event, column, self.save_cell, on_cancel,
                                       self.next_cell)
         self.cell_editor.show(bounds)
 
@@ -504,15 +524,23 @@ class App(tk.Tk):
             if value == original.replace(second=0, microsecond=0):
                 value = original
         event = replace(current, **{field: value})
-        if self.draft_event is not None and event.id == self.draft_event.id:
+        if event.id in self.undefined:
+            if event.tag_id is not None:
+                event = replace(event, id=uuid4().hex, title=event.title or "未定义")
+                if not self.try_action(lambda: self.store.save_event(event)):
+                    return False
+                self.undefined_names.pop(current.id, None)
+            elif field == "title":
+                self.undefined_names[event.id] = value or "未定义"
+        elif event.id in self.drafts:
             if not event.title:
                 if not self.try_action(lambda: self.store.validate_event(replace(event, title="新事件"))):
                     return False
-                self.draft_event = event
+                self.drafts[event.id] = event
             else:
                 if not self.try_action(lambda: self.store.save_event(event)):
                     return False
-                self.draft_event = None
+                del self.drafts[event.id]
         elif event != current and not self.try_action(lambda: self.store.save_event(event)):
             return False
         self.cancel_cell()
@@ -535,12 +563,16 @@ class App(tk.Tk):
     def cancel_cell(self):
         editor, self.cell_editor = self.cell_editor, None
         if editor is not None:
+            parent = editor.master
             editor.destroy()
-            self.events_tree.focus_set()
+            parent.focus_set()
 
     def position_cell(self):
         if self.cell_editor is not None:
-            bounds = self.events_tree.bbox(self.cell_editor.event_id, self.cell_editor.column)
+            if self.cell_editor.master is self.timeline.canvas:
+                bounds = self.timeline.title_bounds(self.cell_editor.event_id)
+            else:
+                bounds = self.events_tree.bbox(self.cell_editor.event_id, self.cell_editor.column)
             if bounds:
                 x, y, width, height = bounds
                 self.cell_editor.place_configure(x=x, y=y, width=width, height=height)
@@ -562,7 +594,12 @@ class App(tk.Tk):
             self.event_menu.destroy()
         self.event_menu = menu = tk.Menu(self, tearoff=False, bg="white", fg="#111111",
                                          activebackground="#e5e7eb", activeforeground="#111111")
-        menu.add_command(label="删除", command=self.delete_events)
+        if event_id in self.undefined:
+            menu.add_command(label="设置标签", command=lambda: self.edit_cell(event_id, "tag"))
+        else:
+            menu.add_command(label="删除", command=self.delete_events)
+            if event_id in self.store.events:
+                menu.add_command(label="编辑详情", command=lambda: self.edit_event(event_id))
         try:
             menu.tk_popup(pointer.x_root, pointer.y_root)
         finally:
@@ -581,9 +618,13 @@ class App(tk.Tk):
         self.timeline_menu = menu = tk.Menu(self, tearoff=False, bg="white", fg="#111111",
                                             activebackground="#e5e7eb", activeforeground="#111111")
         menu.add_command(label="在此新增事件", command=lambda: self.add_event(start))
-        if event_id:
+        if event_id in self.undefined:
+            menu.add_command(label="设置标签", command=lambda: self.edit_cell(event_id, "tag"))
+        elif event_id:
             menu.add_separator()
             menu.add_command(label="删除", command=self.delete_events)
+            if event_id in self.store.events:
+                menu.add_command(label="编辑详情", command=lambda: self.edit_event(event_id))
         try:
             menu.tk_popup(pointer.x_root, pointer.y_root)
         finally:
@@ -592,11 +633,13 @@ class App(tk.Tk):
 
     def delete_events(self):
         selected = list(self.events_tree.selection())
-        if self.draft_event is not None and self.draft_event.id in selected:
-            selected.remove(self.draft_event.id)
-            self.discard_draft()
-        if selected and self.try_action(lambda: self.store.delete_events(selected)):
-            self.refresh()
+        self.cancel_cell()
+        saved = [event_id for event_id in selected if event_id in self.store.events]
+        if saved and not self.try_action(lambda: self.store.delete_events(saved)):
+            return
+        for event_id in selected:
+            self.drafts.pop(event_id, None)
+        self.refresh()
 
     def try_action(self, action):
         try:

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
+from uuid import NAMESPACE_URL, uuid5
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,19 @@ def move_event_on_day(event: Event, day: date, minutes: int) -> Event:
     upper = min((limit - end) // minute, (datetime.max - event.end) // minute)
     offset = timedelta(minutes=min(upper, max(lower, minutes)))
     return replace(event, start=event.start + offset, end=event.end + offset)
+
+
+def undefined_events(events: list[Event], day: date) -> list[Event]:
+    """Derive gaps between the union of completed intervals, without storing them."""
+    intervals = sorted((*interval, event.id) for event in events if (interval := event.interval_on(day)))
+    result, end, previous_id = [], None, None
+    for left, right, event_id in intervals:
+        if end is not None and left > end:
+            key = uuid5(NAMESPACE_URL, repr(("daymark:undefined", previous_id, event_id))).hex
+            result.append(Event(f"undefined:{key}", "未定义", None, end, left))
+        if end is None or right >= end:
+            end, previous_id = right, event_id
+    return result
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import datetime, time, timedelta
 from tkinter import ttk
 
-from .model import duration_text, move_event_on_day, timeline_segments
+from .model import duration_text, move_event_on_day, timeline_segments, undefined_events
 from .widgets import AutoScrollbar
 
 PALETTE = ("#dbeafe", "#ede9fe", "#fef3c7", "#fee2e2", "#ffedd5", "#cffafe", "#fce7f3")
@@ -32,11 +32,14 @@ def tag_color(store, tag_id, selected=False):
 
 
 class Timeline(ttk.Frame):
-    def __init__(self, parent, store, on_select, on_edit, on_change, on_context):
+    def __init__(self, parent, store, on_select, on_edit, on_change, on_context, on_layout):
         super().__init__(parent)
         self.store, self.on_select, self.on_edit = store, on_select, on_edit
         self.on_change = on_change
         self.on_context = on_context
+        self.on_layout = on_layout
+        self.undefined = {}
+        self.undefined_names = {}
         self._pieces = {}
         self._drag = None
         self.canvas = tk.Canvas(self, height=280, bg="white", highlightthickness=1, highlightbackground="#e5e5e5")
@@ -65,9 +68,10 @@ class Timeline(ttk.Frame):
         self.tooltip = None
         self.hovered_id = None
 
-    def update_events(self, events, day, selected=()):
+    def update_events(self, events, day, selected, undefined_names):
         self.events, self.day = events, day
         self.selected = set(selected)
+        self.undefined_names = dict(undefined_names)
         self.draw()
 
     def draw(self):
@@ -81,7 +85,9 @@ class Timeline(ttk.Frame):
         if self._drag is not None:
             preview = self._drag["preview"]
             events = [preview if event.id == preview.id else event for event in events]
-        segments = timeline_segments(events, self.day)
+        self.undefined = {event.id: replace(event, title=self.undefined_names.get(event.id, event.title))
+                          for event in undefined_events(events, self.day)}
+        segments = timeline_segments([*events, *self.undefined.values()], self.day)
         bottom = max(90, canvas.winfo_height() - 26)
         canvas.configure(scrollregion=(0, 0, width + 48, bottom + 24))
         origin = datetime.combine(self.day, time.min)
@@ -117,6 +123,9 @@ class Timeline(ttk.Frame):
             options = dict(fill=tag_color(self.store, event.tag_id, event_id in self.selected),
                            outline="#111111" if event_id in self.selected else "#cccccc",
                            width=3 if event_id in self.selected else 1, tags=tags)
+            if event.tag_id is None:
+                options.update(fill=tag_color(self.store, None, True) if event_id in self.selected else "#f5f6f7",
+                               dash=(4, 3))
             if all((top, low) == rectangles[0][2:] for _, _, top, low in rectangles):
                 canvas.create_rectangle(
                     rectangles[0][0], rectangles[0][2], rectangles[-1][1], rectangles[-1][3], **options
@@ -135,7 +144,8 @@ class Timeline(ttk.Frame):
                                    anchor="w", font=("Microsoft YaHei UI", 10), tags=(f"event:{event_id}",))
         if not segments:
             canvas.create_text(width / 2 + 24, bottom / 2, text="这一天还没有记录。", fill="#111111", font=("Microsoft YaHei UI", 11))
-        if len(self.selected) == 1 and (event := visible_events.get(next(iter(self.selected)))):
+        event = visible_events.get(next(iter(self.selected))) if len(self.selected) == 1 else None
+        if event is not None and event.id not in self.undefined:
             start, end = event.interval_on(self.day)
             for edge, moment, clipped in (("start", event.start, start), ("end", event.end, end)):
                 if moment != clipped:
@@ -169,6 +179,22 @@ class Timeline(ttk.Frame):
                 canvas.tag_raise(item, background)
             if (snap := self._drag.get("snap")) is not None:
                 canvas.create_line(x(snap), 43, x(snap), bottom, fill="#2563eb", width=2, tags=("snap-guide",))
+        self.on_layout()
+
+    def title_bounds(self, event_id):
+        """Place a name input on the largest visible piece of an event."""
+        canvas = self.canvas
+        origin_x, origin_y = canvas.canvasx(0), canvas.canvasy(0)
+        visible = [(max(left, origin_x), min(right, origin_x + canvas.winfo_width()),
+                    max(top, origin_y), min(low, origin_y + canvas.winfo_height()))
+                   for left, right, top, low in self._pieces.get(event_id, ())]
+        visible = [piece for piece in visible if piece[1] > piece[0] and piece[3] > piece[2]]
+        if not visible:
+            return None
+        left, right, top, low = max(visible, key=lambda item: (item[1] - item[0]) * (item[3] - item[2]))
+        width = min(max(120, right - left - 12), canvas.winfo_width() - 16)
+        xpos = min(canvas.winfo_width() - width - 8, max(8, (left + right - width) / 2 - origin_x))
+        return round(xpos), round((top + low) / 2 - origin_y - 16), round(width), 32
 
     def _snap_interval(self):
         return 15 if self.zoom < 2 else 5 if self.zoom < 4 else 1
@@ -177,7 +203,7 @@ class Timeline(ttk.Frame):
         return max(650, self.canvas.winfo_width() - 50) * self.zoom
 
     def _get_event(self, event_id):
-        return next((event for event in self.events if event.id == event_id), None)
+        return self.undefined.get(event_id) or next((event for event in self.events if event.id == event_id), None)
 
     def _tick_intervals(self, width):
         major = 120 if self.zoom == 1 else 60 if self.zoom < 2 else 30 if self.zoom < 3 else 15
@@ -206,6 +232,9 @@ class Timeline(ttk.Frame):
             return "break"
         if self.on_select(event_id) is False:
             return "break"
+        if event_id in self.undefined:
+            self.canvas.focus_force()
+            return "break"
         event = self._get_event(event_id)
         if event is None:
             return "break"
@@ -222,11 +251,12 @@ class Timeline(ttk.Frame):
         return "break"
 
     def _double_click(self, pointer):
-        if self._handle_at(pointer):
-            return self._click(pointer)
-        if event := self._event_at(pointer):
+        handle = self._handle_at(pointer)
+        event = self._get_event(handle[1]) if handle else self._event_at(pointer)
+        if event is not None:
             self.cancel_drag()
             self.on_edit(event.id)
+        return "break"
 
     def _handle_at(self, pointer):
         x, y = self.canvas.canvasx(pointer.x), self.canvas.canvasy(pointer.y)
@@ -234,6 +264,8 @@ class Timeline(ttk.Frame):
         origin = datetime.combine(self.day, time.min) if self.day is not None else None
         width = self._day_width()
         for event_id, rectangles in reversed(list(self._pieces.items())):
+            if event_id in self.undefined:
+                continue
             event = self._get_event(event_id)
             start, end = event.interval_on(self.day)
             for edge, moment, clipped, rectangle in (("start", event.start, start, rectangles[0]),
@@ -355,7 +387,8 @@ class Timeline(ttk.Frame):
             self._hide_tooltip()
             return
         event = self._event_at(pointer)
-        self.canvas.configure(cursor=("fleur" if event.id in self.selected else "hand2") if event else "")
+        self.canvas.configure(cursor=("fleur" if event.id in self.selected and event.id not in self.undefined
+                                      else "hand2") if event else "")
         if event is None:
             self._hide_tooltip()
             return
