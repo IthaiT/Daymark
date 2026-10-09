@@ -17,7 +17,7 @@ conda env create --prefix ./.conda --file environment.yml
 ./.conda/python.exe -m daymark
 # Run storage tests without opening windows.
 ./.conda/python.exe -m unittest discover -s tests -p test_storage.py -v
-# Run all tests, including real Tk windows.
+# Run all tests; real Tk windows use an inactive Windows desktop.
 $env:DAYMARK_UI_TESTS = '1'
 ./.conda/python.exe -m unittest discover -s tests -v
 ```
@@ -34,7 +34,7 @@ No formatter or linter is configured. Follow neighboring code and run `git diff 
 
 Use `unittest`, naming files `test_*.py` and methods `test_<behavior>`. Add regression tests for changed persistence or time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility, and failed writes. Test right-click, drag, picker, and inline-edit interactions when changing the UI. Use isolated temporary directories under `.test-artifacts/`.
 
-UI tests require a desktop session and `DAYMARK_UI_TESTS=1`; otherwise they are skipped. Run affected tests before committing. No numeric coverage threshold is configured.
+UI tests require Windows, a desktop session, and `DAYMARK_UI_TESTS=1`; otherwise they are skipped. They attach the test thread to a private inactive desktop before creating Tk windows, so focus and grabs cannot disturb the user's desktop. The desktop lives for the test process and Windows releases it on process exit, together with Tk/Windows helper windows. Never activate that desktop or fall back to opening test windows on the active desktop. Run affected tests before committing. No numeric coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 

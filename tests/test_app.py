@@ -1,4 +1,4 @@
-"""Desktop integration tests. These briefly open real Tk windows."""
+"""Real Tk integration tests, isolated from the active Windows desktop."""
 
 import os
 import tempfile
@@ -14,28 +14,48 @@ from daymark.model import Event
 from daymark.storage import Store
 from daymark.timeline import tag_color
 from daymark.widgets import AutoScrollbar, Popup
+from tests.desktop import IsolatedDesktop
 
 
-@unittest.skipUnless(os.environ.get("DAYMARK_UI_TESTS") == "1", "Set DAYMARK_UI_TESTS=1 to open test windows")
+@unittest.skipUnless(os.environ.get("DAYMARK_UI_TESTS") == "1", "Set DAYMARK_UI_TESTS=1 to run UI tests")
+@unittest.skipUnless(os.name == "nt", "Background UI tests require Windows")
 class AppTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.desktop = IsolatedDesktop()
+
     def setUp(self):
+        self.assertEqual(self.desktop.thread_name(), self.desktop.name)
         artifacts = Path(__file__).resolve().parents[1] / ".test-artifacts"
         artifacts.mkdir(exist_ok=True)
         self.directory = tempfile.TemporaryDirectory(dir=artifacts)
         self.addCleanup(self.directory.cleanup)
         self.store = Store(Path(self.directory.name))
         self.app = App(self.store)
-        self.addCleanup(self.app.close)
+        self.addCleanup(self.close_app)
         self.app.update()
-        # Coordinate hit testing requires the test window to be visible above
-        # the host app, just as it is when a user clicks it.
-        self.app.attributes("-topmost", True)
+        # Real focus and coordinate hit testing stay inside the private desktop.
         self.app.lift()
         self.app.focus_force()
         self.app.update()
         errors = patch("tkinter.messagebox.showerror", side_effect=AssertionError("Unexpected UI error"))
         errors.start()
         self.addCleanup(errors.stop)
+
+    def close_app(self):
+        try:
+            self.app.close()
+        finally:
+            self.app = None
+
+    def test_ui_windows_and_picker_stay_on_inactive_desktop(self):
+        self.assertEqual(self.desktop.thread_name(), self.desktop.name)
+        self.assertNotEqual(self.desktop.input_name(), self.desktop.name)
+        self.click(self.app.date_picker.entry)
+        self.assertIsNotNone(self.app.grab_current())
+        self.assertIsNotNone(self.app.focus_get())
+        self.assertEqual(self.desktop.thread_name(), self.desktop.name)
+        self.assertNotEqual(self.desktop.input_name(), self.desktop.name)
 
     @staticmethod
     def fill(entry, value):
