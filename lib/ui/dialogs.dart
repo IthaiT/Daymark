@@ -217,9 +217,11 @@ class _EventEditorState extends State<_EventEditor> {
                     }),
                   ),
                   builder: (context, close) => DateTimeChoices(
-                    value:
-                        (start ? widget.event.start : widget.event.end) ??
-                        widget.event.start.add(const Duration(hours: 1)),
+                    value: pickerInitialTime(
+                      (start ? _start : _end).text,
+                      (start ? widget.event.start : widget.event.end) ??
+                          widget.event.start.add(const Duration(hours: 1)),
+                    ),
                     onCancel: close,
                     onChoose: (value) {
                       (start ? _start : _end).text =

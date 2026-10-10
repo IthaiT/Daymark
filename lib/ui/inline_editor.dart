@@ -160,11 +160,13 @@ class _InlineEditorState extends State<InlineEditor> {
                 },
               )
             : DateTimeChoices(
-                value:
-                    (session.column == EventColumn.start
-                        ? session.event.start
-                        : session.event.end) ??
-                    session.event.start.add(const Duration(hours: 1)),
+                value: pickerInitialTime(
+                  session.text.text,
+                  (session.column == EventColumn.start
+                          ? session.event.start
+                          : session.event.end) ??
+                      session.event.start.add(const Duration(hours: 1)),
+                ),
                 onCancel: close,
                 onChoose: (value) {
                   session.text.text = '${dateText(value)} ${clockText(value)}';

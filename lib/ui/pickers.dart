@@ -4,6 +4,15 @@ import 'package:flutter/services.dart';
 import '../data/store.dart';
 import '../domain/model.dart';
 
+/// Open a picker at the current input without replacing invalid typed text.
+DateTime pickerInitialTime(String text, DateTime fallback) {
+  try {
+    return parseEditorTime(text, fallback);
+  } on FormatException {
+    return fallback;
+  }
+}
+
 /// An anchored, focusable overlay. Outside taps continue to their target.
 class PickerPopup extends StatefulWidget {
   const PickerPopup({
@@ -423,7 +432,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
           }),
         ),
         builder: (context, close) => CalendarChoices(
-          value: widget.value,
+          value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
           onChoose: (value) {
             _date.text = dateText(value);
             close();
@@ -444,7 +453,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
           }),
         ),
         builder: (context, close) => TimeChoices(
-          value: widget.value,
+          value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
           onChoose: (value) {
             _time.text = clockText(value);
             close();

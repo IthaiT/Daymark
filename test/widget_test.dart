@@ -393,6 +393,21 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(DateTimeChoices), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextField, '日期'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<CalendarChoices>(find.byType(CalendarChoices)).value.day,
+        6,
+      );
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byType(CalendarDatePicker),
+              matching: find.text('6'),
+            )
+            .first,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextField, '时间'));
       await tester.pumpAndSettle();
       expect(find.byType(TimeChoices), findsOneWidget);
@@ -402,6 +417,19 @@ void main() {
             .first,
       );
       await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(TimeChoices),
+          matching: find.text('确定'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextField, '时间'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TimeChoices>(find.byType(TimeChoices)).value.hour,
+        14,
+      );
       await tester.tap(
         find.descendant(
           of: find.byType(TimeChoices),
