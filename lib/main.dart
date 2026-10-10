@@ -10,7 +10,7 @@ import 'data/store.dart';
 import 'ui/journal_screen.dart';
 import 'ui/theme.dart';
 
-Directory dataDirectory(List<String> arguments) {
+Directory dataDirectory(List<String> arguments, {String? executable}) {
   if (arguments.length == 2 &&
       arguments.first == '--data-dir' &&
       arguments.last.trim().isNotEmpty) {
@@ -18,28 +18,34 @@ Directory dataDirectory(List<String> arguments) {
   }
   if (arguments.length == 1 &&
       arguments.first.startsWith('--data-dir=') &&
-      arguments.first.length > 11) {
+      arguments.first.substring(11).trim().isNotEmpty) {
     return Directory(arguments.first.substring(11)).absolute;
   }
   if (arguments.isNotEmpty) {
     throw const FormatException('参数格式不正确，请使用 --data-dir 数据目录。');
   }
   // Development and repository launchers retain the original data location.
-  for (final start in [
-    Directory.current,
-    File(Platform.resolvedExecutable).parent,
-  ]) {
-    var directory = start;
-    while (true) {
-      if (File('${directory.path}/pubspec.yaml').existsSync() &&
-          Directory('${directory.path}/lib').existsSync()) {
+  final executableDirectory = File(
+    executable ?? Platform.resolvedExecutable,
+  ).absolute.parent;
+  var directory = executableDirectory;
+  while (true) {
+    final manifest = File('${directory.path}/pubspec.yaml');
+    if (manifest.existsSync()) {
+      if (Directory('${directory.path}/lib').existsSync() &&
+          RegExp(
+            r'^name:\s*daymark\s*$',
+            multiLine: true,
+          ).hasMatch(manifest.readAsStringSync())) {
         return Directory('${directory.path}/data');
       }
-      if (directory.parent.path == directory.path) break;
-      directory = directory.parent;
+      // An unrelated nested project is a boundary, not a Daymark checkout.
+      break;
     }
+    if (directory.parent.path == directory.path) break;
+    directory = directory.parent;
   }
-  return Directory('${File(Platform.resolvedExecutable).parent.path}/journal');
+  return Directory('${executableDirectory.path}/journal');
 }
 
 Future<void> main(List<String> arguments) async {
