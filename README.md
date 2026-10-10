@@ -1,28 +1,25 @@
 # Daymark
 
-一个本地运行的 Python 桌面时间记录工具，帮助你看见一天中的时间分配。
+一个本地运行的 Flutter / Dart 桌面时间记录工具，帮助你看见一天中的时间分配。
 
-首版使用 Tkinter，不需要 Web 服务或第三方 Python 库。标签写入 JSON，事件写入 CSV。
+Windows 界面采用标准 Material 3 和 Material 内置色板。标签写入 JSON，事件写入 CSV，兼容原版数据；不需要 Web 服务。
 
 ## 开发环境
 
-```powershell
-conda env create --prefix ./.conda --file environment.yml
-conda activate ./.conda
-python -m daymark
-```
-
-也可以直接运行 `./.conda/python.exe -m daymark`，无须激活环境。当前机器的环境已经创建在 `E:\Workspace\Daymark\.conda`。
-
-Windows 上可以双击 `start.cmd` 打开软件；或者在 PowerShell 中运行 `./start.ps1`。
-
-如 PowerShell 的 Conda 初始化有问题，可以用 Miniconda 自带的 Python 调用 Conda：
+安装 Flutter stable（已验证 3.47.7 / Dart 3.13.5）及 Visual Studio 2022 的「使用 C++ 的桌面开发」工作负载。用 `flutter doctor -v` 检查 Windows 工具链。Flutter 插件链接需要 Windows 开发者模式或具备创建符号链接权限的终端。
 
 ```powershell
-& 'D:/Creation_Tool/Miniconda/python.exe' -m conda env create --prefix ./.conda --file environment.yml
+flutter pub get
+flutter run -d windows
+# 构建后双击 start.cmd，或运行 ./start.ps1
+flutter build windows --release
 ```
 
-## 首版范围
+本工作区的 SDK 位于被 Git 忽略的 `.tools/flutter/`。使用本地 SDK 时，将以上 `flutter` 替换为 `./.tools/flutter/bin/flutter.bat`，并设置 `$env:PUB_CACHE = Join-Path $PWD '.tools/pub-cache'`。本机未开启开发者模式，已在项目内使用 NTFS junction 建立两个插件链接；其他机器按 Flutter 官方环境要求配置即可。
+
+发行时复制整个 `build/windows/x64/runner/Release/` 目录，包含 DLL 和 Flutter 的 `data/` 资源；单独复制 EXE 不足以运行。独立发行版默认将用户记录保存在 EXE 旁的 `journal/`，也可传入 `--data-dir`。仓库启动脚本始终默认使用项目原有的 `data/`。
+
+## 功能
 
 - 任意层级的标签：新增、重命名、移动到其他父标签。
 - 手动记录事件的开始和结束时间，提供日历和小时、分钟选择器。
@@ -49,7 +46,7 @@ Windows 上可以双击 `start.cmd` 打开软件；或者在 PowerShell 中运�
 
 时间轴和明细同步显示选中状态：底色加深，明细文字加粗，时间轴显示边框。点击时间轴或明细的空白处、标题等其他区域可取消选中。滚动条采用无纹路的细滑块，标签树、轨迹和明细只在内容溢出时显示滚动条。
 
-列表中的「本日用时」只显示事件在选中日期内的时长。界面采用白底黑字，标签使用浅色区分。
+列表中的「本日用时」只显示事件在选中日期内的时长。界面采用 Material 3 浅色主题，标签使用 Material 内置浅色色板区分。
 
 删除标签前，必须先移走它的子标签和关联事件；这能避免历史记录失去分类。
 
@@ -78,46 +75,48 @@ Windows 上可以双击 `start.cmd` 打开软件；或者在 PowerShell 中运�
 
 CSV 列固定为 `id,title,tag_id,start,end,notes`。时间格式为 `2026-10-07T09:00:00`，新记录精确到分钟；空 `tag_id` 表示未分类。CSV 使用 UTF-8 BOM，便于 Excel 显示中文。标签 ID 稳定，改名和移动只修改标签文件。
 
-旧版数据可以直接读取，不会自动重写。已有秒数在只修改名称或分类时会保留。旧记录缺少结束时间时，列表显示「待补全」；补齐时间后才会显示在时间轴上。
+旧版数据可以直接读取，启动时同步派生空档。已有秒数在只修改名称或分类时会保留。旧记录缺少结束时间时，列表显示「待补全」；补齐时间后才会显示在时间轴上。
 
 保存采用同目录临时文件加原子替换。读取失败会显示错误并保留原文件，不会重建覆盖。不要在软件运行时手动修改数据；Excel 打开 CSV 时可能阻止保存，请先关闭文件。备份时关闭软件，复制整个 `data` 文件夹即可。
 
 可以指定另一个数据目录，方便分开工作日志或测试：
 
 ```powershell
-./.conda/python.exe -m daymark --data-dir ./another-journal
+./start.ps1 --data-dir ./another-journal
 ```
 
 ## 项目结构与验证
 
 ```text
-daymark/
-  __main__.py    启动入口与自定义数据目录
-  app.py         主界面、标签右键菜单和拖拽管理
-  dialogs.py     标签和事件编辑
-  inline.py      事件明细的单元格编辑
-  widgets.py     树状标签、日历和分钟级时间选择器
-  timeline.py    横向时间轴、缩放、提示、端点调整和整体拖拽
-  model.py       事件模型、跨天裁剪和重叠计算
-  storage.py     JSON/CSV 校验与原子保存
-  instance.py    数据目录的进程锁
-tests/          数据层和真实 Tk 窗口集成测试
+lib/
+  main.dart           启动、数据目录和应用生命周期
+  domain/             日历模型、并行分段、拖拽计算和快照历史
+  data/               JSON/CSV 校验、原子保存和进程锁
+  application/        串行事务控制器，统一草稿、事件和空档同步
+  ui/                 标签树、选择器、表格行内编辑、时间轴和主界面
+windows/              Flutter 官方 Windows 桌面宿主
+test/                 模型、存储、控制器和无窗口 Widget 交互回归
+test/fixtures/        原版导出的合成兼容样本
+tools/smoke_windows.ps1  私有非活动桌面的原生 Release 启动验证
 ```
 
-运行数据层测试（无需打开窗口）：
+运行格式化、静态检查和全部自动测试（Widget 测试不打开原生窗口）：
 
 ```powershell
-./.conda/python.exe -m unittest discover -s tests -p test_storage.py -v
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+git diff --check
 ```
 
-运行全部测试（Windows 界面测试在隐藏的独立桌面运行，不显示窗口、不抢占当前桌面的焦点；测试数据使用独立目录）：
+验证 Windows Release 的真实启动、CSV BOM / 空档同步、第二实例拒绝和退出释放锁（合成数据、不可激活的私有桌面）：
 
 ```powershell
-$env:DAYMARK_UI_TESTS = '1'
-./.conda/python.exe -m unittest discover -s tests -v
+flutter build windows --release
+./tools/smoke_windows.ps1
 ```
 
-界面测试仍使用真实 Tk 窗口，保留焦点、鼠标抓取和弹出选择器的交互验证。独立桌面随测试进程退出由 Windows 释放。独立桌面创建失败时，测试会报错并停止，不会改为在当前桌面打开窗口。其他平台跳过界面测试，数据层测试照常运行。
+原生检查需要 Windows 桌面会话，私有桌面创建失败时直接停止；不会切换桌面或回退到当前桌面。所有测试工件位于 `.test-artifacts/`，不读取个人数据。CI 在 Windows 上执行格式化、静态检查、测试和 Release 构建。
 
 测试覆盖标签关联保持、中文和换行 CSV、跨天与分段重叠显示、旧数据兼容、原子保存失败、损坏数据保护、右键和 Del 删除、拖拽操作、树状/日期/时间选择、窗口布局和单实例锁。交互回归测试通过鼠标按下/释放、键盘和滚轮事件验证单元格编辑、备注、同步选中与取消、弹窗关闭后的焦点恢复、时间轴缩放、端点调整和保持时长的整段移动，以及取消和失败保存后的数据保持。
 

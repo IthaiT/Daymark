@@ -2,39 +2,38 @@
 
 ## Project Structure & Module Organization
 
-`daymark/` contains the Python desktop application. `app.py`, `dialogs.py`, and `timeline.py` implement the Tkinter interface; `inline.py` edits event-table cells; `widgets.py` provides tree, calendar, and time pickers; `model.py` handles time calculations; `storage.py` validates and persists records; `instance.py` locks the data directory; `__main__.py` starts the application. Keep calculations and persistence independent of UI code.
+`lib/` contains the Flutter / Dart Windows desktop application. `domain/` implements local calendar models, overlap segmentation, timeline drag calculations, Unicode compatibility and snapshot history. `data/` validates and persists JSON/CSV and locks the data directory. `application/journal_controller.dart` serializes mutations and combines event changes with derived-gap synchronization in one atomic write. `ui/` implements the tag tree, pickers, dialogs, event table, inline editing and timeline. Keep calculations and persistence independent of UI code.
 
-`tests/` contains storage and desktop integration tests. `environment.yml` defines the Conda environment; `start.cmd` and `start.ps1` are Windows launchers. There is no separate asset directory. Runtime `data/` and generated `.test-artifacts/` are ignored by Git.
+`windows/` is the standard Flutter desktop host. `test/` contains unit and headless Widget interaction tests; `test/fixtures/` contains synthetic Python-baseline compatibility samples. `tools/smoke_windows.ps1` runs the built application on an inactive private Windows desktop. `start.cmd` and `start.ps1` launch the Release build. Runtime `/data/`, `.test-artifacts/`, SDKs, caches and build outputs are ignored by Git.
 
 ## Build, Test, and Development Commands
 
-Run these PowerShell commands from the repository root:
+Run from the repository root with Flutter stable (verified 3.47.7 / Dart 3.13.5) and the Visual Studio C++ Windows toolchain:
 
 ```powershell
-# Create the Python 3.12 / Tk environment.
-conda env create --prefix ./.conda --file environment.yml
-# Launch directly without activating Conda.
-./.conda/python.exe -m daymark
-# Run storage tests without opening windows.
-./.conda/python.exe -m unittest discover -s tests -p test_storage.py -v
-# Run all tests; real Tk windows use an inactive Windows desktop.
-$env:DAYMARK_UI_TESTS = '1'
-./.conda/python.exe -m unittest discover -s tests -v
+flutter pub get
+flutter run -d windows
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build windows --release
+./tools/smoke_windows.ps1
+git diff --check
 ```
 
-No compilation or packaging step is required.
+For this workspace's ignored SDK, use `./.tools/flutter/bin/flutter.bat` and `./.tools/flutter/bin/cache/dart-sdk/bin/dart.exe`; set `$env:PUB_CACHE = Join-Path $PWD '.tools/pub-cache'`. Plugin symlinks require Windows Developer Mode or suitable link permissions. This workstation uses project-local NTFS junctions instead; never modify system settings without explicit authorization. Distribute the entire Release directory, not just its EXE.
 
 ## Coding Style & Naming Conventions
 
-Use four-space indentation, `snake_case` functions and variables, `PascalCase` classes, and `UPPER_CASE` constants. Prefer standard-library modules, type hints for models, and short docstrings. Keep user-facing text in Chinese. Update `environment.yml` if dependencies change.
+Use `dart format`, `flutter_lints`, strict analyzer types, `lowerCamelCase` members, `UpperCamelCase` types and `snake_case.dart` filenames. Keep user-facing text in Chinese. Use standard Material 3 components and Material color swatches instead of custom palettes. Prefer immutable domain values, standard libraries and short docstrings. Update `pubspec.yaml` and `pubspec.lock` when dependencies change.
 
-No formatter or linter is configured. Follow neighboring code and run `git diff --check`. `.gitattributes` specifies LF except for CMD launchers, which use CRLF.
+`.gitattributes` specifies LF except for CMD launchers, which use CRLF. `lib/domain/unicode_data.dart` contains a compressed Unicode 15.0 snapshot matching original Python 3.12 casefold and printable classification. Do not casually replace it with Dart lowercasing or UTF-16 ordering.
 
 ## Testing Guidelines
 
-Use `unittest`, naming files `test_*.py` and methods `test_<behavior>`. Add regression tests for changed persistence or time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility, and failed writes. Test right-click, drag, picker, and inline-edit interactions when changing the UI. Use isolated temporary directories under `.test-artifacts/`.
+Use Flutter `test` and `testWidgets`, naming files `*_test.dart`. Add regression tests for changed persistence and time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility and failed writes. Test right-click, drag, pickers and inline editing when changing the UI. Use isolated temporary directories under `.test-artifacts/`; never test against personal `/data/`.
 
-UI tests require Windows, a desktop session, and `DAYMARK_UI_TESTS=1`; otherwise they are skipped. They attach the test thread to a private inactive desktop before creating Tk windows, so focus and grabs cannot disturb the user's desktop. The desktop lives for the test process and Windows releases it on process exit, together with Tk/Windows helper windows. Never activate that desktop or fall back to opening test windows on the active desktop. Run affected tests before committing. No numeric coverage threshold is configured.
+Widget tests run without native windows. The Release smoke test requires Windows and a desktop session. It creates a private inactive desktop without desktop-switch access and owns every process it launches. Never activate that desktop or fall back to opening test windows on the active desktop. Creation failures must stop validation. Run affected tests before committing; no numeric coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
 
@@ -44,6 +43,6 @@ PR descriptions should explain the problem, resulting behavior, and validation p
 
 ## Data Safety
 
-Preserve stable tag IDs, JSON versioning, CSV columns, and UTF-8 BOM encoding for CSV. Retain atomic writes, single-instance locking, and corrupt-file protection. Use local timestamps consistently. Never commit personal records or test against the user's live `data/` directory.
+Preserve stable tag IDs, JSON version 1, the original six CSV columns and UTF-8 BOM. Retain flushed same-directory atomic replacement, `.daymark.lock` first-byte Windows locking and corrupt-file protection. Keep the lock reachable for the entire Release application's lifecycle. Preserve local calendar fields without timezone conversion; UTC `DateTime` values are only zone-neutral containers for these fields. Never commit personal records or test against the user's live `data/` directory.
 
-Events may use any tag level or remain unclassified. Adding or moving child tags must preserve existing event-to-tag IDs.
+Events may use any tag level or remain unclassified. Tag moves must preserve event associations. Retain legacy seconds and incomplete records; derived `undefined:` IDs and renamed gaps must remain compatible. Drafts stay in memory and disappear on date change or exit. Save failures must retain prior persisted state and the user's editing input.

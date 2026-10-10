@@ -1,1 +1,0 @@
-"""Daymark regression tests."""
