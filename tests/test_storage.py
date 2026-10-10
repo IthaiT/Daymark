@@ -61,7 +61,7 @@ class StorageTests(unittest.TestCase):
                 self.assertEqual(moved.end - moved.start, end - start)
                 self.assertEqual((moved.id, moved.title, moved.tag_id, moved.notes), (event.id, event.title, event.tag_id, event.notes))
 
-    def test_undefined_events_fill_internal_gaps_day_edges_and_merge_overlaps(self):
+    def test_undefined_events_fill_internal_gaps_day_start_and_merge_overlaps(self):
         day = date(2026, 10, 7)
         events = [self.event("a", end="2026-10-07T11:00:00"),
                   self.event("b", start="2026-10-07T10:00:00", end="2026-10-07T12:00:00"),
@@ -71,13 +71,12 @@ class StorageTests(unittest.TestCase):
         gaps = undefined_events(events, day)
         self.assertEqual([(gap.start, gap.end, gap.tag_id) for gap in gaps],
                          [(datetime(2026, 10, 7, 0), datetime(2026, 10, 7, 9), None),
-                          (datetime(2026, 10, 7, 12), datetime(2026, 10, 7, 13), None),
-                          (datetime(2026, 10, 7, 15), datetime(2026, 10, 8, 0), None)])
+                          (datetime(2026, 10, 7, 12), datetime(2026, 10, 7, 13), None)])
         self.assertEqual(gaps, undefined_events(list(reversed(events)), day))
         self.assertFalse(undefined_events([], day))
+        # Only the leading span fills; time after the last event stays blank.
         self.assertEqual([(gap.start, gap.end) for gap in undefined_events(events[:1], day)],
-                         [(datetime(2026, 10, 7, 0), datetime(2026, 10, 7, 9)),
-                          (datetime(2026, 10, 7, 11), datetime(2026, 10, 8, 0))])
+                         [(datetime(2026, 10, 7, 0), datetime(2026, 10, 7, 9))])
 
     def test_undefined_boundaries_follow_neighbors_with_stable_identity(self):
         day = date(2026, 10, 7)

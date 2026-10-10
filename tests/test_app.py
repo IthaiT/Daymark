@@ -154,26 +154,25 @@ class AppTests(unittest.TestCase):
                          Event(gap.id, "未定义", None, first.end, second.start))
         return first, second, gap
 
-    def test_day_edges_appear_as_persisted_undefined_gaps(self):
+    def test_day_start_appears_as_persisted_undefined_gap_without_a_trailing_one(self):
         first, second, gap = self.events_with_gap()
-        edges = sorted((event for event in self.app.undefined.values() if event.id != gap.id),
-                       key=lambda event: event.start)
-        self.assertEqual([(event.start, event.end) for event in edges],
-                         [(datetime(2026, 10, 10, 0), first.start),
-                          (second.end, datetime(2026, 10, 11, 0))])
+        [head] = [event for event in self.app.undefined.values() if event.id != gap.id]
+        self.assertEqual((head.start, head.end), (datetime(2026, 10, 10, 0), first.start))
+        # Time after the last event never turns into an undefined gap.
+        self.assertFalse([event for event in self.app.undefined.values() if event.start >= second.end])
         restored = Store(self.store.directory).events
-        self.assertEqual({event.id for event in edges},
-                         {key for key in restored if key.startswith("undefined:")} - {gap.id})
+        self.assertEqual({key for key in restored if key.startswith("undefined:")},
+                         {head.id, gap.id})
         # Naming the leading span survives restarts and edge moves keep its identity.
-        self.app.rename_event(edges[0].id)
+        self.app.rename_event(head.id)
         self.app.update()
         self.fill(self.app.cell_editor.entry, "睡觉")
         self.type_key("Return")
-        self.assertEqual(Store(self.store.directory).events[edges[0].id].title, "睡觉")
+        self.assertEqual(Store(self.store.directory).events[head.id].title, "睡觉")
         self.finish_resize(self.begin_resize(first.id, "start", first.start + timedelta(minutes=30)))
-        row = Store(self.store.directory).events[edges[0].id]
+        row = Store(self.store.directory).events[head.id]
         self.assertEqual((row.title, row.end), ("睡觉", first.start + timedelta(minutes=30)))
-        # Days without any covered interval stay blank instead of filling 24 hours.
+        # Days without any covered interval stay blank instead of filling hours.
         self.app.day = date(2026, 10, 20)
         self.app.refresh()
         self.app.update()
@@ -219,12 +218,11 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirmation:
             self.app.delete_events()
             confirmation.assert_not_called()
-        # The remaining draft leaves only its day-boundary rows behind.
+        # The remaining draft leaves only its leading row behind.
         restored = Store(self.store.directory).events
         self.assertTrue(all(key.startswith("undefined:") for key in restored))
-        self.assertEqual(sorted((event.start, event.end) for event in restored.values()),
-                         [(datetime(2026, 10, 10, 0), second.start),
-                          (second.end, datetime(2026, 10, 11, 0))])
+        self.assertEqual([(event.start, event.end) for event in restored.values()],
+                         [(datetime(2026, 10, 10, 0), second.start)])
         self.assertEqual(set(self.app.drafts), {second.id})
         self.assertEqual({key for key in self.app.events_tree.get_children()
                           if not key.startswith("undefined:")}, {second.id})
