@@ -7,3 +7,11 @@ data/
 .pytest_cache/
 *.tmp
 *.log
+.tools/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+windows/flutter/ephemeral/
+.idea/
+*.iml
