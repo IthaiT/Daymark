@@ -234,6 +234,20 @@ class Store:
         self.events = events
         self._notify_events_change(before)
 
+    def save_new_events(self, events: list[Event]):
+        """Persist derived undefined gaps so unclassified time survives export."""
+        pending = [event for event in events if event.id not in self.events]
+        if not pending:
+            return
+        merged = dict(self.events)
+        for event in pending:
+            self.validate_event(event)
+            merged[event.id] = event
+        before = self.events
+        self._write_events(merged)
+        self.events = merged
+        self._notify_events_change(before)
+
     def delete_events(self, event_ids: list[str]):
         before = self.events
         events = {key: value for key, value in self.events.items() if key not in event_ids}

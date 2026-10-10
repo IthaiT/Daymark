@@ -193,6 +193,8 @@ class App(tk.Tk):
                        for event_id, event in self.drafts.items()}
         selected = self.events_tree.selection()
         events = self.visible_events()
+        self._persist_gaps(undefined_events(events, self.day))
+        events = self.visible_events()
         gaps = undefined_events(events, self.day)
         self.undefined = {event.id: replace(event, title=self.undefined_names.get(event.id, event.title))
                           for event in gaps}
@@ -215,6 +217,22 @@ class App(tk.Tk):
         self.date_picker.value.set(self.day.isoformat())
         self.weekday_label.configure(text="星期" + "一二三四五六日"[self.day.weekday()])
         self.draw_timeline()
+
+    def _persist_gaps(self, gaps):
+        """Write undefined gaps into the event table; keep derived display on failure."""
+        pending = [replace(gap, title=self.undefined_names.get(gap.id, gap.title))
+                   for gap in gaps if gap.id not in self.store.events]
+        if not pending:
+            return
+        # Automatic bookkeeping must not enter the undo history: undoing it
+        # would only trigger the same materialization again on refresh.
+        self.history.suspended = True
+        try:
+            if self.try_action(lambda: self.store.save_new_events(pending)):
+                for gap in pending:
+                    self.undefined_names.pop(gap.id, None)
+        finally:
+            self.history.suspended = False
 
     def visible_events(self):
         events = self.store.events_on(self.day)
