@@ -1,23 +1,23 @@
-"""Snapshot-based undo/redo history over the persisted event table."""
+"""Snapshot-based undo/redo history over the editor state."""
 
 
 class History:
-    """Reversible snapshots of the whole event table.
+    """Reversible snapshots of the complete undoable editor state.
 
-    Store mutators report each successful write with the table before and
-    after the change. Undo swaps the current table for the previous snapshot
-    and keeps the undone change available for redo.
+    The application captures its state (persisted events, in-progress drafts
+    and pending gap titles) before each user action and records the pair
+    after the action completes. Undo swaps the current state for the previous
+    snapshot and keeps the undone change available for redo.
     """
 
     def __init__(self, limit: int = 100):
         self.limit = limit
-        self.suspended = False
         self._undo = []  # (before, after) snapshot pairs, oldest first.
         self._redo = []
 
     def record(self, before, after):
         """Remember one change; a new edit discards the redo branch."""
-        if self.suspended or before == after:
+        if before == after:
             return
         self._undo.append((before, after))
         if len(self._undo) > self.limit:
@@ -47,12 +47,7 @@ class History:
         return True
 
     def _apply(self, restore, snapshot) -> bool:
-        # Restores must not be recorded as fresh changes.
-        self.suspended = True
-        try:
-            return bool(restore(snapshot))
-        finally:
-            self.suspended = False
+        return bool(restore(snapshot))
 
     def can_undo(self) -> bool:
         return bool(self._undo)

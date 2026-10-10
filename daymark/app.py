@@ -21,7 +21,6 @@ class App(tk.Tk):
         super().__init__()
         self.store = store
         self.history = History()
-        self.store.on_events_change = self.history.record
         self.title("Daymark")
         self.configure(bg="white")
         width, height = min(1360, self.winfo_screenwidth() - 80), min(900, self.winfo_screenheight() - 64)
@@ -224,15 +223,18 @@ class App(tk.Tk):
                    for gap in gaps if gap.id not in self.store.events]
         if not pending:
             return
-        # Automatic bookkeeping must not enter the undo history: undoing it
+        # Automatic bookkeeping never enters the undo history: undoing it
         # would only trigger the same materialization again on refresh.
-        self.history.suspended = True
-        try:
-            if self.try_action(lambda: self.store.save_new_events(pending)):
-                for gap in pending:
-                    self.undefined_names.pop(gap.id, None)
-        finally:
-            self.history.suspended = False
+        if self.try_action(lambda: self.store.save_new_events(pending)):
+            for gap in pending:
+                self.undefined_names.pop(gap.id, None)
+
+    def _capture(self):
+        """Complete undoable state: persisted events, drafts and gap titles."""
+        return (self.store.events, dict(self.drafts), dict(self.undefined_names))
+
+    def _record(self, before):
+        self.history.record(before, self._capture())
 
     def visible_events(self):
         events = self.store.events_on(self.day)
@@ -470,20 +472,24 @@ class App(tk.Tk):
     def add_event(self, start=None):
         if not self.commit_cell():
             return "break"
+        before = self._capture()
         left, right = default_event_interval(self.day, start)
         event = Event(uuid4().hex, "", None, left, right)
         self.drafts[event.id] = event
         event_id = event.id
         self.refresh()
+        self._record(before)
         self.select_event(event_id)
         self.update_idletasks()
         self.edit_cell(event_id, "title")
         return "break"
 
     def discard_draft(self, event_id):
+        before = self._capture()
         self.cancel_cell()
         self.drafts.pop(event_id, None)
         self.refresh()
+        self._record(before)
 
     def select_event(self, event_id):
         if event_id is None:
@@ -500,7 +506,12 @@ class App(tk.Tk):
 
     def edit_event(self, event_id):
         if self.commit_cell() and self.grab_current() is None and event_id in self.store.events:
-            EventDialog(self, self.store, self.refresh, self.day, self.store.events[event_id])
+            before = self._capture()
+            EventDialog(self, self.store, lambda: self._dialog_saved(before), self.day, self.store.events[event_id])
+
+    def _dialog_saved(self, before):
+        self.refresh()
+        self._record(before)
 
     def rename_event(self, event_id):
         if self.select_event(event_id):
@@ -508,12 +519,15 @@ class App(tk.Tk):
             self.edit_cell(event_id, "title", self.timeline.canvas)
 
     def update_event_time(self, event):
+        before = self._capture()
         if event.id in self.drafts:
             self.drafts[event.id] = event
             saved = True
         else:
             saved = self.try_action(lambda: self.store.save_event(event))
         self.refresh()
+        if saved:
+            self._record(before)
         return saved
 
     def event_double_click(self, pointer):
@@ -543,6 +557,7 @@ class App(tk.Tk):
         self.cell_editor.show(bounds)
 
     def save_cell(self, editor, value):
+        before = self._capture()
         current = self.get_event(editor.event_id)
         field = "tag_id" if editor.column == "tag" else editor.column
         if field in ("start", "end") and (original := getattr(current, field)) is not None:
@@ -570,6 +585,7 @@ class App(tk.Tk):
             return False
         self.cancel_cell()
         self.refresh()
+        self._record(before)
         self.select_event(event.id)
         return True
 
@@ -657,6 +673,7 @@ class App(tk.Tk):
         return "break"
 
     def delete_events(self):
+        before = self._capture()
         selected = list(self.events_tree.selection())
         self.cancel_cell()
         saved = [event_id for event_id in selected if event_id in self.store.events]
@@ -665,9 +682,10 @@ class App(tk.Tk):
         for event_id in selected:
             self.drafts.pop(event_id, None)
         self.refresh()
+        self._record(before)
 
     def undo(self):
-        """Ctrl+Z: revert the last persisted event change in both panels."""
+        """Ctrl+Z: revert the last change, including draft creation and edits."""
         if not self.commit_cell():
             return
         self.history.undo(self.restore_history)
@@ -678,11 +696,14 @@ class App(tk.Tk):
             return
         self.history.redo(self.restore_history)
 
-    def restore_history(self, events):
-        if self.try_action(lambda: self.store.restore_events(events)):
-            self.refresh()
-            return True
-        return False
+    def restore_history(self, snapshot):
+        events, drafts, undefined_names = snapshot
+        if not self.try_action(lambda: self.store.restore_events(events)):
+            return False
+        self.drafts = dict(drafts)
+        self.undefined_names = dict(undefined_names)
+        self.refresh()
+        return True
 
     def try_action(self, action):
         try:

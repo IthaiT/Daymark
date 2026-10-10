@@ -39,8 +39,6 @@ class Store:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.tags = self._read_tags()
         self.events = self._read_events()
-        # Optional observer invoked as (before, after) after each successful write.
-        self.on_events_change = None
         # Read and validate all existing files before initializing missing ones.
         if not self.tags_path.exists():
             self._write_tags(self.tags)
@@ -222,17 +220,11 @@ class Store:
         self._write_tags(tags)
         self.tags = tags
 
-    def _notify_events_change(self, before: dict[str, Event]):
-        if self.on_events_change is not None:
-            self.on_events_change(before, self.events)
-
     def save_event(self, event: Event):
         self.validate_event(event)
-        before = self.events
         events = {**self.events, event.id: event}
         self._write_events(events)
         self.events = events
-        self._notify_events_change(before)
 
     def save_new_events(self, events: list[Event]):
         """Persist derived undefined gaps so unclassified time survives export."""
@@ -243,28 +235,22 @@ class Store:
         for event in pending:
             self.validate_event(event)
             merged[event.id] = event
-        before = self.events
         self._write_events(merged)
         self.events = merged
-        self._notify_events_change(before)
 
     def delete_events(self, event_ids: list[str]):
-        before = self.events
         events = {key: value for key, value in self.events.items() if key not in event_ids}
         self._write_events(events)
         self.events = events
-        self._notify_events_change(before)
 
     def reassign_events(self, event_ids: list[str], tag_id: str | None):
         if tag_id is not None and tag_id not in self.tags:
             raise ValueError("所选标签不存在。")
-        before = self.events
         events = dict(self.events)
         for event_id in event_ids:
             events[event_id] = replace(events[event_id], tag_id=tag_id)
         self._write_events(events)
         self.events = events
-        self._notify_events_change(before)
 
     def restore_events(self, events: dict[str, Event]) -> bool:
         """Undo/redo entry point: bulk-replace, unclassifying tags deleted since."""
@@ -272,10 +258,8 @@ class Store:
                   for event in events.values()}
         for event in events.values():
             self.validate_event(event, allow_incomplete=True)
-        before = self.events
         self._write_events(events)
         self.events = events
-        self._notify_events_change(before)
         return True
 
     def events_on(self, day: date) -> list[Event]:
