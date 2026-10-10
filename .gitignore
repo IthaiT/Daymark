@@ -2,7 +2,7 @@
 .conda-pkgs/
 __pycache__/
 *.py[cod]
-data/
+/data/
 .test-artifacts/
 .pytest_cache/
 *.tmp
