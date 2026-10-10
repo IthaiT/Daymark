@@ -148,11 +148,37 @@ class AppTests(unittest.TestCase):
         self.store.save_event(second)
         self.app.refresh()
         self.app.update()
-        gap = next(iter(self.app.undefined.values()))
+        gap = next(event for event in self.app.undefined.values() if event.start == first.end)
         # The derived gap is mirrored into the CSV as a prefixed unclassified row.
         self.assertEqual(Store(self.store.directory).events[gap.id],
                          Event(gap.id, "未定义", None, first.end, second.start))
         return first, second, gap
+
+    def test_day_edges_appear_as_persisted_undefined_gaps(self):
+        first, second, gap = self.events_with_gap()
+        edges = sorted((event for event in self.app.undefined.values() if event.id != gap.id),
+                       key=lambda event: event.start)
+        self.assertEqual([(event.start, event.end) for event in edges],
+                         [(datetime(2026, 10, 10, 0), first.start),
+                          (second.end, datetime(2026, 10, 11, 0))])
+        restored = Store(self.store.directory).events
+        self.assertEqual({event.id for event in edges},
+                         {key for key in restored if key.startswith("undefined:")} - {gap.id})
+        # Naming the leading span survives restarts and edge moves keep its identity.
+        self.app.rename_event(edges[0].id)
+        self.app.update()
+        self.fill(self.app.cell_editor.entry, "睡觉")
+        self.type_key("Return")
+        self.assertEqual(Store(self.store.directory).events[edges[0].id].title, "睡觉")
+        self.finish_resize(self.begin_resize(first.id, "start", first.start + timedelta(minutes=30)))
+        row = Store(self.store.directory).events[edges[0].id]
+        self.assertEqual((row.title, row.end), ("睡觉", first.start + timedelta(minutes=30)))
+        # Days without any covered interval stay blank instead of filling 24 hours.
+        self.app.day = date(2026, 10, 20)
+        self.app.refresh()
+        self.app.update()
+        self.assertFalse(self.app.undefined)
+        self.assertFalse(self.app.timeline.undefined)
 
     def test_multiple_unnamed_drafts_can_move_and_be_named_independently(self):
         self.app.day = date(2000, 1, 1)
@@ -193,10 +219,15 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirmation:
             self.app.delete_events()
             confirmation.assert_not_called()
-        # The remaining draft leaves no derivable gap, so no rows survive either.
-        self.assertFalse(Store(self.store.directory).events)
+        # The remaining draft leaves only its day-boundary rows behind.
+        restored = Store(self.store.directory).events
+        self.assertTrue(all(key.startswith("undefined:") for key in restored))
+        self.assertEqual(sorted((event.start, event.end) for event in restored.values()),
+                         [(datetime(2026, 10, 10, 0), second.start),
+                          (second.end, datetime(2026, 10, 11, 0))])
         self.assertEqual(set(self.app.drafts), {second.id})
-        self.assertEqual(self.app.events_tree.get_children(), (second.id,))
+        self.assertEqual({key for key in self.app.events_tree.get_children()
+                          if not key.startswith("undefined:")}, {second.id})
 
     def test_undefined_gap_follows_drag_and_delete_while_staying_derived(self):
         first, second, gap = self.events_with_gap()
@@ -213,8 +244,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.events_tree.item(gap.id, "values")[-1], "30 分钟")
         self.app.select_event(second.id)
         self.app.delete_events()
-        self.assertFalse(self.app.undefined)
-        self.assertFalse(self.app.timeline.undefined)
+        self.assertNotIn(gap.id, self.app.undefined)
+        self.assertNotIn(gap.id, self.app.timeline.undefined)
         self.assertNotIn(gap.id, Store(self.store.directory).events)
 
     def test_undefined_gap_name_survives_restart_and_follows_boundaries(self):
@@ -240,18 +271,21 @@ class AppTests(unittest.TestCase):
         self.store.save_event(second)
         self.app.refresh()
         self.app.update()
-        gap = next(iter(self.app.undefined.values()))
+        gap = next(event for event in self.app.undefined.values() if event.start == first.end)
         self.assertIn(gap.id, Store(self.store.directory).events)
         self.app.add_event(first.end + timedelta(minutes=30))
         self.app.update()
         middle = self.latest_draft()
         restored = Store(self.store.directory).events
         self.assertNotIn(gap.id, restored)
-        halves = sorted((event for event in restored.values() if event.id.startswith("undefined:")),
+        halves = sorted((event for event in restored.values()
+                         if event.id.startswith("undefined:")
+                         and event.start >= first.end and event.end <= second.start),
                         key=lambda event: event.start)
         self.assertEqual([(half.start, half.end) for half in halves],
                          [(first.end, middle.start), (middle.end, second.start)])
-        self.assertEqual(set(self.app.undefined), {half.id for half in halves})
+        self.assertEqual(set(self.app.undefined),
+                         {key for key in restored if key.startswith("undefined:")})
 
     def test_only_assigning_a_tag_defines_an_automatic_gap(self):
         first, second, gap = self.events_with_gap()
@@ -264,10 +298,10 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.store.events_path.read_bytes(), original)
         editor = self.click_cell(gap.id, "tag")
         self.choose_tag(editor.input, "embedded")
-        self.assertFalse(self.app.undefined)
+        self.assertNotIn(gap.id, self.app.undefined)
         self.assertFalse(self.app.drafts)
-        recorded = next(event for key, event in self.store.events.items() if key not in (first.id, second.id))
-        self.assertEqual((recorded.tag_id, recorded.start, recorded.end), ("embedded", first.end, second.start))
+        recorded = next(event for event in self.store.events.values() if event.tag_id == "embedded")
+        self.assertEqual((recorded.start, recorded.end), (first.end, second.start))
         self.assertEqual(recorded.title, "未定义")
         self.assertEqual(Store(self.store.directory).events[recorded.id], recorded)
 
@@ -283,8 +317,10 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.undefined[gap.id].tag_id, None)
         self.assertEqual(self.store.events_path.read_bytes(), original)
         self.type_key("Return")
-        self.assertFalse(self.app.undefined)
-        self.assertEqual(len(Store(self.store.directory).events), 3)
+        self.assertNotIn(gap.id, self.app.undefined)
+        recorded = next(event for event in Store(self.store.directory).events.values()
+                        if event.tag_id == "linux" and event.title == "未定义")
+        self.assertEqual((recorded.start, recorded.end), (first.end, second.start))
 
     def test_undefined_appearance_depends_on_tag_instead_of_name(self):
         event = self.cell_event()
@@ -400,7 +436,8 @@ class AppTests(unittest.TestCase):
         self.app.event_generate("<Control-z>")
         self.app.update()
         self.assertEqual(Store(self.store.directory).events[event.id], event)
-        self.assertEqual(self.app.events_tree.get_children(), (event.id,))
+        self.assertEqual([key for key in self.app.events_tree.get_children()
+                          if not key.startswith("undefined:")], [event.id])
         self.assertTrue(self.app.timeline.canvas.find_withtag(f"event:{event.id}"))
 
     def test_undo_reverts_timeline_drag_and_redo_reapplies_it(self):
@@ -665,7 +702,8 @@ class AppTests(unittest.TestCase):
         self.app.day = date(2000, 1, 1)
         self.app.refresh()
         for shortcut in (False, True):
-            original = self.store.events_path.read_bytes()
+            regular_before = {key for key in Store(self.store.directory).events
+                              if not key.startswith("undefined:")}
             with patch("daymark.app.EventDialog") as dialog:
                 if shortcut:
                     self.app.events_tree.focus_force()
@@ -679,7 +717,11 @@ class AppTests(unittest.TestCase):
             self.assertEqual(self.app.cell_editor.event_id, draft.id)
             self.assertEqual(self.app.cell_editor.entry.get(), "")
             self.assertEqual((draft.start.hour, draft.end.hour), (9, 10))
-            self.assertEqual(self.store.events_path.read_bytes(), original)
+            # Drafts stay in memory; only derived boundary rows may hit the disk.
+            restored = Store(self.store.directory).events
+            self.assertNotIn(draft.id, restored)
+            self.assertEqual({key for key in restored if not key.startswith("undefined:")},
+                             regular_before)
             self.fill(self.app.cell_editor.entry, "直接新增")
             self.type_key("Return")
             self.assertIsNone(self.latest_draft())
@@ -691,7 +733,6 @@ class AppTests(unittest.TestCase):
         self.app.refresh()
         self.click(self.app.add_event_button)
         first = self.latest_draft()
-        original = self.store.events_path.read_bytes()
         self.finish_resize(self.begin_move(first.id, 60))
         self.assertEqual(self.app.drafts[first.id].start, first.start + timedelta(hours=1))
         self.click(self.app.add_event_button)
@@ -704,7 +745,8 @@ class AppTests(unittest.TestCase):
         self.type_key("Escape")
         self.assertFalse(self.app.drafts)
         self.assertFalse(self.app.events_tree.get_children())
-        self.assertEqual(self.store.events_path.read_bytes(), original)
+        # Discarding every draft also removes the rows it had derived.
+        self.assertFalse(Store(self.store.directory).events)
 
     def test_draft_failed_save_keeps_input_and_tab_moves_to_next_cell(self):
         self.click(self.app.add_event_button)
@@ -742,7 +784,8 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.latest_draft().id, draft.id)
         self.assertIsNone(self.latest_draft().tag_id)
         self.assertEqual(self.app.events_tree.item(draft.id, "values")[3], "未分类")
-        self.assertFalse(self.store.events)
+        # The draft was never saved; only its derived boundary rows exist.
+        self.assertTrue(all(key.startswith("undefined:") for key in self.store.events))
 
     def test_double_click_empty_table_adds_a_draft_and_modifier_clicks_keep_multiselection(self):
         event = self.cell_event()
@@ -1501,7 +1544,8 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirm:
             menu.invoke(0)
             confirm.assert_not_called()
-        self.assertEqual(set(Store(self.store.directory).events), {"c"})
+        self.assertEqual({key for key in Store(self.store.directory).events
+                          if not key.startswith("undefined:")}, {"c"})
         self.assertIsNone(self.app.grab_current())
 
     def test_event_context_menu_targets_clicked_row_and_ignores_empty_space(self):
@@ -1516,13 +1560,15 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirm:
             menu.invoke(0)
             confirm.assert_not_called()
-        self.assertEqual(set(self.store.events), {"a"})
+        self.assertEqual({key for key in self.store.events
+                          if not key.startswith("undefined:")}, {"a"})
         self.app.update()
         with patch("tkinter.Menu.tk_popup") as post:
             tree.event_generate("<Button-3>", x=100, y=tree.winfo_height() - 10)
             self.app.update()
             post.assert_not_called()
-        self.assertEqual(set(self.store.events), {"a"})
+        self.assertEqual({key for key in self.store.events
+                          if not key.startswith("undefined:")}, {"a"})
 
     def drag(self, source, target):
         tree = self.app.tags_tree
@@ -1550,7 +1596,8 @@ class AppTests(unittest.TestCase):
         self.app.refresh()
         self.app.update()
         event = next(iter(self.store.events.values()))
-        self.assertEqual(self.app.events_tree.get_children(), (event.id,))
+        self.assertEqual([key for key in self.app.events_tree.get_children()
+                          if not key.startswith("undefined:")], [event.id])
         self.assertTrue(self.app.timeline.canvas.find_withtag(f"event:{event.id}"))
         self.assertEqual(self.app.events_tree.item(event.id, "values")[-1], "1 小时 30 分")
         self.assertEqual((event.start.second, event.end.second), (0, 0))
@@ -1575,7 +1622,8 @@ class AppTests(unittest.TestCase):
         self.app.refresh()
         self.app.tags_tree.selection_set("work")
         self.app.update()
-        self.assertEqual(set(self.app.events_tree.get_children()), {"late", "other"})
+        self.assertEqual({key for key in self.app.events_tree.get_children()
+                          if not key.startswith("undefined:")}, {"late", "other"})
         self.assertTrue(self.app.timeline.canvas.find_withtag("event:other"))
         self.assertEqual(self.app.events_tree.item("late", "values")[-1], "30 分钟")
         self.app.timeline.on_select("late")

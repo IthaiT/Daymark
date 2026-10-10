@@ -76,15 +76,33 @@ def move_event_on_day(event: Event, day: date, minutes: int) -> Event:
 
 
 def undefined_events(events: list[Event], day: date) -> list[Event]:
-    """Derive gaps between the union of completed intervals, without storing them."""
+    """Derive gaps between the union of completed intervals, without storing them.
+
+    The day's leading and trailing spans count as gaps too, so boundary time can
+    be named like any other gap; days without a covered interval stay blank.
+    """
     intervals = sorted((*interval, event.id) for event in events if (interval := event.interval_on(day)))
+    origin = datetime.combine(day, time.min)
+    limit = datetime.max if day == date.max else origin + timedelta(days=1)
+
+    def boundary_gap(kind: str, start: datetime, end: datetime) -> Event:
+        # Anchored to the day alone: adding or moving edge events resizes the
+        # row instead of replacing it, so custom titles survive.
+        key = uuid5(NAMESPACE_URL, repr(("daymark:undefined", kind, day.isoformat()))).hex
+        return Event(f"{UNDEFINED_ID_PREFIX}{key}", "未定义", None, start, end)
+
     result, end, previous_id = [], None, None
     for left, right, event_id in intervals:
-        if end is not None and left > end:
+        if end is None:
+            if left > origin:
+                result.append(boundary_gap("head", origin, left))
+        elif left > end:
             key = uuid5(NAMESPACE_URL, repr(("daymark:undefined", previous_id, event_id))).hex
             result.append(Event(f"{UNDEFINED_ID_PREFIX}{key}", "未定义", None, end, left))
         if end is None or right >= end:
             end, previous_id = right, event_id
+    if intervals and end < limit:
+        result.append(boundary_gap("tail", end, limit))
     return result
 
 
