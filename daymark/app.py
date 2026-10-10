@@ -7,6 +7,7 @@ from tkinter import messagebox, ttk
 from uuid import uuid4
 
 from .dialogs import EventDialog, TagDialog
+from .history import History
 from .inline import CellEditor
 from .model import Event, default_event_interval, duration_text, undefined_events
 from .timeline import Timeline, tag_color
@@ -19,6 +20,8 @@ class App(tk.Tk):
     def __init__(self, store):
         super().__init__()
         self.store = store
+        self.history = History()
+        self.store.on_events_change = self.history.record
         self.title("Daymark")
         self.configure(bg="white")
         width, height = min(1360, self.winfo_screenwidth() - 80), min(900, self.winfo_screenheight() - 64)
@@ -48,6 +51,10 @@ class App(tk.Tk):
         self.bind("<Control-n>", lambda _: self.add_event() if self.grab_current() is None else None)
         self.bind("<Control-Left>", lambda _: self.shift_day(-1) if self.grab_current() is None else None)
         self.bind("<Control-Right>", lambda _: self.shift_day(1) if self.grab_current() is None else None)
+        self.bind("<Control-z>", lambda _: self.undo() if self.grab_current() is None else None)
+        self.bind("<Control-Z>", lambda _: self.redo() if self.grab_current() is None else None)
+        self.bind("<Control-y>", lambda _: self.redo() if self.grab_current() is None else None)
+        self.bind("<Control-Y>", lambda _: self.redo() if self.grab_current() is None else None)
         self.bind("<Button-1>", self.background_click)
         self.bind("<<PickerDismissed>>", self.picker_dismissed)
         self.bind("<Delete>", self.delete_key)
@@ -640,6 +647,24 @@ class App(tk.Tk):
         for event_id in selected:
             self.drafts.pop(event_id, None)
         self.refresh()
+
+    def undo(self):
+        """Ctrl+Z: revert the last persisted event change in both panels."""
+        if not self.commit_cell():
+            return
+        self.history.undo(self.restore_history)
+
+    def redo(self):
+        """Ctrl+Y / Ctrl+Shift+Z: reapply the change undone last."""
+        if not self.commit_cell():
+            return
+        self.history.redo(self.restore_history)
+
+    def restore_history(self, events):
+        if self.try_action(lambda: self.store.restore_events(events)):
+            self.refresh()
+            return True
+        return False
 
     def try_action(self, action):
         try:

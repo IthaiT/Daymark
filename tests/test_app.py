@@ -344,6 +344,46 @@ class AppTests(unittest.TestCase):
         self.assertFalse(self.app.events_tree.get_children())
         self.assertIsNone(self.app.grab_current())
 
+    def test_undo_and_redo_shortcuts_revert_and_reapply_table_and_timeline(self):
+        event = self.cell_event()
+        editor = self.click_cell(event.id, "title")
+        self.fill(editor.entry, "撤销改名")
+        self.type_key("Return")
+        self.assertEqual(self.store.events[event.id].title, "撤销改名")
+        self.app.event_generate("<Control-z>")
+        self.app.update()
+        self.assertEqual(Store(self.store.directory).events[event.id].title, event.title)
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[0], "原名称")
+        self.assertTrue(self.app.timeline.canvas.find_withtag(f"event:{event.id}"))
+        self.app.event_generate("<Control-y>")
+        self.app.update()
+        self.assertEqual(self.store.events[event.id].title, "撤销改名")
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[0], "撤销改名")
+        self.assertIsNone(self.app.grab_current())
+
+    def test_undo_restores_deleted_events_across_both_panels(self):
+        event = self.cell_event()
+        self.app.select_event(event.id)
+        self.app.delete_events()
+        self.assertFalse(self.store.events)
+        self.app.event_generate("<Control-z>")
+        self.app.update()
+        self.assertEqual(Store(self.store.directory).events[event.id], event)
+        self.assertEqual(self.app.events_tree.get_children(), (event.id,))
+        self.assertTrue(self.app.timeline.canvas.find_withtag(f"event:{event.id}"))
+
+    def test_undo_reverts_timeline_drag_and_redo_reapplies_it(self):
+        event = self.cell_event()
+        self.finish_resize(self.begin_move(event.id, 60))
+        self.assertEqual(self.store.events[event.id].start, event.start + timedelta(hours=1))
+        self.app.event_generate("<Control-z>")
+        self.app.update()
+        self.assertEqual(Store(self.store.directory).events[event.id], event)
+        self.assertEqual(self.app.events_tree.item(event.id, "values")[1:3], ("09:00", "10:00"))
+        self.app.event_generate("<Control-Shift-Z>")
+        self.app.update()
+        self.assertEqual(self.store.events[event.id].start, event.start + timedelta(hours=1))
+
     def test_delete_key_in_an_inline_editor_only_deletes_text(self):
         event = self.cell_event()
         editor = self.click_cell(event.id, "title")
