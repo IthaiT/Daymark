@@ -143,6 +143,17 @@ void main() {
   );
 
   test(
+    'Unicode-equivalent sibling names retain Python casefold validation',
+    () async {
+      await store.saveTag('Straße', null);
+      await expectLater(store.saveTag('STRASSE', null), throwsFormatException);
+      await store.saveTag('Σ', null);
+      await expectLater(store.saveTag('ς', null), throwsFormatException);
+      await store.saveTag('STRASSE', 'work');
+    },
+  );
+
+  test(
     'invalid or corrupt CSV cannot be overwritten or initialize a missing tag file',
     () async {
       for (final source in [

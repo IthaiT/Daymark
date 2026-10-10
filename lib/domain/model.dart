@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:uuid/uuid.dart';
 
+import 'unicode.dart';
+
 const undefinedIdPrefix = 'undefined:';
 
 /// Local calendar fields stored in a zone-neutral container. Never convert
@@ -155,7 +157,7 @@ class Interval {
 
 int compareEvents(Event a, Event b) {
   final result = a.start.compareTo(b.start);
-  return result == 0 ? a.id.compareTo(b.id) : result;
+  return result == 0 ? compareUnicode(a.id, b.id) : result;
 }
 
 String durationText(Duration duration) {
@@ -217,20 +219,8 @@ Event moveEventOnDay(Event event, DateTime day, int minutes) {
   );
 }
 
-// Match Python repr(tuple) before UUIDv5 so existing renamed gap rows keep IDs.
-String _pythonString(String value) {
-  final quote = value.contains("'") && !value.contains('"') ? '"' : "'";
-  final escaped = value
-      .replaceAll('\\', '\\\\')
-      .replaceAll(quote, '\\$quote')
-      .replaceAll('\n', r'\n')
-      .replaceAll('\r', r'\r')
-      .replaceAll('\t', r'\t');
-  return '$quote$escaped$quote';
-}
-
 String _gapId(List<String> parts) =>
-    '$undefinedIdPrefix${const Uuid().v5(Namespace.url.value, '(${parts.map(_pythonString).join(', ')})').replaceAll('-', '')}';
+    '$undefinedIdPrefix${const Uuid().v5(Namespace.url.value, '(${parts.map(pythonStringRepr).join(', ')})').replaceAll('-', '')}';
 
 List<Event> undefinedEvents(Iterable<Event> events, DateTime day) {
   final intervals =
@@ -241,7 +231,7 @@ List<Event> undefinedEvents(Iterable<Event> events, DateTime day) {
       ]..sort((a, b) {
         var result = a.interval.start.compareTo(b.interval.start);
         if (result == 0) result = a.interval.end.compareTo(b.interval.end);
-        return result == 0 ? a.event.id.compareTo(b.event.id) : result;
+        return result == 0 ? compareUnicode(a.event.id, b.event.id) : result;
       });
   final gaps = <Event>[];
   DateTime? end;

@@ -5,6 +5,7 @@ import 'package:csv/csv.dart';
 import 'package:uuid/uuid.dart';
 
 import '../domain/model.dart';
+import '../domain/unicode.dart';
 import 'atomic_file.dart';
 
 const csvFields = ['id', 'title', 'tag_id', 'start', 'end', 'notes'];
@@ -78,14 +79,10 @@ class Store {
         ].join('\n');
   List<Tag> orderedTags() => _tags.values.toList()
     ..sort((a, b) {
-      final left = ancestors(
-        a.id,
-      ).map((tag) => tag.name.toLowerCase()).toList();
-      final right = ancestors(
-        b.id,
-      ).map((tag) => tag.name.toLowerCase()).toList();
+      final left = ancestors(a.id).map((tag) => caseFold(tag.name)).toList();
+      final right = ancestors(b.id).map((tag) => caseFold(tag.name)).toList();
       for (var i = 0; i < left.length && i < right.length; i++) {
-        final result = left[i].compareTo(right[i]);
+        final result = compareUnicode(left[i], right[i]);
         if (result != 0) return result;
       }
       return left.length.compareTo(right.length);
@@ -113,10 +110,7 @@ class Store {
       if (tag.id.isEmpty || tag.name.trim().isEmpty) {
         throw const FormatException('标签 ID 和名称不能为空。');
       }
-      if (tag.parentId != null && !tags.containsKey(tag.parentId)) {
-        throw FormatException('标签「${tag.name}」的父标签不存在。');
-      }
-      if (!siblings.add((tag.parentId, tag.name.trim().toLowerCase()))) {
+      if (!siblings.add((tag.parentId, caseFold(tag.name.trim())))) {
         throw const FormatException('同一个父标签下不能有重名标签。');
       }
       final visited = <String>{tag.id};

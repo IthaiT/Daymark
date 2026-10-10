@@ -24,6 +24,8 @@ cases = {
                   event("unfinished", "2026-10-07T06:00:00", None)],
     "quoted Unicode IDs": [event("中文'双引号\"\\", "2026-10-07T09:00:30", "2026-10-07T10:00:30"),
                             event("另一行\n", "2026-10-07T12:00:00", "2026-10-07T13:00:00")],
+    "nonprintable Unicode IDs": [event("\x00\b\x1f\x7f\u00a0\u200b\u2028\ue000\U000e0001", "2026-10-07T09:00:00", "2026-10-07T10:00:00"),
+                                event("emoji😀\U0001ffff", "2026-10-07T12:00:00", "2026-10-07T13:00:00")],
 }
 fixtures = []
 for name, events in cases.items():
