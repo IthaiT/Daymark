@@ -148,8 +148,10 @@ class AppTests(unittest.TestCase):
         self.store.save_event(second)
         self.app.refresh()
         self.app.update()
-        # Refresh materializes the gap as a persisted unclassified record.
-        gap = next(event for event in self.store.events.values() if event.id.startswith("undefined:"))
+        gap = next(iter(self.app.undefined.values()))
+        # The derived gap is mirrored into the CSV as a prefixed unclassified row.
+        self.assertEqual(Store(self.store.directory).events[gap.id],
+                         Event(gap.id, "未定义", None, first.end, second.start))
         return first, second, gap
 
     def test_multiple_unnamed_drafts_can_move_and_be_named_independently(self):
@@ -191,59 +193,85 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirmation:
             self.app.delete_events()
             confirmation.assert_not_called()
-        # Deleting records leaves persisted undefined time behind, never drafts.
-        restored = Store(self.store.directory).events
-        self.assertTrue(restored)
-        self.assertTrue(all(event.id.startswith("undefined:") for event in restored.values()))
+        # The remaining draft leaves no derivable gap, so no rows survive either.
+        self.assertFalse(Store(self.store.directory).events)
         self.assertEqual(set(self.app.drafts), {second.id})
-        children = set(self.app.events_tree.get_children())
-        self.assertEqual(children, {second.id} | set(restored))
+        self.assertEqual(self.app.events_tree.get_children(), (second.id,))
 
-    def test_undefined_gaps_are_persisted_and_behave_like_records(self):
+    def test_undefined_gap_follows_drag_and_delete_while_staying_derived(self):
         first, second, gap = self.events_with_gap()
-        restored = Store(self.store.directory).events[gap.id]
-        self.assertEqual((restored.title, restored.tag_id, restored.start, restored.end),
-                         ("未定义", None, first.end, second.start))
-        self.assertEqual(self.app.events_tree.item(gap.id, "values")[3], "未分类")
-        # The record keeps its own times; dragging a neighbor no longer resizes it.
+        original = self.store.events_path.read_bytes()
+        self.assertIn(gap.id, self.app.events_tree.get_children())
         pointer = self.begin_resize(first.id, "end", first.end + timedelta(minutes=30))
-        self.assertEqual(self.store.events[gap.id], gap)
+        preview = self.app.timeline.undefined[gap.id]
+        self.assertEqual((preview.start, preview.end), (first.end + timedelta(minutes=30), second.start))
+        self.assertEqual(self.store.events_path.read_bytes(), original)
         self.finish_resize(pointer)
-        self.assertEqual(self.store.events[gap.id], gap)
-        self.assertEqual(self.store.events[first.id].end, first.end + timedelta(minutes=30))
+        self.assertEqual(self.app.undefined[gap.id], preview)
+        self.assertEqual(Store(self.store.directory).events[gap.id],
+                         Event(gap.id, "未定义", None, preview.start, preview.end))
+        self.assertEqual(self.app.events_tree.item(gap.id, "values")[-1], "30 分钟")
         self.app.select_event(second.id)
         self.app.delete_events()
-        self.assertEqual(Store(self.store.directory).events[gap.id], gap)
+        self.assertFalse(self.app.undefined)
+        self.assertFalse(self.app.timeline.undefined)
+        self.assertNotIn(gap.id, Store(self.store.directory).events)
 
-    def test_undefined_gap_name_persists_and_keeps_its_boundaries(self):
+    def test_undefined_gap_name_survives_restart_and_follows_boundaries(self):
         first, second, gap = self.events_with_gap()
         self.app.rename_event(gap.id)
         self.app.update()
-        self.fill(self.app.cell_editor.entry, "待分类时段")
+        self.fill(self.app.cell_editor.entry, "煮饭和刷手机")
         self.type_key("Return")
-        self.assertIsNone(self.app.cell_editor)
+        self.assertEqual(self.app.undefined[gap.id].title, "煮饭和刷手机")
+        self.assertIsNone(self.app.undefined[gap.id].tag_id)
         restored = Store(self.store.directory).events[gap.id]
-        self.assertEqual((restored.title, restored.tag_id), ("待分类时段", None))
+        self.assertEqual((restored.title, restored.tag_id), ("煮饭和刷手机", None))
         self.assertFalse(self.app.drafts)
         self.finish_resize(self.begin_resize(first.id, "end", first.end + timedelta(minutes=15)))
-        self.assertEqual((self.store.events[gap.id].start, self.store.events[gap.id].end),
-                         (gap.start, gap.end))
-        self.assertEqual(Store(self.store.directory).events[gap.id].title, "待分类时段")
+        updated = self.app.undefined[gap.id]
+        self.assertEqual((updated.title, updated.start, updated.end),
+                         ("煮饭和刷手机", first.end + timedelta(minutes=15), second.start))
+        self.assertEqual(Store(self.store.directory).events[gap.id].title, "煮饭和刷手机")
 
-    def test_assigning_a_tag_classifies_the_persisted_gap(self):
+    def test_inserting_an_event_between_events_splits_the_undefined_gap(self):
+        first = self.cell_event()
+        second = Event("following", "后续事件", "life", first.end + timedelta(hours=2), first.end + timedelta(hours=3))
+        self.store.save_event(second)
+        self.app.refresh()
+        self.app.update()
+        gap = next(iter(self.app.undefined.values()))
+        self.assertIn(gap.id, Store(self.store.directory).events)
+        self.app.add_event(first.end + timedelta(minutes=30))
+        self.app.update()
+        middle = self.latest_draft()
+        restored = Store(self.store.directory).events
+        self.assertNotIn(gap.id, restored)
+        halves = sorted((event for event in restored.values() if event.id.startswith("undefined:")),
+                        key=lambda event: event.start)
+        self.assertEqual([(half.start, half.end) for half in halves],
+                         [(first.end, middle.start), (middle.end, second.start)])
+        self.assertEqual(set(self.app.undefined), {half.id for half in halves})
+
+    def test_only_assigning_a_tag_defines_an_automatic_gap(self):
         first, second, gap = self.events_with_gap()
+        original = self.store.events_path.read_bytes()
+        self.app.edit_cell(gap.id, "start")
+        self.assertIsNone(self.app.cell_editor)
         editor = self.click_cell(gap.id, "tag")
         self.choose_tag(editor.input, None)
-        self.assertEqual(Store(self.store.directory).events[gap.id].tag_id, None)
+        self.assertIn(gap.id, self.app.undefined)
+        self.assertEqual(self.store.events_path.read_bytes(), original)
         editor = self.click_cell(gap.id, "tag")
         self.choose_tag(editor.input, "embedded")
         self.assertFalse(self.app.undefined)
         self.assertFalse(self.app.drafts)
-        restored = Store(self.store.directory).events[gap.id]
-        self.assertEqual((restored.tag_id, restored.title, restored.start, restored.end),
-                         ("embedded", "未定义", first.end, second.start))
+        recorded = next(event for key, event in self.store.events.items() if key not in (first.id, second.id))
+        self.assertEqual((recorded.tag_id, recorded.start, recorded.end), ("embedded", first.end, second.start))
+        self.assertEqual(recorded.title, "未定义")
+        self.assertEqual(Store(self.store.directory).events[recorded.id], recorded)
 
-    def test_failed_gap_classification_keeps_the_record_and_tag_input_for_retry(self):
+    def test_failed_gap_definition_keeps_the_gap_and_tag_input_for_retry(self):
         first, second, gap = self.events_with_gap()
         original = self.store.events_path.read_bytes()
         editor = self.click_cell(gap.id, "tag")
@@ -252,10 +280,10 @@ class AppTests(unittest.TestCase):
             error.assert_called_once()
         self.assertIs(self.app.cell_editor, editor)
         self.assertEqual(editor.input.tag_id(), "linux")
-        self.assertEqual(self.store.events[gap.id].tag_id, None)
+        self.assertEqual(self.app.undefined[gap.id].tag_id, None)
         self.assertEqual(self.store.events_path.read_bytes(), original)
         self.type_key("Return")
-        self.assertEqual(Store(self.store.directory).events[gap.id].tag_id, "linux")
+        self.assertFalse(self.app.undefined)
         self.assertEqual(len(Store(self.store.directory).events), 3)
 
     def test_undefined_appearance_depends_on_tag_instead_of_name(self):
@@ -273,17 +301,18 @@ class AppTests(unittest.TestCase):
         self.assertFalse(canvas.itemcget(item, "dash"))
         self.assertEqual(self.store.events[event.id].title, event.title)
 
-    def test_undefined_gap_drags_and_its_context_menu_offers_record_actions(self):
+    def test_undefined_gap_does_not_drag_and_context_menu_sets_its_tag(self):
         _, _, gap = self.events_with_gap()
         self.click_timeline_event(gap.id)
-        pointer = self.begin_move(gap.id, 30)
-        self.assertIsNotNone(self.app.timeline._drag)
-        self.finish_resize(pointer)
-        self.assertEqual(self.store.events[gap.id].start, gap.start + timedelta(minutes=30))
+        self.assertIsNone(self.app.timeline._drag)
         canvas = self.app.timeline.canvas
+        self.assertFalse(canvas.find_withtag(f"resize:start:{gap.id}"))
         left, top, right, bottom = canvas.bbox(canvas.find_withtag(f"event:{gap.id}")[0])
         menu = self.timeline_menu_for(round((left + right) / 2), round((top + bottom) / 2))
-        self.assertEqual(menu.entrycget(2, "label"), "删除")
+        self.assertEqual(menu.entrycget(1, "label"), "设置标签")
+        menu.invoke(1)
+        self.app.update()
+        self.assertEqual((self.app.cell_editor.event_id, self.app.cell_editor.column), (gap.id, "tag"))
 
     def click_timeline_event(self, event_id):
         canvas = self.app.timeline.canvas
@@ -341,11 +370,9 @@ class AppTests(unittest.TestCase):
         with patch("tkinter.messagebox.askyesno") as confirm:
             self.type_key("Delete")
             confirm.assert_not_called()
-        # Vacated time becomes persisted undefined records instead of vanishing.
-        restored = Store(self.store.directory).events
-        self.assertTrue(all(event.id.startswith("undefined:") for event in restored.values()))
-        self.assertTrue(all(event_id.startswith("undefined:")
-                            for event_id in self.app.events_tree.get_children()))
+        # Deleting every regular record leaves no derivable gap, so no rows survive.
+        self.assertFalse(Store(self.store.directory).events)
+        self.assertFalse(self.app.events_tree.get_children())
         self.assertIsNone(self.app.grab_current())
 
     def test_undo_and_redo_shortcuts_revert_and_reapply_table_and_timeline(self):

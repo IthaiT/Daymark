@@ -4,6 +4,10 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from uuid import NAMESPACE_URL, uuid5
 
+# Rows with this id prefix mirror derived undefined gaps; they are persisted
+# so gap titles survive restarts but never behave as regular records.
+UNDEFINED_ID_PREFIX = "undefined:"
+
 
 @dataclass(frozen=True)
 class Tag:
@@ -78,7 +82,7 @@ def undefined_events(events: list[Event], day: date) -> list[Event]:
     for left, right, event_id in intervals:
         if end is not None and left > end:
             key = uuid5(NAMESPACE_URL, repr(("daymark:undefined", previous_id, event_id))).hex
-            result.append(Event(f"undefined:{key}", "未定义", None, end, left))
+            result.append(Event(f"{UNDEFINED_ID_PREFIX}{key}", "未定义", None, end, left))
         if end is None or right >= end:
             end, previous_id = right, event_id
     return result

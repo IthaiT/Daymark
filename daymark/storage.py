@@ -226,17 +226,12 @@ class Store:
         self._write_events(events)
         self.events = events
 
-    def save_new_events(self, events: list[Event]):
-        """Persist derived undefined gaps so unclassified time survives export."""
-        pending = [event for event in events if event.id not in self.events]
-        if not pending:
-            return
-        merged = dict(self.events)
-        for event in pending:
-            self.validate_event(event)
-            merged[event.id] = event
-        self._write_events(merged)
-        self.events = merged
+    def replace_events(self, events: dict[str, Event]):
+        """Bulk-replace the whole table in one atomic write."""
+        for event in events.values():
+            self.validate_event(event, allow_incomplete=True)
+        self._write_events(events)
+        self.events = events
 
     def delete_events(self, event_ids: list[str]):
         events = {key: value for key, value in self.events.items() if key not in event_ids}
@@ -256,10 +251,7 @@ class Store:
         """Undo/redo entry point: bulk-replace, unclassifying tags deleted since."""
         events = {event.id: (event if event.tag_id in self.tags else replace(event, tag_id=None))
                   for event in events.values()}
-        for event in events.values():
-            self.validate_event(event, allow_incomplete=True)
-        self._write_events(events)
-        self.events = events
+        self.replace_events(events)
         return True
 
     def events_on(self, day: date) -> list[Event]:

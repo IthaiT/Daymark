@@ -9,7 +9,8 @@ from uuid import uuid4
 from .dialogs import EventDialog, TagDialog
 from .history import History
 from .inline import CellEditor
-from .model import Event, default_event_interval, duration_text, undefined_events
+from .model import (UNDEFINED_ID_PREFIX, Event, default_event_interval, duration_text,
+                    undefined_events)
 from .timeline import Timeline, tag_color
 from .widgets import AutoScrollbar, DatePicker
 
@@ -32,7 +33,6 @@ class App(tk.Tk):
         self.cell_editor = None
         self.drafts = {}
         self.undefined = {}
-        self.undefined_names = {}
         self._pressed_cell = None
         self._drag_source = None
         self._drag_active = False
@@ -192,13 +192,10 @@ class App(tk.Tk):
                        for event_id, event in self.drafts.items()}
         selected = self.events_tree.selection()
         events = self.visible_events()
-        self._persist_gaps(undefined_events(events, self.day))
-        events = self.visible_events()
         gaps = undefined_events(events, self.day)
-        self.undefined = {event.id: replace(event, title=self.undefined_names.get(event.id, event.title))
-                          for event in gaps}
-        self.undefined_names = {event_id: title for event_id, title in self.undefined_names.items()
-                                if event_id in self.undefined}
+        self._sync_gaps(gaps)
+        rows = self.undefined_rows()
+        self.undefined = {gap.id: rows.get(gap.id, gap) for gap in gaps}
         events = sorted([*events, *self.undefined.values()], key=lambda event: (event.start, event.id))
         self.events_tree.delete(*self.events_tree.get_children())
         for event in events:
@@ -217,27 +214,40 @@ class App(tk.Tk):
         self.weekday_label.configure(text="星期" + "一二三四五六日"[self.day.weekday()])
         self.draw_timeline()
 
-    def _persist_gaps(self, gaps):
-        """Write undefined gaps into the event table; keep derived display on failure."""
-        pending = [replace(gap, title=self.undefined_names.get(gap.id, gap.title))
-                   for gap in gaps if gap.id not in self.store.events]
-        if not pending:
+    def _sync_gaps(self, gaps):
+        """Mirror derived gaps into prefixed rows so undefined time and titles survive restart.
+
+        Rows are resized (keeping custom titles) when boundaries move, added when new
+        gaps appear and deleted when they disappear; regular events are never touched.
+        """
+        rows = {event_id: event for event_id, event in self.store.events.items()
+                if event_id.startswith(UNDEFINED_ID_PREFIX)}
+        desired = {gap.id: replace(rows[gap.id], start=gap.start, end=gap.end) if gap.id in rows else gap
+                   for gap in gaps}
+        current = {event_id: event for event_id, event in rows.items() if event.interval_on(self.day)}
+        if desired == current:
             return
-        # Automatic bookkeeping never enters the undo history: undoing it
-        # would only trigger the same materialization again on refresh.
-        if self.try_action(lambda: self.store.save_new_events(pending)):
-            for gap in pending:
-                self.undefined_names.pop(gap.id, None)
+        merged = {event_id: event for event_id, event in self.store.events.items()
+                  if event_id not in current}
+        merged.update(desired)
+        # Automatic bookkeeping never enters the undo history: undoing a sync
+        # would only re-derive the same rows on the next refresh.
+        self.try_action(lambda: self.store.replace_events(merged))
+
+    def undefined_rows(self):
+        return {event_id: event for event_id, event in self.store.events.items()
+                if event_id.startswith(UNDEFINED_ID_PREFIX) and event.interval_on(self.day)}
 
     def _capture(self):
-        """Complete undoable state: persisted events, drafts and gap titles."""
-        return (self.store.events, dict(self.drafts), dict(self.undefined_names))
+        """Complete undoable state: persisted events and in-progress drafts."""
+        return (self.store.events, dict(self.drafts))
 
     def _record(self, before):
         self.history.record(before, self._capture())
 
     def visible_events(self):
-        events = self.store.events_on(self.day)
+        events = [event for event in self.store.events_on(self.day)
+                  if not event.id.startswith(UNDEFINED_ID_PREFIX)]
         events.extend(event for event in self.drafts.values() if event.interval_on(self.day))
         return sorted(events, key=lambda event: (event.start, event.id))
 
@@ -256,7 +266,8 @@ class App(tk.Tk):
             self.events_tree.tag_configure(f"event-color:{event_id}",
                                            background=self.event_color(event, event_id in selected),
                                            font=(FONT, 10, "bold" if event_id in selected else "normal"))
-        self.timeline.update_events(self.visible_events(), self.day, selected, self.undefined_names)
+        self.timeline.update_events(self.visible_events(), self.day, selected,
+                                    {event_id: event.title for event_id, event in self.undefined.items()})
 
     def clear_event_selection(self):
         if not self.commit_cell():
@@ -447,7 +458,6 @@ class App(tk.Tk):
             self.date_picker.value.set(self.day.isoformat())
             return
         self.drafts.clear()
-        self.undefined_names.clear()
         self.refresh()
 
     def shift_day(self, delta):
@@ -456,7 +466,6 @@ class App(tk.Tk):
         try:
             self.day += timedelta(days=delta)
             self.drafts.clear()
-            self.undefined_names.clear()
             self.refresh()
         except OverflowError:
             messagebox.showerror("日期范围", "已经到达日期范围边界。", parent=self)
@@ -466,7 +475,6 @@ class App(tk.Tk):
             return
         self.day = date.today()
         self.drafts.clear()
-        self.undefined_names.clear()
         self.refresh()
 
     def add_event(self, start=None):
@@ -505,7 +513,8 @@ class App(tk.Tk):
         return False
 
     def edit_event(self, event_id):
-        if self.commit_cell() and self.grab_current() is None and event_id in self.store.events:
+        if (self.commit_cell() and self.grab_current() is None and event_id in self.store.events
+                and not event_id.startswith(UNDEFINED_ID_PREFIX)):
             before = self._capture()
             EventDialog(self, self.store, lambda: self._dialog_saved(before), self.day, self.store.events[event_id])
 
@@ -566,12 +575,15 @@ class App(tk.Tk):
         event = replace(current, **{field: value})
         if event.id in self.undefined:
             if event.tag_id is not None:
+                # Assigning a tag defines the gap as a regular record.
                 event = replace(event, id=uuid4().hex, title=event.title or "未定义")
                 if not self.try_action(lambda: self.store.save_event(event)):
                     return False
-                self.undefined_names.pop(current.id, None)
             elif field == "title":
-                self.undefined_names[event.id] = value or "未定义"
+                # Renaming writes straight into the gap's stored row.
+                event = replace(current, title=value or "未定义")
+                if event != current and not self.try_action(lambda: self.store.save_event(event)):
+                    return False
         elif event.id in self.drafts:
             if not event.title:
                 if not self.try_action(lambda: self.store.validate_event(replace(event, title="新事件"))):
@@ -676,7 +688,10 @@ class App(tk.Tk):
         before = self._capture()
         selected = list(self.events_tree.selection())
         self.cancel_cell()
-        saved = [event_id for event_id in selected if event_id in self.store.events]
+        # Undefined rows are derived and re-created by the next sync, so deleting
+        # them directly would be undone immediately; only regular records go.
+        saved = [event_id for event_id in selected
+                 if event_id in self.store.events and not event_id.startswith(UNDEFINED_ID_PREFIX)]
         if saved and not self.try_action(lambda: self.store.delete_events(saved)):
             return
         for event_id in selected:
@@ -697,11 +712,10 @@ class App(tk.Tk):
         self.history.redo(self.restore_history)
 
     def restore_history(self, snapshot):
-        events, drafts, undefined_names = snapshot
+        events, drafts = snapshot
         if not self.try_action(lambda: self.store.restore_events(events)):
             return False
         self.drafts = dict(drafts)
-        self.undefined_names = dict(undefined_names)
         self.refresh()
         return True
 
