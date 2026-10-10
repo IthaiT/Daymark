@@ -166,7 +166,7 @@ void main() {
     'corrupt JSON including cycles and missing ancestors preserves both files',
     () async {
       for (final payload in [
-        {'version': 2, 'tags': []},
+        {'version': 2, 'tags': <Object?>[]},
         {
           'version': 1,
           'tags': [
@@ -211,6 +211,36 @@ void main() {
     next.close();
     next.close();
   }, skip: !Platform.isWindows);
+
+  test(
+    'locked Windows destination reports native error and keeps data',
+    () async {
+      final before = await store.eventsFile.readAsBytes();
+      final handle = store.eventsFile.openSync(mode: FileMode.append);
+      handle.lockSync(FileLock.exclusive);
+      try {
+        await expectLater(
+          AtomicFile.write(store.eventsFile, utf8.encode('replacement')),
+          throwsA(
+            isA<FileSystemException>().having(
+              (error) => error.osError?.errorCode,
+              'Win32 sharing or access error',
+              isIn([5, 32, 33]),
+            ),
+          ),
+        );
+        expect(
+          directory.listSync().where((file) => file.path.endsWith('.tmp')),
+          isEmpty,
+        );
+      } finally {
+        handle.closeSync();
+      }
+      expect(await store.eventsFile.readAsBytes(), before);
+      await AtomicFile.write(store.eventsFile, before);
+    },
+    skip: !Platform.isWindows,
+  );
 
   test(
     'maps exposed to callers cannot bypass validation or mutate saved state',

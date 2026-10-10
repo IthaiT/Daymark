@@ -16,9 +16,11 @@ class AtomicFile {
       : null;
   static final _move = _kernel?.lookupFunction<_MoveNative, _MoveDart>(
     'MoveFileExW',
+    isLeaf: true,
   );
   static final _lastError = _kernel?.lookupFunction<_ErrorNative, _ErrorDart>(
     'GetLastError',
+    isLeaf: true,
   );
 
   static Future<void> write(File destination, List<int> bytes) async {
@@ -31,11 +33,14 @@ class AtomicFile {
       }
       final source = temporary.absolute.path.toNativeUtf16();
       final target = destination.absolute.path.toNativeUtf16();
+      // Resolve both lazy symbols before MoveFileEx sets thread-local last error.
+      final move = _move!;
+      final lastError = _lastError!;
       try {
         for (var attempt = 0; ; attempt++) {
           // MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
-          if (_move!(source, target, 0x9) != 0) break;
-          final error = _lastError!();
+          if (move(source, target, 0x9) != 0) break;
+          final error = lastError();
           if (attempt == 3 || (error != 5 && error != 32 && error != 33)) {
             throw FileSystemException(
               '无法替换文件，请关闭占用此文件的程序。',
