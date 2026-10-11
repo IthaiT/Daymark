@@ -396,11 +396,6 @@ class JournalScreenState extends State<JournalScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 24),
-                          Text(
-                            '一天的轨迹',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
                           const SizedBox(height: 12),
                           Expanded(
                             child: Card.outlined(
@@ -439,10 +434,6 @@ class JournalScreenState extends State<JournalScreen> {
                           const SizedBox(height: 24),
                           Row(
                             children: [
-                              Text(
-                                '事件明细 · ${widget.journal.rows.length}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
                               const Spacer(),
                               FilledButton.icon(
                                 key: const ValueKey('add-event'),

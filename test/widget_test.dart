@@ -111,7 +111,6 @@ void main() {
       for (final title in [
         'Daymark',
         '我的标签',
-        '一天的轨迹',
         '事件',
         '开始',
         '结束',
@@ -519,7 +518,9 @@ void main() {
       await tester.tap(cell('b', 'title'));
       await tester.pumpAndSettle();
       await tester.enterText(input('b', 'title'), '空白保存');
-      await tester.tap(find.text('一天的轨迹'));
+      // The sidebar logo is always visible; its primary tap falls through to
+      // the screen's blank-area handler, which commits and clears selection.
+      await tester.tap(find.text('Daymark'));
       await tester.pumpAndSettle();
       expect(journal.store.events['b']!.title, '空白保存');
       expect(journal.selected, isEmpty);
@@ -623,7 +624,6 @@ void main() {
       await open(tester);
       expect(journal.rows, [sleep]);
       expect(find.text('未定义'), findsNothing);
-      expect(find.text('事件明细 · 1'), findsOneWidget);
       final rect = tester.getRect(find.byType(Timeline));
       await tester.tapAt(Offset(rect.left + 80, rect.top + 100));
       await tester.pumpAndSettle();
