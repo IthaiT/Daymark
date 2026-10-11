@@ -64,3 +64,6 @@ MaterialColor _paletteFor(Store store, String? tagId) {
   final palette = _paletteFor(store, event.tagId);
   return (palette[selected ? 200 : 100]!, palette[800]!);
 }
+
+/// Accent color for the dot marking a tag in the sidebar.
+Color tagDot(Store store, String? tagId) => _paletteFor(store, tagId)[600]!;

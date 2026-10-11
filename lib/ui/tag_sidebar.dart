@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../application/journal_controller.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
+import 'theme.dart';
 
 class TagSidebar extends StatefulWidget {
   const TagSidebar({
@@ -106,100 +107,133 @@ class _TagSidebarState extends State<TagSidebar> {
         .toList();
     return SizedBox(
       width: 250,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 24, 16, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Daymark',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 28),
-            Text('我的标签', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            Expanded(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onSecondaryTapDown: (details) =>
-                    _menu(details.globalPosition, null),
-                child: Scrollbar(
-                  controller: _scroll,
-                  child: ListView(
+      // Material keeps ListTile ink and tile colors visible above the tint.
+      child: Material(
+        color: Theme.of(context).colorScheme.surfaceContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 24, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Daymark',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 28),
+              Text('我的标签', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              Expanded(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onSecondaryTapDown: (details) =>
+                      _menu(details.globalPosition, null),
+                  child: Scrollbar(
                     controller: _scroll,
-                    children: [
-                      for (final tag in tags)
-                        _target(
-                          tag,
-                          Draggable<String>(
-                            data: tag.id,
-                            dragAnchorStrategy: pointerDragAnchorStrategy,
-                            feedback: Material(
-                              elevation: 6,
-                              borderRadius: BorderRadius.circular(8),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Text(tag.name),
-                              ),
-                            ),
-                            child: GestureDetector(
-                              onSecondaryTapDown: (details) =>
-                                  _menu(details.globalPosition, tag),
-                              onDoubleTap: () => setState(() {
-                                if (!_collapsed.add(tag.id)) {
-                                  _collapsed.remove(tag.id);
-                                }
-                              }),
-                              child: ListTile(
-                                key: ValueKey('tag-${tag.id}'),
-                                dense: true,
-                                selected: _selected == tag.id,
-                                contentPadding: EdgeInsets.only(
-                                  left:
-                                      (store.ancestors(tag.id).length - 1) *
-                                      14.0,
-                                  right: 4,
+                    child: ListView(
+                      controller: _scroll,
+                      children: [
+                        for (final tag in tags)
+                          _target(
+                            tag,
+                            Draggable<String>(
+                              data: tag.id,
+                              dragAnchorStrategy: pointerDragAnchorStrategy,
+                              feedback: Material(
+                                elevation: 6,
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(tag.name),
                                 ),
-                                leading:
-                                    store.tags.values.any(
-                                      (child) => child.parentId == tag.id,
-                                    )
-                                    ? IconButton(
-                                        icon: Icon(
-                                          _collapsed.contains(tag.id)
-                                              ? Icons.chevron_right
-                                              : Icons.expand_more,
-                                          size: 18,
-                                        ),
-                                        onPressed: () => setState(() {
-                                          if (!_collapsed.add(tag.id)) {
-                                            _collapsed.remove(tag.id);
-                                          }
-                                        }),
-                                      )
-                                    : const SizedBox(width: 28),
-                                title: Text(tag.name),
-                                onTap: () async {
-                                  if (await widget.beforeAction() && mounted) {
-                                    setState(() => _selected = tag.id);
+                              ),
+                              child: GestureDetector(
+                                onSecondaryTapDown: (details) =>
+                                    _menu(details.globalPosition, tag),
+                                onDoubleTap: () => setState(() {
+                                  if (!_collapsed.add(tag.id)) {
+                                    _collapsed.remove(tag.id);
                                   }
-                                },
+                                }),
+                                child: ListTile(
+                                  key: ValueKey('tag-${tag.id}'),
+                                  dense: true,
+                                  selected: _selected == tag.id,
+                                  selectedTileColor: Theme.of(
+                                    context,
+                                  ).colorScheme.primaryContainer,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  contentPadding: EdgeInsets.only(
+                                    left:
+                                        (store.ancestors(tag.id).length - 1) *
+                                        14.0,
+                                    right: 4,
+                                  ),
+                                  leading:
+                                      store.tags.values.any(
+                                        (child) => child.parentId == tag.id,
+                                      )
+                                      ? IconButton(
+                                          icon: Icon(
+                                            _collapsed.contains(tag.id)
+                                                ? Icons.chevron_right
+                                                : Icons.expand_more,
+                                            size: 18,
+                                          ),
+                                          onPressed: () => setState(() {
+                                            if (!_collapsed.add(tag.id)) {
+                                              _collapsed.remove(tag.id);
+                                            }
+                                          }),
+                                        )
+                                      : const SizedBox(width: 28),
+                                  title: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: 10,
+                                        height: 10,
+                                        decoration: BoxDecoration(
+                                          color: tagDot(store, tag.id),
+                                          borderRadius: BorderRadius.circular(
+                                            3,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          tag.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  onTap: () async {
+                                    if (await widget.beforeAction() &&
+                                        mounted) {
+                                      setState(() => _selected = tag.id);
+                                    }
+                                  },
+                                ),
                               ),
                             ),
                           ),
+                        _target(
+                          null,
+                          const SizedBox(height: 180, width: double.infinity),
                         ),
-                      _target(
-                        null,
-                        const SizedBox(height: 180, width: double.infinity),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
