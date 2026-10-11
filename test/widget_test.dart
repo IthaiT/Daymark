@@ -140,7 +140,6 @@ void main() {
       await open(tester);
       for (final title in [
         'Daymark',
-        '我的标签',
         '事件',
         '开始',
         '结束',

@@ -131,8 +131,6 @@ class _TagSidebarState extends State<TagSidebar> {
                 ),
               ),
               const SizedBox(height: 28),
-              Text('我的标签', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
