@@ -52,9 +52,15 @@ class JournalController extends ChangeNotifier {
   }
 
   Event? event(String id) => _drafts[id] ?? store.events[id];
+  List<Event> get regularEvents => [
+    ...store.events.values.where((event) => !event.isUndefined),
+    ..._drafts.values,
+  ];
   List<Event> get visibleEvents => [
-    ...store.eventsOn(day).where((event) => !event.isUndefined),
-    ..._drafts.values.where((event) => event.intervalOn(day) != null),
+    for (final event in regularEvents)
+      if (event.intervalOn(day) != null ||
+          event.end == null && dayStart(event.start) == day)
+        event,
   ]..sort(compareEvents);
   List<Event> get rows => [
     ...visibleEvents,
@@ -65,34 +71,36 @@ class JournalController extends ChangeNotifier {
   Map<String, Event> _reconcile(
     Map<String, Event> events,
     Map<String, Event> drafts,
-    DateTime day,
   ) {
     final storedGaps = {
       for (final item in events.values.where((event) => event.isUndefined))
         item.id: item,
-    };
-    final days = {
-      dayStart(day),
-      for (final item in storedGaps.values) dayStart(item.start),
     };
     final regular = {
       for (final item in events.values.where((event) => !event.isUndefined))
         item.id: item,
     };
     final result = {...regular};
-    for (final date in days) {
-      for (final gap in undefinedEvents([
-        ...regular.values,
-        ...drafts.values,
-      ], date)) {
-        result[gap.id] =
-            storedGaps[gap.id]?.copyWith(
-              start: gap.start,
-              end: gap.end,
-              clearTag: true,
-            ) ??
-            gap;
+    for (final gap in undefinedEvents([...regular.values, ...drafts.values])) {
+      var previous = storedGaps[gap.id];
+      if (previous == null &&
+          dayStart(gap.start).isBefore(dayStart(gap.end!))) {
+        // Older versions persisted only the next day's leading portion.
+        // Carry its name and notes into the complete cross-day gap once.
+        final legacyHead = storedGaps[undefinedHeadId(gap.end!)];
+        if (legacyHead?.end == gap.end &&
+            legacyHead!.start == dayStart(gap.end!)) {
+          previous = legacyHead;
+        }
       }
+      result[gap.id] =
+          previous?.copyWith(
+            id: gap.id,
+            start: gap.start,
+            end: gap.end,
+            clearTag: true,
+          ) ??
+          gap;
     }
     return result;
   }
@@ -105,7 +113,7 @@ class JournalController extends ChangeNotifier {
   }) async {
     final before = _capture();
     final desiredDay = day ?? _day;
-    final desired = _reconcile(events, drafts, desiredDay);
+    final desired = _reconcile(events, drafts);
     if (!mapEquals(desired, store.events)) await store.replaceEvents(desired);
     _drafts = Map.of(drafts);
     _day = desiredDay;

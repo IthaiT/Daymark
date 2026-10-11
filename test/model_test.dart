@@ -202,4 +202,110 @@ void main() {
     expect(durationText(const Duration(minutes: 61)), '1 小时 01 分');
     expect(durationText(Duration.zero), '0 分钟');
   });
+
+  test(
+    'a midnight gap keeps one complete interval and identity on both days',
+    () {
+      final evening = DateTime.utc(2026, 10, 9);
+      final nextDay = DateTime.utc(2026, 10, 10);
+      final video = Event(
+        'video',
+        '视频',
+        'life',
+        evening.add(const Duration(hours: 22)),
+        evening.add(const Duration(hours: 23, minutes: 50)),
+      );
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        nextDay.add(const Duration(minutes: 6)),
+        nextDay.add(const Duration(hours: 8)),
+      );
+      final gaps = undefinedEvents([video, sleep], evening);
+      final gap = gaps.singleWhere((gap) => gap.start == video.end);
+      expect(gap.end, sleep.start);
+      expect(gap.intervalOn(evening)!.duration, const Duration(minutes: 10));
+      expect(gap.intervalOn(nextDay)!.duration, const Duration(minutes: 6));
+      expect(undefinedEvents([sleep, video], nextDay), [gap]);
+      expect(undefinedEvents([video], nextDay), isEmpty);
+    },
+  );
+
+  test(
+    'bounded gaps cover empty intervening days and merge overnight overlaps',
+    () {
+      final first = Event(
+        'first',
+        '第一条',
+        null,
+        day.add(const Duration(hours: 9)),
+        day.add(const Duration(hours: 10)),
+      );
+      final later = Event(
+        'later',
+        '之后',
+        null,
+        day.add(const Duration(days: 3, hours: 8)),
+        day.add(const Duration(days: 3, hours: 9)),
+      );
+      final gap = undefinedEvents([
+        first,
+        later,
+      ], day.add(const Duration(days: 1))).single;
+      expect(gap.start, first.end);
+      expect(gap.end, later.start);
+      expect(
+        gap.intervalOn(day.add(const Duration(days: 2)))!.duration,
+        const Duration(days: 1),
+      );
+      final night = Event(
+        'night',
+        '跨午夜',
+        null,
+        day.add(const Duration(hours: 23)),
+        day.add(const Duration(days: 1, hours: 2)),
+      );
+      final overlap = Event(
+        'overlap',
+        '重叠',
+        null,
+        day.add(const Duration(days: 1, hours: 1)),
+        day.add(const Duration(days: 1, hours: 3)),
+      );
+      final morning = Event(
+        'morning',
+        '清晨',
+        null,
+        day.add(const Duration(days: 1, hours: 4)),
+        day.add(const Duration(days: 1, hours: 5)),
+      );
+      final unfinished = Event(
+        'unfinished',
+        '待补全',
+        null,
+        day.add(const Duration(days: 1, hours: 3, minutes: 30)),
+        null,
+      );
+      final merged = undefinedEvents([
+        night,
+        overlap,
+        morning,
+        unfinished,
+      ], day.add(const Duration(days: 1))).single;
+      expect(merged.start, overlap.end);
+      expect(merged.end, morning.start);
+      expect(
+        undefinedEvents([
+          night,
+          night.copyWith(
+            id: 'touching',
+            start: night.end!,
+            end: day.add(const Duration(days: 1, hours: 3)),
+          ),
+        ], day.add(const Duration(days: 1))),
+        isEmpty,
+      );
+    },
+  );
 }

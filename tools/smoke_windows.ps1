@@ -6,9 +6,10 @@ if (-not (Test-Path -LiteralPath $taskExecutable)) { throw "Build the Windows ap
 $taskDirectory = Join-Path $taskRoot ('.test-artifacts/native-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $taskDirectory -Force | Out-Null
 $taskDay = (Get-Date).ToString('yyyy-MM-dd')
+$taskPreviousDay = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
 $taskTags = '{"version":1,"tags":[{"id":"work","name":"主业","parent_id":null}]}'
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'tags.json'), $taskTags, [Text.UTF8Encoding]::new($false))
-$taskEvents = "id,title,tag_id,start,end,notes`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
+$taskEvents = "id,title,tag_id,start,end,notes`r`nvideo,视频,work,${taskPreviousDay}T22:00:00,${taskPreviousDay}T23:50:00,`r`nsleep,睡觉,work,${taskDay}T00:06:00,${taskDay}T08:00:00,`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'events.csv'), $taskEvents, [Text.UTF8Encoding]::new($true))
 
 Add-Type -TypeDefinition @'
@@ -82,7 +83,7 @@ public static class DaymarkPrivateDesktop {
             catch (IOException) { return false; }
         }
     }
-    public static void Run(string executable, string directory) {
+    public static void Run(string executable, string directory, string gapStart, string gapEnd) {
         // No DESKTOP_SWITCHDESKTOP access; never activate or fall back to the input desktop.
         string name = "DaymarkSmoke-" + Guid.NewGuid().ToString("N");
         IntPtr desktop = CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x87, IntPtr.Zero);
@@ -97,6 +98,9 @@ public static class DaymarkPrivateDesktop {
             var csv = Encoding.UTF8.GetString(bytes);
             if (bytes.Length < 3 || bytes[0] != 0xef || bytes[1] != 0xbb || bytes[2] != 0xbf || !csv.Contains("undefined:")) {
                 throw new Exception("Native launch did not preserve BOM and synchronize derived gaps.");
+            }
+            if (!csv.Contains("," + gapStart + "," + gapEnd + ",")) {
+                throw new Exception("Native launch did not persist the complete cross-midnight gap.");
             }
             second = Launch(executable, directory, name);
             var secondWindow = WaitForWindow(desktop, second);
@@ -118,5 +122,5 @@ public static class DaymarkPrivateDesktop {
     }
 }
 '@
-[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory)
-Write-Output "Native smoke passed: isolated desktop, startup, BOM/gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+Write-Output "Native smoke passed: isolated desktop, startup, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"

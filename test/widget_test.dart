@@ -289,6 +289,69 @@ void main() {
   );
 
   testWidgets(
+    'cross-midnight gap is drawn and context-selectable on both days with daily duration',
+    (tester) async {
+      final tomorrow = day.add(const Duration(days: 1));
+      final video = Event(
+        'video',
+        '视频',
+        'life',
+        day.add(const Duration(hours: 22)),
+        day.add(const Duration(hours: 23, minutes: 50)),
+      );
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        tomorrow.add(const Duration(minutes: 6)),
+        tomorrow.add(const Duration(hours: 8)),
+      );
+      await journal.store.replaceEvents({video.id: video, sleep.id: sleep});
+      await open(tester);
+      final gap = journal.rows.singleWhere(
+        (row) => row.isUndefined && row.start == video.end,
+      );
+      expect(
+        find.descendant(
+          of: cell(gap.id, 'duration'),
+          matching: find.text('10 分钟'),
+        ),
+        findsOneWidget,
+      );
+      Future<void> clickMinute(double minute) async {
+        final rectangle = tester.getRect(find.byType(Timeline));
+        // These tiny gaps sit inside neighboring resize handles at 1x zoom;
+        // the context click targets the rendered gap instead of a drag handle.
+        await tester.tapAt(
+          Offset(
+            rectangle.left + 24 + (rectangle.width - 50) * minute / 1440,
+            rectangle.top + 80,
+          ),
+          buttons: kSecondaryMouseButton,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('设置标签'), findsOneWidget);
+        await key(tester, LogicalKeyboardKey.escape);
+      }
+
+      await clickMinute(1435);
+      expect(journal.selected, {gap.id});
+      await key(tester, LogicalKeyboardKey.arrowRight, control: true);
+      expect(journal.rows.where((row) => row.isUndefined), [gap]);
+      expect(
+        find.descendant(
+          of: cell(gap.id, 'duration'),
+          matching: find.text('6 分钟'),
+        ),
+        findsOneWidget,
+      );
+      await clickMinute(3);
+      expect(journal.selected, {gap.id});
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'timeline single click stays selected after double tap timeout and clock repaint',
     (tester) async {
       await open(tester);

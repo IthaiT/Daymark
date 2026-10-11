@@ -222,37 +222,33 @@ Event moveEventOnDay(Event event, DateTime day, int minutes) {
 String _gapId(List<String> parts) =>
     '$undefinedIdPrefix${const Uuid().v5(Namespace.url.value, '(${parts.map(pythonStringRepr).join(', ')})').replaceAll('-', '')}';
 
-List<Event> undefinedEvents(Iterable<Event> events, DateTime day) {
+String undefinedHeadId(DateTime day) =>
+    _gapId(['daymark:undefined', 'head', dateText(day)]);
+
+/// Merge the complete journal before filtering by day, so a midnight boundary
+/// never splits a gap's persisted interval or identity.
+List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
   final intervals =
-      <({Event event, Interval interval})>[
+      <Event>[
         for (final event in events)
-          if (!event.isUndefined && event.intervalOn(day) != null)
-            (event: event, interval: event.intervalOn(day)!),
+          if (!event.isUndefined && event.end != null) event,
       ]..sort((a, b) {
-        var result = a.interval.start.compareTo(b.interval.start);
-        if (result == 0) result = a.interval.end.compareTo(b.interval.end);
-        return result == 0 ? compareUnicode(a.event.id, b.event.id) : result;
+        var result = a.start.compareTo(b.start);
+        if (result == 0) result = a.end!.compareTo(b.end!);
+        return result == 0 ? compareUnicode(a.id, b.id) : result;
       });
   final gaps = <Event>[];
   DateTime? end;
   String? previousId;
   for (final item in intervals) {
-    final left = item.interval.start;
-    final right = item.interval.end;
-    if (end == null && left.isAfter(dayStart(day))) {
-      gaps.add(
-        Event(
-          _gapId(['daymark:undefined', 'head', dateText(day)]),
-          '未定义',
-          null,
-          dayStart(day),
-          left,
-        ),
-      );
+    final left = item.start;
+    final right = item.end!;
+    if (end == null && left.isAfter(dayStart(left))) {
+      gaps.add(Event(undefinedHeadId(left), '未定义', null, dayStart(left), left));
     } else if (end != null && left.isAfter(end)) {
       gaps.add(
         Event(
-          _gapId(['daymark:undefined', previousId!, item.event.id]),
+          _gapId(['daymark:undefined', previousId!, item.id]),
           '未定义',
           null,
           end,
@@ -262,10 +258,12 @@ List<Event> undefinedEvents(Iterable<Event> events, DateTime day) {
     }
     if (end == null || !right.isBefore(end)) {
       end = right;
-      previousId = item.event.id;
+      previousId = item.id;
     }
   }
-  return gaps;
+  return day == null
+      ? gaps
+      : gaps.where((gap) => gap.intervalOn(day) != null).toList();
 }
 
 class TimelineSegment {

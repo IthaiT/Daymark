@@ -238,4 +238,131 @@ void main() {
       );
     },
   );
+
+  test(
+    'legacy renamed head becomes one complete cross-day gap on both dates',
+    () async {
+      final evening = DateTime.utc(2026, 10, 9);
+      final morning = DateTime.utc(2026, 10, 10);
+      final video = Event(
+        'video',
+        '视频',
+        'life',
+        evening.add(const Duration(hours: 22)),
+        evening.add(const Duration(hours: 23, minutes: 50)),
+      );
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        morning.add(const Duration(minutes: 6)),
+        morning.add(const Duration(hours: 8)),
+      );
+      final head = Event(
+        undefinedHeadId(morning),
+        '刷手机',
+        null,
+        morning,
+        sleep.start,
+        '旧备注',
+      );
+      await store.replaceEvents({
+        video.id: video,
+        sleep.id: sleep,
+        head.id: head,
+      });
+      // Startup may show a date unrelated to either neighbor; reconcile all
+      // records before the user visits the dates containing this gap.
+      await controller.initialize();
+      expect(controller.rows, isEmpty);
+      expect(
+        store.events.values.any(
+          (gap) =>
+              gap.isUndefined &&
+              gap.start == video.end &&
+              gap.end == sleep.start,
+        ),
+        isTrue,
+      );
+      await controller.setDay(evening);
+      final gap = controller.rows.singleWhere(
+        (gap) => gap.isUndefined && gap.start == video.end,
+      );
+      expect(gap.end, sleep.start);
+      expect(gap.title, '刷手机');
+      expect(gap.notes, '旧备注');
+      expect(store.events.containsKey(head.id), isFalse);
+      await controller.setDay(morning);
+      expect(controller.rows.where((event) => event.isUndefined), [gap]);
+      await controller.editCell(gap.id, EventColumn.title, '睡前空闲');
+      controller.dispose();
+      store = await Store.open(directory);
+      controller = JournalController(store, day: evening);
+      await controller.initialize();
+      expect(controller.event(gap.id)!.title, '睡前空闲');
+      expect(controller.rows.any((row) => row.id == gap.id), isTrue);
+      await controller.setDay(morning);
+      final promoted = await controller.editCell(
+        gap.id,
+        EventColumn.tag,
+        'life',
+      );
+      expect(store.events[promoted]!.start, video.end);
+      expect(store.events[promoted]!.end, sleep.start);
+      expect(controller.event(gap.id), isNull);
+      await controller.undo();
+      expect(controller.event(gap.id)!.title, '睡前空闲');
+      await controller.redo();
+      expect(controller.event(gap.id), isNull);
+    },
+  );
+
+  test(
+    'cross-day boundaries and undo update every day in one atomic write',
+    () async {
+      final morning = day.add(const Duration(days: 1));
+      final video = item('video', 22, 23);
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        morning.add(const Duration(minutes: 6)),
+        morning.add(const Duration(hours: 8)),
+      );
+      await store.replaceEvents({video.id: video, sleep.id: sleep});
+      await controller.initialize();
+      final gap = controller.rows.singleWhere(
+        (gap) => gap.isUndefined && gap.start == video.end,
+      );
+      await controller.editCell(gap.id, EventColumn.title, '跨天空档');
+      final before = await store.eventsFile.readAsBytes();
+      final beforeWrites = writes;
+      final shifted = video.copyWith(
+        end: day.add(const Duration(hours: 23, minutes: 50)),
+      );
+      failWrites = true;
+      await expectLater(
+        controller.updateEvent(shifted),
+        throwsFileSystemException,
+      );
+      expect(controller.event(gap.id)!.start, video.end);
+      expect(await store.eventsFile.readAsBytes(), before);
+      failWrites = false;
+      await controller.updateEvent(shifted);
+      expect(writes - beforeWrites, 1);
+      await controller.setDay(morning);
+      expect(controller.event(gap.id)!.start, shifted.end);
+      expect(controller.event(gap.id)!.title, '跨天空档');
+      await controller.undo();
+      expect(controller.event(gap.id)!.start, video.end);
+      await controller.redo();
+      expect(controller.event(gap.id)!.start, shifted.end);
+      controller.select(sleep.id);
+      await controller.deleteSelected();
+      expect(controller.event(gap.id), isNull);
+      expect(controller.rows, isEmpty);
+      await controller.undo();
+      expect(controller.event(gap.id)!.title, '跨天空档');
+    },
+  );
 }
