@@ -2,12 +2,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'application/journal_controller.dart';
 import 'data/instance_lock.dart';
 import 'data/store.dart';
 import 'ui/journal_screen.dart';
+import 'ui/startup_window.dart';
 import 'ui/theme.dart';
 
 Directory dataDirectory(List<String> arguments, {String? executable}) {
@@ -52,24 +54,22 @@ Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
   InstanceLock? lock;
   try {
+    await windowManager.ensureInitialized();
+    final display = await screenRetriever.getPrimaryDisplay();
+    // ScreenRetriever already accounts for DPI and the taskbar.
+    final geometry = startupWindowGeometry(
+      (display.visiblePosition ?? Offset.zero) &
+          (display.visibleSize ?? display.size),
+    );
+    await windowManager.waitUntilReadyToShow(
+      WindowOptions(title: 'Daymark', minimumSize: geometry.minimumSize),
+    );
+    await windowManager.setBounds(geometry.bounds);
     final directory = dataDirectory(arguments);
     lock = InstanceLock.acquire(directory);
     final store = await Store.open(directory);
     final journal = JournalController(store);
     await journal.initialize();
-    await windowManager.ensureInitialized();
-    await windowManager.waitUntilReadyToShow(
-      const WindowOptions(
-        title: 'Daymark',
-        size: Size(1360, 900),
-        minimumSize: Size(1100, 740),
-        center: true,
-      ),
-      () async {
-        await windowManager.show();
-        await windowManager.focus();
-      },
-    );
     runApp(DaymarkApp(journal: journal, instanceLock: lock));
     // The OS releases the byte lock on exit, including abnormal termination.
   } catch (error) {
@@ -92,6 +92,8 @@ Future<void> main(List<String> arguments) async {
       ),
     );
   }
+  await windowManager.show();
+  await windowManager.focus();
 }
 
 class DaymarkApp extends StatefulWidget {

@@ -32,6 +32,10 @@ public static class DaymarkPrivateDesktop {
     }
     [StructLayout(LayoutKind.Sequential)]
     struct ProcessInfo { public IntPtr process, thread; public uint processId, threadId; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct Rect { public int left, top, right, bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct MonitorInfo { public int size; public Rect monitor, work; public uint flags; }
     delegate bool WindowCallback(IntPtr window, IntPtr data);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern IntPtr CreateDesktopW(string name, IntPtr device, IntPtr mode, uint flags, uint access, IntPtr security);
@@ -39,6 +43,10 @@ public static class DaymarkPrivateDesktop {
     [DllImport("user32.dll")] static extern bool EnumDesktopWindows(IntPtr desktop, WindowCallback callback, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr window, uint message, IntPtr w, IntPtr l);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     static extern bool CreateProcessW(string app, StringBuilder args, IntPtr processSecurity, IntPtr threadSecurity,
@@ -83,6 +91,22 @@ public static class DaymarkPrivateDesktop {
             catch (IOException) { return false; }
         }
     }
+    static void CheckWindowBounds(IntPtr window) {
+        // Compare physical pixels even if PowerShell uses a different DPI context.
+        var previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try {
+            var info = new MonitorInfo { size = Marshal.SizeOf<MonitorInfo>() };
+            if (!GetMonitorInfoW(MonitorFromWindow(window, 2), ref info) || !GetWindowRect(window, out var bounds)) {
+                throw new Exception("Cannot inspect startup window bounds.");
+            }
+            if (bounds.left < info.work.left || bounds.top < info.work.top ||
+                bounds.right > info.work.right || bounds.bottom > info.work.bottom) {
+                throw new Exception("Startup window extends beyond the monitor work area, including its title bar.");
+            }
+        } finally {
+            if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous);
+        }
+    }
     public static void Run(string executable, string directory, string gapStart, string gapEnd) {
         // No DESKTOP_SWITCHDESKTOP access; never activate or fall back to the input desktop.
         string name = "DaymarkSmoke-" + Guid.NewGuid().ToString("N");
@@ -93,6 +117,7 @@ public static class DaymarkPrivateDesktop {
             first = Launch(executable, directory, name);
             var firstWindow = WaitForWindow(desktop, first);
             Thread.Sleep(500);
+            CheckWindowBounds(firstWindow);
             if (CanLock(directory)) throw new Exception("Application did not retain its data-directory lock.");
             var bytes = File.ReadAllBytes(Path.Combine(directory, "events.csv"));
             var csv = Encoding.UTF8.GetString(bytes);
@@ -105,6 +130,7 @@ public static class DaymarkPrivateDesktop {
             second = Launch(executable, directory, name);
             var secondWindow = WaitForWindow(desktop, second);
             Thread.Sleep(500);
+            CheckWindowBounds(secondWindow);
             if (!Convert.ToBase64String(bytes).Equals(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(directory, "events.csv"))))) {
                 throw new Exception("The second instance changed the data file.");
             }
@@ -123,4 +149,4 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: isolated desktop, startup, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: isolated desktop, startup window within work area, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"

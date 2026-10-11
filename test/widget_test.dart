@@ -7,6 +7,8 @@ import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/pickers.dart';
+import 'package:daymark/ui/startup_window.dart';
+import 'package:daymark/ui/tag_sidebar.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:daymark/ui/theme.dart';
 import 'package:flutter/gestures.dart';
@@ -126,6 +128,46 @@ void main() {
       expect(cell('a', 'title'), findsOneWidget);
       expect(cell('b', 'title'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'smaller startup windows retain accessible panels and date controls',
+    (tester) async {
+      await open(tester);
+      final sidebarState = tester.state(find.byType(TagSidebar));
+      final timelineState = tester.state(find.byType(Timeline));
+      for (final workArea in [
+        const Rect.fromLTWH(0, 0, 1366, 728),
+        const Rect.fromLTWH(0, 0, 1280, 680),
+        const Rect.fromLTWH(0, 0, 960, 520),
+        const Rect.fromLTWH(0, 0, 910, 485),
+        const Rect.fromLTWH(0, 0, 800, 560),
+        const Rect.fromLTWH(0, 0, 640, 336),
+        const Rect.fromLTWH(0, 0, 455, 242),
+      ]) {
+        // The window size includes the native title bar and borders.
+        final windowSize = startupWindowGeometry(workArea).bounds.size;
+        tester.view.physicalSize = Size(
+          windowSize.width - 16,
+          windowSize.height - 40,
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.byType(Timeline), findsOneWidget);
+        expect(tester.state(find.byType(TagSidebar)), same(sidebarState));
+        expect(tester.state(find.byType(Timeline)), same(timelineState));
+        for (final key in [
+          'previous-day',
+          'day-input',
+          'next-day',
+          'add-event',
+        ]) {
+          await tester.ensureVisible(find.byKey(ValueKey(key)));
+          await tester.pumpAndSettle();
+          expect(find.byKey(ValueKey(key)).hitTestable(), findsOneWidget);
+        }
+      }
     },
   );
 
