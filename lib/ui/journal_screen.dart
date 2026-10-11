@@ -12,6 +12,7 @@ import 'journal_viewport.dart';
 import 'pickers.dart';
 import 'tag_sidebar.dart';
 import 'timeline.dart';
+import 'title_bar.dart';
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({super.key, required this.journal});
@@ -302,184 +303,203 @@ class JournalScreenState extends State<JournalScreen> {
         behavior: HitTestBehavior.translucent,
         onTap: () => unawaited(_clear()),
         child: Scaffold(
-          body: AnimatedBuilder(
-            animation: widget.journal,
-            builder: (context, _) => JournalViewport(
-              child: Row(
-                children: [
-                  TagSidebar(
-                    journal: widget.journal,
-                    beforeAction: _beforeAction,
-                    onError: _showError,
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              IconButton(
-                                key: const ValueKey('previous-day'),
-                                tooltip: '前一天',
-                                onPressed: () => unawaited(
-                                  _action(
-                                    () => widget.journal.shiftDay(-1),
-                                    clear: true,
-                                  ),
-                                ),
-                                icon: const Icon(Icons.chevron_left),
-                              ),
-                              SizedBox(
-                                width: 170,
-                                child: PickerPopup(
-                                  open: _calendarOpen,
-                                  width: 320,
-                                  onClose: () =>
-                                      setState(() => _calendarOpen = false),
-                                  anchor: TextField(
-                                    key: const ValueKey('day-input'),
-                                    controller: _date,
-                                    decoration: const InputDecoration(
-                                      suffixIcon: Icon(
-                                        Icons.calendar_today,
-                                        size: 18,
-                                      ),
-                                    ),
-                                    onSubmitted: (_) => unawaited(_setDate()),
-                                    onTap: () async {
-                                      if (await commit() && mounted) {
-                                        setState(() => _calendarOpen = true);
-                                      }
-                                    },
-                                  ),
-                                  builder: (context, close) => CalendarChoices(
-                                    value: widget.journal.day,
-                                    onChoose: (value) {
-                                      close();
-                                      unawaited(
+          body: Column(
+            children: [
+              const WindowTitleBar(),
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: widget.journal,
+                  builder: (context, _) => JournalViewport(
+                    child: Row(
+                      children: [
+                        TagSidebar(
+                          journal: widget.journal,
+                          beforeAction: _beforeAction,
+                          onError: _showError,
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      key: const ValueKey('previous-day'),
+                                      tooltip: '前一天',
+                                      onPressed: () => unawaited(
                                         _action(
-                                          () => widget.journal.setDay(value),
+                                          () => widget.journal.shiftDay(-1),
                                           clear: true,
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                key: const ValueKey('next-day'),
-                                tooltip: '后一天',
-                                onPressed: () => unawaited(
-                                  _action(
-                                    () => widget.journal.shiftDay(1),
-                                    clear: true,
-                                  ),
-                                ),
-                                icon: const Icon(Icons.chevron_right),
-                              ),
-                              TextButton(
-                                onPressed: () => unawaited(
-                                  _action(
-                                    () => widget.journal.setDay(
-                                      dayStart(widget.journal.clock()),
+                                      ),
+                                      icon: const Icon(Icons.chevron_left),
                                     ),
-                                    clear: true,
-                                  ),
+                                    SizedBox(
+                                      width: 170,
+                                      child: PickerPopup(
+                                        open: _calendarOpen,
+                                        width: 320,
+                                        onClose: () => setState(
+                                          () => _calendarOpen = false,
+                                        ),
+                                        anchor: TextField(
+                                          key: const ValueKey('day-input'),
+                                          controller: _date,
+                                          decoration: const InputDecoration(
+                                            suffixIcon: Icon(
+                                              Icons.calendar_today,
+                                              size: 18,
+                                            ),
+                                          ),
+                                          onSubmitted: (_) =>
+                                              unawaited(_setDate()),
+                                          onTap: () async {
+                                            if (await commit() && mounted) {
+                                              setState(
+                                                () => _calendarOpen = true,
+                                              );
+                                            }
+                                          },
+                                        ),
+                                        builder: (context, close) =>
+                                            CalendarChoices(
+                                              value: widget.journal.day,
+                                              onChoose: (value) {
+                                                close();
+                                                unawaited(
+                                                  _action(
+                                                    () => widget.journal.setDay(
+                                                      value,
+                                                    ),
+                                                    clear: true,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      key: const ValueKey('next-day'),
+                                      tooltip: '后一天',
+                                      onPressed: () => unawaited(
+                                        _action(
+                                          () => widget.journal.shiftDay(1),
+                                          clear: true,
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.chevron_right),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => unawaited(
+                                        _action(
+                                          () => widget.journal.setDay(
+                                            dayStart(widget.journal.clock()),
+                                          ),
+                                          clear: true,
+                                        ),
+                                      ),
+                                      child: const Text('今天'),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Text(
+                                      '星期${'一二三四五六日'[widget.journal.day.weekday - 1]}',
+                                    ),
+                                  ],
                                 ),
-                                child: const Text('今天'),
-                              ),
-                              const SizedBox(width: 14),
-                              Text(
-                                '星期${'一二三四五六日'[widget.journal.day.weekday - 1]}',
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Expanded(
-                            child: Card.outlined(
-                              margin: EdgeInsets.zero,
-                              clipBehavior: Clip.antiAlias,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerLowest,
-                              child: Padding(
-                                padding: const EdgeInsets.all(10),
-                                child: Timeline(
-                                  key: _timeline,
-                                  journal: widget.journal,
-                                  beforeAction: commit,
-                                  onRename: (id) => unawaited(
-                                    _startEdit(
-                                      id,
-                                      EventColumn.title,
-                                      timeline: true,
+                                const SizedBox(height: 12),
+                                Expanded(
+                                  child: Card.outlined(
+                                    margin: EdgeInsets.zero,
+                                    clipBehavior: Clip.antiAlias,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerLowest,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(10),
+                                      child: Timeline(
+                                        key: _timeline,
+                                        journal: widget.journal,
+                                        beforeAction: commit,
+                                        onRename: (id) => unawaited(
+                                          _startEdit(
+                                            id,
+                                            EventColumn.title,
+                                            timeline: true,
+                                          ),
+                                        ),
+                                        onContext: (position, id, start) =>
+                                            unawaited(
+                                              _context(
+                                                position,
+                                                id,
+                                                start: start,
+                                              ),
+                                            ),
+                                        onError: _showError,
+                                        editorEventId: _edit?.inTimeline == true
+                                            ? _edit?.event.id
+                                            : null,
+                                        titleEditor: _edit?.inTimeline == true
+                                            ? _editor()
+                                            : null,
+                                      ),
                                     ),
                                   ),
-                                  onContext: (position, id, start) => unawaited(
-                                    _context(position, id, start: start),
-                                  ),
-                                  onError: _showError,
-                                  editorEventId: _edit?.inTimeline == true
-                                      ? _edit?.event.id
-                                      : null,
-                                  titleEditor: _edit?.inTimeline == true
-                                      ? _editor()
-                                      : null,
                                 ),
-                              ),
+                                const SizedBox(height: 24),
+                                Row(
+                                  children: [
+                                    const Spacer(),
+                                    FilledButton.icon(
+                                      key: const ValueKey('add-event'),
+                                      onPressed: () => unawaited(_add()),
+                                      icon: const Icon(Icons.add),
+                                      label: const Text('新增事件'),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Expanded(
+                                  child: Card.outlined(
+                                    margin: EdgeInsets.zero,
+                                    clipBehavior: Clip.antiAlias,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surfaceContainerLowest,
+                                    child: EventTable(
+                                      key: _table,
+                                      journal: widget.journal,
+                                      onCell: (id, column) =>
+                                          unawaited(_cell(id, column)),
+                                      onBlank: () => unawaited(_clear()),
+                                      onAdd: () => unawaited(_add()),
+                                      onContext: (position, id) =>
+                                          unawaited(_context(position, id)),
+                                      beforeScroll: commit,
+                                      editorId: _edit?.inTimeline == false
+                                          ? _edit?.event.id
+                                          : null,
+                                      editorColumn: _edit?.inTimeline == false
+                                          ? _edit?.column
+                                          : null,
+                                      editor: _edit?.inTimeline == false
+                                          ? _editor()
+                                          : null,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(height: 24),
-                          Row(
-                            children: [
-                              const Spacer(),
-                              FilledButton.icon(
-                                key: const ValueKey('add-event'),
-                                onPressed: () => unawaited(_add()),
-                                icon: const Icon(Icons.add),
-                                label: const Text('新增事件'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Expanded(
-                            child: Card.outlined(
-                              margin: EdgeInsets.zero,
-                              clipBehavior: Clip.antiAlias,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.surfaceContainerLowest,
-                              child: EventTable(
-                                key: _table,
-                                journal: widget.journal,
-                                onCell: (id, column) =>
-                                    unawaited(_cell(id, column)),
-                                onBlank: () => unawaited(_clear()),
-                                onAdd: () => unawaited(_add()),
-                                onContext: (position, id) =>
-                                    unawaited(_context(position, id)),
-                                beforeScroll: commit,
-                                editorId: _edit?.inTimeline == false
-                                    ? _edit?.event.id
-                                    : null,
-                                editorColumn: _edit?.inTimeline == false
-                                    ? _edit?.column
-                                    : null,
-                                editor: _edit?.inTimeline == false
-                                    ? _editor()
-                                    : null,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),

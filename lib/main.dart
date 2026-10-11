@@ -62,7 +62,11 @@ Future<void> main(List<String> arguments) async {
           (display.visibleSize ?? display.size),
     );
     await windowManager.waitUntilReadyToShow(
-      WindowOptions(title: 'Daymark', minimumSize: geometry.minimumSize),
+      WindowOptions(
+        title: 'Daymark',
+        minimumSize: geometry.minimumSize,
+        titleBarStyle: TitleBarStyle.hidden,
+      ),
     );
     await windowManager.setBounds(geometry.bounds);
     final directory = dataDirectory(arguments);
