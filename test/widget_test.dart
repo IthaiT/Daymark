@@ -138,7 +138,15 @@ void main() {
     'layout retains all panels, columns, Chinese controls and no tag filtering',
     (tester) async {
       await open(tester);
-      for (final title in ['Daymark', '事件', '开始', '结束', '标签', '本日用时', '新增事件']) {
+      for (final title in [
+        'Daymark',
+        '事件',
+        '开始',
+        '结束',
+        '标签',
+        '本日用时',
+        '新增事件',
+      ]) {
         expect(find.text(title), findsWidgets);
       }
       expect(find.byType(Timeline), findsOneWidget);
@@ -539,10 +547,9 @@ void main() {
       await tester.tap(cell('b', 'title'));
       await tester.pumpAndSettle();
       await tester.enterText(input('b', 'title'), '空白保存');
-      // The blank area right of the weekday label always stays visible; its
-      // tap falls through to the screen's blank-area handler, which commits
-      // and clears selection.
-      await tester.tapAt(const Offset(700, 84));
+      // The sidebar logo is always visible; its primary tap falls through to
+      // the screen's blank-area handler, which commits and clears selection.
+      await tester.tap(find.text('Daymark'));
       await tester.pumpAndSettle();
       expect(journal.store.events['b']!.title, '空白保存');
       expect(journal.selected, isEmpty);
