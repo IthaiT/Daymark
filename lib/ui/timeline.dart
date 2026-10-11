@@ -587,16 +587,15 @@ class _TimelinePainter extends CustomPainter {
     for (final event in events) {
       final rectangles = pieces[event.id];
       if (rectangles == null) continue;
-      final path = Path()..moveTo(rectangles.first.left, rectangles.first.top);
+      // Chip look: shave a hair off each side so neighbouring segments and
+      // lanes breathe, and round the corners. Hit testing keeps using the
+      // raw rectangles, so the interactive targets do not shrink.
+      final path = Path();
       for (final rect in rectangles) {
-        path.lineTo(rect.left, rect.top);
-        path.lineTo(rect.right, rect.top);
+        final body = rect.deflate(1);
+        final radius = math.min(6.0, math.min(body.width, body.height) / 2);
+        path.addRRect(RRect.fromRectAndRadius(body, Radius.circular(radius)));
       }
-      for (final rect in rectangles.reversed) {
-        path.lineTo(rect.right, rect.bottom);
-        path.lineTo(rect.left, rect.bottom);
-      }
-      path.close();
       final selected = journal.selected.contains(event.id);
       final (background, foreground) = eventColors(
         journal.store,
@@ -630,8 +629,8 @@ class _TimelinePainter extends CustomPainter {
         _text(
           canvas,
           event.title.isEmpty ? '新事件' : event.title,
-          Offset(largest.left + 7, largest.center.dy - 7),
-          width: largest.width - 12,
+          Offset(largest.left + 8, largest.center.dy - 7),
+          width: largest.width - 14,
           color: foreground,
           bold: selected,
         );
