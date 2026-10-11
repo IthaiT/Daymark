@@ -547,10 +547,10 @@ class _TimelinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final bottom = size.height - 26;
+    // The enclosing card draws the frame; the grid lines share this paint.
     final border = Paint()
       ..color = scheme.outlineVariant
       ..style = PaintingStyle.stroke;
-    canvas.drawRect(Offset.zero & size, border);
     var major = zoom == 1
         ? 120
         : zoom < 2

@@ -312,7 +312,6 @@ class JournalScreenState extends State<JournalScreen> {
                     beforeAction: _beforeAction,
                     onError: _showError,
                   ),
-                  const VerticalDivider(width: 1),
                   Expanded(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
@@ -404,27 +403,37 @@ class JournalScreenState extends State<JournalScreen> {
                           ),
                           const SizedBox(height: 12),
                           Expanded(
-                            child: Timeline(
-                              key: _timeline,
-                              journal: widget.journal,
-                              beforeAction: commit,
-                              onRename: (id) => unawaited(
-                                _startEdit(
-                                  id,
-                                  EventColumn.title,
-                                  timeline: true,
+                            child: Card.outlined(
+                              margin: EdgeInsets.zero,
+                              clipBehavior: Clip.antiAlias,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLowest,
+                              child: Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Timeline(
+                                  key: _timeline,
+                                  journal: widget.journal,
+                                  beforeAction: commit,
+                                  onRename: (id) => unawaited(
+                                    _startEdit(
+                                      id,
+                                      EventColumn.title,
+                                      timeline: true,
+                                    ),
+                                  ),
+                                  onContext: (position, id, start) => unawaited(
+                                    _context(position, id, start: start),
+                                  ),
+                                  onError: _showError,
+                                  editorEventId: _edit?.inTimeline == true
+                                      ? _edit?.event.id
+                                      : null,
+                                  titleEditor: _edit?.inTimeline == true
+                                      ? _editor()
+                                      : null,
                                 ),
                               ),
-                              onContext: (position, id, start) => unawaited(
-                                _context(position, id, start: start),
-                              ),
-                              onError: _showError,
-                              editorEventId: _edit?.inTimeline == true
-                                  ? _edit?.event.id
-                                  : null,
-                              titleEditor: _edit?.inTimeline == true
-                                  ? _editor()
-                                  : null,
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -445,25 +454,32 @@ class JournalScreenState extends State<JournalScreen> {
                           ),
                           const SizedBox(height: 12),
                           Expanded(
-                            child: EventTable(
-                              key: _table,
-                              journal: widget.journal,
-                              onCell: (id, column) =>
-                                  unawaited(_cell(id, column)),
-                              onBlank: () => unawaited(_clear()),
-                              onAdd: () => unawaited(_add()),
-                              onContext: (position, id) =>
-                                  unawaited(_context(position, id)),
-                              beforeScroll: commit,
-                              editorId: _edit?.inTimeline == false
-                                  ? _edit?.event.id
-                                  : null,
-                              editorColumn: _edit?.inTimeline == false
-                                  ? _edit?.column
-                                  : null,
-                              editor: _edit?.inTimeline == false
-                                  ? _editor()
-                                  : null,
+                            child: Card.outlined(
+                              margin: EdgeInsets.zero,
+                              clipBehavior: Clip.antiAlias,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerLowest,
+                              child: EventTable(
+                                key: _table,
+                                journal: widget.journal,
+                                onCell: (id, column) =>
+                                    unawaited(_cell(id, column)),
+                                onBlank: () => unawaited(_clear()),
+                                onAdd: () => unawaited(_add()),
+                                onContext: (position, id) =>
+                                    unawaited(_context(position, id)),
+                                beforeScroll: commit,
+                                editorId: _edit?.inTimeline == false
+                                    ? _edit?.event.id
+                                    : null,
+                                editorColumn: _edit?.inTimeline == false
+                                    ? _edit?.column
+                                    : null,
+                                editor: _edit?.inTimeline == false
+                                    ? _editor()
+                                    : null,
+                              ),
                             ),
                           ),
                         ],
