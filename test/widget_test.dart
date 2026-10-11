@@ -10,7 +10,6 @@ import 'package:daymark/ui/pickers.dart';
 import 'package:daymark/ui/startup_window.dart';
 import 'package:daymark/ui/tag_sidebar.dart';
 import 'package:daymark/ui/timeline.dart';
-import 'package:daymark/ui/theme.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -425,7 +424,11 @@ void main() {
       );
       expect(
         row.color,
-        eventColor(journal.store, journal.event('a')!, selected: true),
+        tester
+            .widget<MaterialApp>(find.byType(MaterialApp))
+            .theme!
+            .colorScheme
+            .secondaryContainer,
       );
       final blank = await tester.startGesture(
         Offset(timeline.left + 24 + width * 20 / 24, timeline.top + 80),

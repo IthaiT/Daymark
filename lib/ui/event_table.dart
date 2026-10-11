@@ -87,6 +87,27 @@ class EventTableState extends State<EventTable> {
   String _clock(DateTime value) => dayStart(value) == widget.journal.day
       ? clockText(value)
       : '${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')} ${clockText(value)}';
+
+  Widget _tagCell(Event event) {
+    final (background, foreground) = eventColors(widget.journal.store, event);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        widget.journal.store.tagName(event.tagId),
+        maxLines: 1,
+        style: TextStyle(
+          color: foreground,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
@@ -190,11 +211,11 @@ class EventTableState extends State<EventTable> {
                                 event.id,
                               ),
                               child: ColoredBox(
-                                color: eventColor(
-                                  widget.journal.store,
-                                  event,
-                                  selected: selected,
-                                ),
+                                color: selected
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.secondaryContainer
+                                    : Colors.transparent,
                                 child: Row(
                                   children: [
                                     for (
@@ -229,17 +250,25 @@ class EventTableState extends State<EventTable> {
                                                         const EdgeInsets.symmetric(
                                                           horizontal: 8,
                                                         ),
-                                                    child: Text(
-                                                      labels[cell],
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                        fontWeight: selected
-                                                            ? FontWeight.bold
-                                                            : FontWeight.normal,
-                                                      ),
-                                                    ),
+                                                    child:
+                                                        columns[cell] ==
+                                                            EventColumn.tag
+                                                        ? _tagCell(event)
+                                                        : Text(
+                                                            labels[cell],
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style: TextStyle(
+                                                              fontWeight:
+                                                                  selected
+                                                                  ? FontWeight
+                                                                        .bold
+                                                                  : FontWeight
+                                                                        .normal,
+                                                            ),
+                                                          ),
                                                   ),
                                                 ),
                                               ),

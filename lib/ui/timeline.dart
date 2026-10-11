@@ -598,10 +598,12 @@ class _TimelinePainter extends CustomPainter {
       }
       path.close();
       final selected = journal.selected.contains(event.id);
-      canvas.drawPath(
-        path,
-        Paint()..color = eventColor(journal.store, event, selected: selected),
+      final (background, foreground) = eventColors(
+        journal.store,
+        event,
+        selected: selected,
       );
+      canvas.drawPath(path, Paint()..color = background);
       final outline = Paint()
         ..style = PaintingStyle.stroke
         ..color = selected ? scheme.onSurface : scheme.outline
@@ -630,6 +632,7 @@ class _TimelinePainter extends CustomPainter {
           event.title.isEmpty ? '新事件' : event.title,
           Offset(largest.left + 7, largest.center.dy - 7),
           width: largest.width - 12,
+          color: foreground,
           bold: selected,
         );
       }

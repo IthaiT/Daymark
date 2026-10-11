@@ -37,24 +37,30 @@ ThemeData daymarkTheme() {
 }
 
 // Material's published swatches; descendants share their root's color.
-Color eventColor(Store store, Event event, {bool selected = false}) {
-  if (event.tagId == null) {
-    return selected ? Colors.grey.shade300 : Colors.grey.shade100;
-  }
-  final root = store.ancestors(event.tagId).first.id;
-  const palettes = [
-    Colors.blue,
-    Colors.deepPurple,
-    Colors.amber,
-    Colors.red,
-    Colors.orange,
-    Colors.cyan,
-    Colors.pink,
-  ];
-  const defaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 4};
+const _palettes = [
+  Colors.blue,
+  Colors.deepPurple,
+  Colors.amber,
+  Colors.red,
+  Colors.orange,
+  Colors.cyan,
+  Colors.pink,
+];
+const _defaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 4};
+
+MaterialColor _paletteFor(Store store, String? tagId) {
+  if (tagId == null) return Colors.blueGrey;
+  final root = store.ancestors(tagId).first.id;
   final index =
-      defaults[root] ??
+      _defaults[root] ??
       root.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
-          palettes.length;
-  return palettes[index][selected ? 100 : 50]!;
+          _palettes.length;
+  return _palettes[index];
+}
+
+/// Background and foreground pair that keeps tagged events readable on any
+/// surface; use the foreground for text drawn on the background.
+(Color, Color) eventColors(Store store, Event event, {bool selected = false}) {
+  final palette = _paletteFor(store, event.tagId);
+  return (palette[selected ? 200 : 100]!, palette[800]!);
 }
