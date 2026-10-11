@@ -468,8 +468,8 @@ class _CategoryManagerState extends State<_CategoryManager> {
                   for (final category in widget.ledger.state.orderedCategories(
                     _kind,
                   ))
-              ListTile(
-                key: ValueKey('category-manage-${category.id}'),
+                    ListTile(
+                      key: ValueKey('category-manage-${category.id}'),
                       contentPadding: EdgeInsets.only(
                         left:
                             12 +

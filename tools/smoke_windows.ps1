@@ -12,6 +12,8 @@ $taskTags = '{"version":1,"tags":[{"id":"work","name":"主业","parent_id":null}
 $taskLegacyHead = "undefined:legacy-leading,未定义,,${taskPreviousDay}T00:00:00,${taskPreviousDay}T22:00:00,`r`n"
 $taskEvents = "id,title,tag_id,start,end,notes`r`nvideo,视频,work,${taskPreviousDay}T22:00:00,${taskPreviousDay}T23:50:00,`r`nsleep,睡觉,work,${taskDay}T00:06:00,${taskDay}T08:00:00,`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'events.csv'), $taskEvents + $taskLegacyHead, [Text.UTF8Encoding]::new($true))
+$taskLedger = '{"version":2,"default_cash_account_id":"cash","balance_enabled":true,"accounts":[{"id":"cash","name":"现金","kind":"cash","opening_cents":1000000,"balance_cents":997200},{"id":"provident","name":"公积金","kind":"provident","opening_cents":0,"balance_cents":0},{"id":"investment","name":"投资","kind":"investment","opening_cents":0,"balance_cents":0}],"categories":[{"id":"lunch","name":"午餐","kind":"expense","parent_id":null}],"records":[{"id":"synthetic-money","kind":"expense","amount_cents":2800,"date":"' + $taskDay + '","category_id":"lunch","notes":"隔离测试","account_id":"cash","to_account_id":null,"affects_balance":true}],"pinned":["lunch"]}'
+[IO.File]::WriteAllText((Join-Path $taskDirectory 'ledger.json'), $taskLedger, [Text.UTF8Encoding]::new($false))
 
 Add-Type -TypeDefinition @'
 using System;
@@ -115,11 +117,15 @@ public static class DaymarkPrivateDesktop {
         if (desktop == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
         Process first = null, second = null;
         try {
+            var ledgerBytes = File.ReadAllBytes(Path.Combine(directory, "ledger.json"));
             first = Launch(executable, directory, name);
             var firstWindow = WaitForWindow(desktop, first);
             Thread.Sleep(500);
             CheckWindowBounds(firstWindow);
             if (CanLock(directory)) throw new Exception("Application did not retain its data-directory lock.");
+            if (!Convert.ToBase64String(ledgerBytes).Equals(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(directory, "ledger.json"))))) {
+                throw new Exception("Native launch replayed or rewrote linked money records.");
+            }
             var bytes = File.ReadAllBytes(Path.Combine(directory, "events.csv"));
             var csv = Encoding.UTF8.GetString(bytes);
             if (csv.Contains("undefined:legacy-leading")) {
@@ -138,6 +144,9 @@ public static class DaymarkPrivateDesktop {
             if (!Convert.ToBase64String(bytes).Equals(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(directory, "events.csv"))))) {
                 throw new Exception("The second instance changed the data file.");
             }
+            if (!Convert.ToBase64String(ledgerBytes).Equals(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(directory, "ledger.json"))))) {
+                throw new Exception("The second instance changed ledger balances or records.");
+            }
             PostMessageW(secondWindow, 0x0010, IntPtr.Zero, IntPtr.Zero);
             if (!second.WaitForExit(10000)) throw new Exception("Second instance did not close.");
             PostMessageW(firstWindow, 0x0010, IntPtr.Zero, IntPtr.Zero);
@@ -153,4 +162,4 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
