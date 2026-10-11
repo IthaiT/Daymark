@@ -36,37 +36,61 @@ ThemeData daymarkTheme() {
   );
 }
 
-// Material's published swatches; every tag owns one stable color of its own
-// so sibling activities stay distinguishable at a glance.
-const _palettes = [
-  Colors.blue,
-  Colors.deepPurple,
-  Colors.amber,
-  Colors.red,
-  Colors.orange,
-  Colors.cyan,
-  Colors.pink,
-  Colors.teal,
-  Colors.lightGreen,
-  Colors.indigo,
-];
-const _defaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 4};
+// Anchored family hues, far more than 30° apart on the color wheel: the hue
+// expresses the root family, the lightness expresses the member within it.
+const _families = [Colors.blue, Colors.deepPurple, Colors.teal, Colors.orange];
+const _familyDefaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 3};
 
-MaterialColor _paletteFor(Store store, String? tagId) {
+// Lightness steps handed out to family members in sidebar (tree) order so
+// adjacent siblings always differ; the root itself keeps the middle 500 step.
+const _steps = [400, 600, 300, 700, 500, 800];
+// Pastel fill and strong ink per step; large timeline areas stay muted while
+// the ink carries enough contrast for chips, dots and text.
+const _inkPairs = {
+  300: (100, 600),
+  400: (100, 700),
+  500: (100, 800),
+  600: (200, 800),
+  700: (300, 900),
+  800: (300, 900),
+};
+
+MaterialColor _familyFor(Store store, String? tagId) {
   if (tagId == null) return Colors.blueGrey;
+  final root = store.ancestors(tagId).first.id;
   final index =
-      _defaults[tagId] ??
-      tagId.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
-          _palettes.length;
-  return _palettes[index];
+      _familyDefaults[root] ??
+      root.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
+          _families.length;
+  return _families[index];
+}
+
+int _stepFor(Store store, String? tagId) {
+  if (tagId == null) return 600;
+  final root = store.ancestors(tagId).first.id;
+  var index = 0;
+  for (final tag in store.orderedTags()) {
+    if (store.ancestors(tag.id).first.id != root) continue;
+    if (tag.id == tagId) break;
+    index++;
+  }
+  return index == 0 ? 500 : _steps[(index - 1) % _steps.length];
 }
 
 /// Background and foreground pair that keeps tagged events readable on any
 /// surface; use the foreground for text drawn on the background.
 (Color, Color) eventColors(Store store, Event event, {bool selected = false}) {
-  final palette = _paletteFor(store, event.tagId);
-  return (palette[selected ? 200 : 100]!, palette[800]!);
+  if (event.tagId == null) {
+    return (Colors.blueGrey[selected ? 200 : 100]!, Colors.blueGrey[800]!);
+  }
+  final family = _familyFor(store, event.tagId);
+  final (fill, ink) = _inkPairs[_stepFor(store, event.tagId)]!;
+  return (
+    family[selected ? (fill >= 300 ? 300 : fill + 100) : fill]!,
+    family[ink]!,
+  );
 }
 
 /// Accent color for the dot marking a tag in the sidebar.
-Color tagDot(Store store, String? tagId) => _paletteFor(store, tagId)[600]!;
+Color tagDot(Store store, String? tagId) =>
+    _familyFor(store, tagId)[_stepFor(store, tagId)]!;
