@@ -36,7 +36,8 @@ ThemeData daymarkTheme() {
   );
 }
 
-// Material's published swatches; descendants share their root's color.
+// Material's published swatches; every tag owns one stable color of its own
+// so sibling activities stay distinguishable at a glance.
 const _palettes = [
   Colors.blue,
   Colors.deepPurple,
@@ -45,15 +46,17 @@ const _palettes = [
   Colors.orange,
   Colors.cyan,
   Colors.pink,
+  Colors.teal,
+  Colors.lightGreen,
+  Colors.indigo,
 ];
 const _defaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 4};
 
 MaterialColor _paletteFor(Store store, String? tagId) {
   if (tagId == null) return Colors.blueGrey;
-  final root = store.ancestors(tagId).first.id;
   final index =
-      _defaults[root] ??
-      root.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
+      _defaults[tagId] ??
+      tagId.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
           _palettes.length;
   return _palettes[index];
 }
