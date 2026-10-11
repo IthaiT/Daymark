@@ -8,6 +8,7 @@ import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/pickers.dart';
 import 'package:daymark/ui/timeline.dart';
+import 'package:daymark/ui/theme.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -284,6 +285,51 @@ void main() {
       );
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.day, DateTime.utc(2026, 10, 9));
+    },
+  );
+
+  testWidgets(
+    'timeline single click stays selected after double tap timeout and clock repaint',
+    (tester) async {
+      await open(tester);
+      final timeline = tester.getRect(find.byType(Timeline));
+      final width = timeline.width - 50;
+      final point = Offset(
+        timeline.left + 24 + width * 13.5 / 24,
+        timeline.top + 80,
+      );
+      final before = journal.store.events;
+      final gesture = await tester.startGesture(
+        point,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await gesture.up();
+      await tester.pump(const Duration(seconds: 1));
+      expect(journal.selected, {'a'});
+      await tester.pump(const Duration(minutes: 1));
+      expect(journal.selected, {'a'});
+      expect(journal.store.events, before);
+      final row = tester.widget<ColoredBox>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('row-a')),
+              matching: find.byType(ColoredBox),
+            )
+            .first,
+      );
+      expect(
+        row.color,
+        eventColor(journal.store, journal.event('a')!, selected: true),
+      );
+      final blank = await tester.startGesture(
+        Offset(timeline.left + 24 + width * 20 / 24, timeline.top + 80),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await blank.up();
+      await tester.pumpAndSettle();
+      expect(journal.selected, isEmpty);
     },
   );
 

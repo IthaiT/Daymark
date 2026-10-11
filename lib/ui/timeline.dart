@@ -392,6 +392,9 @@ class TimelineState extends State<Timeline> {
             onPointerSignal: _wheel,
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              // Pointer handlers select immediately; consume the resolved tap
+              // so it cannot clear selection in the screen's blank-area handler.
+              onTap: () {},
               onSecondaryTapDown: _context,
               onDoubleTapDown: (pointer) {
                 final hit = _hit(_content(pointer.localPosition));
