@@ -15,8 +15,6 @@ flutter run -d windows
 flutter build windows --release
 ```
 
-本工作区的 SDK 位于被 Git 忽略的 `.tools/flutter/`。使用本地 SDK 时，将以上 `flutter` 替换为 `./.tools/flutter/bin/flutter.bat`，并设置 `$env:PUB_CACHE = Join-Path $PWD '.tools/pub-cache'`。本机未开启开发者模式，已在项目内使用 NTFS junction 建立两个插件链接；其他机器按 Flutter 官方环境要求配置即可。
-
 发行时复制整个 `build/windows/x64/runner/Release/` 目录，包含 DLL 和 Flutter 的 `data/` 资源；单独复制 EXE 不足以运行。独立发行版默认将用户记录保存在 EXE 旁的 `journal/`，也可传入 `--data-dir`。仓库启动脚本始终默认使用项目原有的 `data/`。
 
 ## 功能
@@ -27,8 +25,6 @@ flutter build windows --release
 - 按日期浏览横向时间轴和事件明细。
 - 标签树右键管理、拖拽移动，事件使用树状下拉选择标签。
 - 本地存储，不上传数据。
-
-开发使用 Git 单分支线性历史，将环境、数据层、界面和验证分步提交。
 
 ## 使用方法
 

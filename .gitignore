@@ -1,10 +1,5 @@
-.conda/
-.conda-pkgs/
-__pycache__/
-*.py[cod]
 /data/
 .test-artifacts/
-.pytest_cache/
 *.tmp
 *.log
 .tools/
@@ -14,4 +9,5 @@ __pycache__/
 build/
 windows/flutter/ephemeral/
 .idea/
+.vscode/
 *.iml
