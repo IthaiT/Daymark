@@ -5,7 +5,8 @@ import 'package:window_manager/window_manager.dart';
 /// window and doubles on double-tap to maximize; flat caption buttons sit at
 /// the far right. The native title bar is hidden in main().
 class WindowTitleBar extends StatefulWidget {
-  const WindowTitleBar({super.key});
+  const WindowTitleBar({super.key, this.leading});
+  final Widget? leading;
   @override
   State<WindowTitleBar> createState() => _WindowTitleBarState();
 }
@@ -40,7 +41,9 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
           Container(
             width: 250,
             color: scheme.surfaceContainer,
-            child: const DragToMoveArea(child: SizedBox.expand()),
+            child:
+                widget.leading ??
+                const DragToMoveArea(child: SizedBox.expand()),
           ),
           Expanded(
             child: DragToMoveArea(

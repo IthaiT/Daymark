@@ -15,8 +15,13 @@ import 'timeline.dart';
 import 'title_bar.dart';
 
 class JournalScreen extends StatefulWidget {
-  const JournalScreen({super.key, required this.journal});
+  const JournalScreen({
+    super.key,
+    required this.journal,
+    this.showTitleBar = true,
+  });
   final JournalController journal;
+  final bool showTitleBar;
   @override
   State<JournalScreen> createState() => JournalScreenState();
 }
@@ -305,7 +310,7 @@ class JournalScreenState extends State<JournalScreen> {
         child: Scaffold(
           body: Column(
             children: [
-              const WindowTitleBar(),
+              if (widget.showTitleBar) const WindowTitleBar(),
               Expanded(
                 child: AnimatedBuilder(
                   animation: widget.journal,

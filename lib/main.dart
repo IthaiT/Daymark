@@ -6,8 +6,11 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'application/journal_controller.dart';
+import 'application/ledger_controller.dart';
 import 'data/instance_lock.dart';
+import 'data/ledger_store.dart';
 import 'data/store.dart';
+import 'ui/app_screen.dart';
 import 'ui/journal_screen.dart';
 import 'ui/startup_window.dart';
 import 'ui/theme.dart';
@@ -71,10 +74,17 @@ Future<void> main(List<String> arguments) async {
     await windowManager.setBounds(geometry.bounds);
     final directory = dataDirectory(arguments);
     lock = InstanceLock.acquire(directory);
+    final ledgerStore = await LedgerStore.open(directory);
     final store = await Store.open(directory);
     final journal = JournalController(store);
     await journal.initialize();
-    runApp(DaymarkApp(journal: journal, instanceLock: lock));
+    runApp(
+      DaymarkApp(
+        journal: journal,
+        ledger: LedgerController(ledgerStore),
+        instanceLock: lock,
+      ),
+    );
     // The OS releases the byte lock on exit, including abnormal termination.
   } catch (error) {
     lock?.close();
@@ -101,8 +111,14 @@ Future<void> main(List<String> arguments) async {
 }
 
 class DaymarkApp extends StatefulWidget {
-  const DaymarkApp({super.key, required this.journal, this.instanceLock});
+  const DaymarkApp({
+    super.key,
+    required this.journal,
+    this.ledger,
+    this.instanceLock,
+  });
   final JournalController journal;
+  final LedgerController? ledger;
   // Keep the native handle reachable for the entire application's lifetime.
   final InstanceLock? instanceLock;
 
@@ -125,6 +141,8 @@ class _DaymarkAppState extends State<DaymarkApp> {
     locale: const Locale('zh', 'CN'),
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     supportedLocales: const [Locale('zh', 'CN')],
-    home: JournalScreen(journal: widget.journal),
+    home: widget.ledger == null
+        ? JournalScreen(journal: widget.journal)
+        : AppScreen(journal: widget.journal, ledger: widget.ledger!),
   );
 }
