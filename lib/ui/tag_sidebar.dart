@@ -120,17 +120,10 @@ class _TagSidebarState extends State<TagSidebar> {
       child: Material(
         color: Theme.of(context).colorScheme.surfaceContainer,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 16, 24),
+          padding: const EdgeInsets.fromLTRB(20, 12, 16, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Daymark',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 28),
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,

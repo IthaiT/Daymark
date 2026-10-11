@@ -37,10 +37,30 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
       child: Row(
         children: [
           // Melt into the sidebar's surface so the bar reads as part of it.
+          // The brand lives here, mirroring the native bar's icon and title.
           Container(
             width: 250,
             color: scheme.surfaceContainer,
-            child: const DragToMoveArea(child: SizedBox.expand()),
+            child: DragToMoveArea(
+              child: Row(
+                children: [
+                  const SizedBox(width: 14),
+                  Image.asset(
+                    'assets/app_icon.png',
+                    width: 18,
+                    height: 18,
+                    filterQuality: FilterQuality.medium,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Daymark',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
           Expanded(
             child: DragToMoveArea(
