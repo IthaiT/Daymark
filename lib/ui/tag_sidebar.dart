@@ -168,51 +168,48 @@ class _TagSidebarState extends State<TagSidebar> {
                                   ),
                                   contentPadding: EdgeInsets.only(
                                     left:
+                                        4 +
                                         (store.ancestors(tag.id).length - 1) *
-                                        14.0,
+                                            20.0,
                                     right: 4,
                                   ),
-                                  leading:
+                                  leading: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      color: tagDot(store, tag.id),
+                                      borderRadius: BorderRadius.circular(5),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    tag.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  trailing:
                                       store.tags.values.any(
                                         (child) => child.parentId == tag.id,
                                       )
-                                      ? IconButton(
-                                          icon: Icon(
-                                            _collapsed.contains(tag.id)
-                                                ? Icons.chevron_right
-                                                : Icons.expand_more,
-                                            size: 18,
-                                          ),
-                                          onPressed: () => setState(() {
+                                      ? GestureDetector(
+                                          onTap: () => setState(() {
                                             if (!_collapsed.add(tag.id)) {
                                               _collapsed.remove(tag.id);
                                             }
                                           }),
-                                        )
-                                      : const SizedBox(width: 28),
-                                  title: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Container(
-                                        width: 10,
-                                        height: 10,
-                                        decoration: BoxDecoration(
-                                          color: tagDot(store, tag.id),
-                                          borderRadius: BorderRadius.circular(
-                                            3,
+                                          child: Padding(
+                                            padding: const EdgeInsets.all(6),
+                                            child: Icon(
+                                              _collapsed.contains(tag.id)
+                                                  ? Icons.chevron_right
+                                                  : Icons.keyboard_arrow_down,
+                                              size: 20,
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.onSurfaceVariant,
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Flexible(
-                                        child: Text(
-                                          tag.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                        )
+                                      : null,
                                   onTap: () async {
                                     if (await widget.beforeAction() &&
                                         mounted) {
