@@ -240,6 +240,80 @@ void main() {
   );
 
   test(
+    'startup removes an obsolete first-day head and retains real gap metadata',
+    () async {
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        day.add(const Duration(hours: 23, minutes: 49)),
+        day.add(const Duration(days: 1, hours: 7, minutes: 40)),
+      );
+      final breakfast = Event(
+        'breakfast',
+        '早餐',
+        'life',
+        day.add(const Duration(days: 1, hours: 9)),
+        day.add(const Duration(days: 1, hours: 10)),
+      );
+      final oldHead = Event(
+        undefinedHeadId(day),
+        '未定义',
+        null,
+        day,
+        sleep.start,
+      );
+      final realGap = undefinedEvents([sleep, breakfast])
+          .singleWhere((gap) => gap.start == sleep.end)
+          .copyWith(title: '准备早餐', notes: '保留备注');
+      await store.replaceEvents({
+        sleep.id: sleep,
+        breakfast.id: breakfast,
+        oldHead.id: oldHead,
+        realGap.id: realGap,
+      });
+      final beforeWrites = writes;
+      await controller.initialize();
+      expect(controller.rows, [sleep]);
+      expect(store.events, {
+        sleep.id: sleep,
+        breakfast.id: breakfast,
+        realGap.id: realGap,
+      });
+      expect(writes - beforeWrites, 1);
+      expect((await Store.open(directory)).events, store.events);
+      await controller.initialize();
+      expect(writes - beforeWrites, 1);
+      await controller.shiftDay(1);
+      expect(controller.rows, [sleep, realGap, breakfast]);
+    },
+  );
+
+  test(
+    'failed obsolete-head cleanup preserves the original data for retry',
+    () async {
+      final first = item('first', 9, 10);
+      final oldHead = Event(
+        undefinedHeadId(day),
+        '未定义',
+        null,
+        day,
+        first.start,
+      );
+      final original = {first.id: first, oldHead.id: oldHead};
+      await store.replaceEvents(original);
+      final oldBytes = await store.eventsFile.readAsBytes();
+      failWrites = true;
+      await expectLater(controller.initialize(), throwsFileSystemException);
+      expect(store.events, original);
+      expect(await store.eventsFile.readAsBytes(), oldBytes);
+      failWrites = false;
+      await controller.initialize();
+      expect(store.events, {first.id: first});
+    },
+  );
+
+  test(
     'legacy renamed head becomes one complete cross-day gap on both dates',
     () async {
       final evening = DateTime.utc(2026, 10, 9);

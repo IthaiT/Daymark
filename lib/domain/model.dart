@@ -222,11 +222,12 @@ Event moveEventOnDay(Event event, DateTime day, int minutes) {
 String _gapId(List<String> parts) =>
     '$undefinedIdPrefix${const Uuid().v5(Namespace.url.value, '(${parts.map(pythonStringRepr).join(', ')})').replaceAll('-', '')}';
 
+/// Legacy leading-gap identity, used only to upgrade bounded overnight gaps.
 String undefinedHeadId(DateTime day) =>
     _gapId(['daymark:undefined', 'head', dateText(day)]);
 
-/// Merge the complete journal before filtering by day, so a midnight boundary
-/// never splits a gap's persisted interval or identity.
+/// Derive only gaps bounded by ordinary events. Merge the complete journal
+/// before filtering by day, preserving cross-midnight intervals and identities.
 List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
   final intervals =
       <Event>[
@@ -243,9 +244,7 @@ List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
   for (final item in intervals) {
     final left = item.start;
     final right = item.end!;
-    if (end == null && left.isAfter(dayStart(left))) {
-      gaps.add(Event(undefinedHeadId(left), '未定义', null, dayStart(left), left));
-    } else if (end != null && left.isAfter(end)) {
+    if (end != null && left.isAfter(end)) {
       gaps.add(
         Event(
           _gapId(['daymark:undefined', previousId!, item.id]),

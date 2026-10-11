@@ -115,7 +115,7 @@ void main() {
   );
 
   test(
-    'gap IDs and boundaries match exported Python compatibility fixtures',
+    'bounded gap IDs and boundaries match exported Python compatibility fixtures',
     () {
       final cases =
           jsonDecode(
@@ -136,10 +136,17 @@ void main() {
             row['end'] == null ? null : parseTimestamp(row['end']! as String),
           );
         }).toList();
-        final gaps = undefinedEvents(
-          events,
-          parseDate(fixture['day']! as String),
-        );
+        final fixtureDay = parseDate(fixture['day']! as String);
+        final gaps = undefinedEvents(events, fixtureDay);
+        // Historical fixtures retain the old day-head rule. Only interior
+        // gaps remain valid; their IDs and boundaries must stay compatible.
+        final expectedGaps = (fixture['gaps']! as List<Object?>)
+            .where(
+              (raw) =>
+                  (raw! as Map<String, Object?>)['id'] !=
+                  undefinedHeadId(fixtureDay),
+            )
+            .toList();
         expect(
           [
             for (final gap in gaps)
@@ -149,7 +156,7 @@ void main() {
                 'end': timestampText(gap.end!),
               },
           ],
-          fixture['gaps'],
+          expectedGaps,
           reason: fixture['name']! as String,
         );
         expect(
@@ -201,6 +208,26 @@ void main() {
     expect(durationText(const Duration(seconds: 30)), '不足 1 分钟');
     expect(durationText(const Duration(minutes: 61)), '1 小时 01 分');
     expect(durationText(Duration.zero), '0 分钟');
+  });
+
+  test('the first overnight event has no inferred head or tail gap', () {
+    final sleep = Event(
+      'sleep',
+      '睡觉',
+      'rest',
+      day.add(const Duration(hours: 23, minutes: 49)),
+      day.add(const Duration(days: 1, hours: 7, minutes: 40)),
+    );
+    final oldHead = Event(undefinedHeadId(day), '未定义', null, day, sleep.start);
+    expect(undefinedHeadId(day), 'undefined:cd030d559a60589f816b9157161c30bb');
+    expect(undefinedEvents([sleep, oldHead]), isEmpty);
+    for (final date in [
+      day.subtract(const Duration(days: 1)),
+      day,
+      day.add(const Duration(days: 1)),
+    ]) {
+      expect(undefinedEvents([sleep, oldHead], date), isEmpty);
+    }
   });
 
   test(

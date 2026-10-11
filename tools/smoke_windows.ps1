@@ -9,8 +9,9 @@ $taskDay = (Get-Date).ToString('yyyy-MM-dd')
 $taskPreviousDay = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
 $taskTags = '{"version":1,"tags":[{"id":"work","name":"主业","parent_id":null}]}'
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'tags.json'), $taskTags, [Text.UTF8Encoding]::new($false))
+$taskLegacyHead = "undefined:legacy-leading,未定义,,${taskPreviousDay}T00:00:00,${taskPreviousDay}T22:00:00,`r`n"
 $taskEvents = "id,title,tag_id,start,end,notes`r`nvideo,视频,work,${taskPreviousDay}T22:00:00,${taskPreviousDay}T23:50:00,`r`nsleep,睡觉,work,${taskDay}T00:06:00,${taskDay}T08:00:00,`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
-[IO.File]::WriteAllText((Join-Path $taskDirectory 'events.csv'), $taskEvents, [Text.UTF8Encoding]::new($true))
+[IO.File]::WriteAllText((Join-Path $taskDirectory 'events.csv'), $taskEvents + $taskLegacyHead, [Text.UTF8Encoding]::new($true))
 
 Add-Type -TypeDefinition @'
 using System;
@@ -121,6 +122,9 @@ public static class DaymarkPrivateDesktop {
             if (CanLock(directory)) throw new Exception("Application did not retain its data-directory lock.");
             var bytes = File.ReadAllBytes(Path.Combine(directory, "events.csv"));
             var csv = Encoding.UTF8.GetString(bytes);
+            if (csv.Contains("undefined:legacy-leading")) {
+                throw new Exception("Native launch retained an unbounded gap before the first ordinary event.");
+            }
             if (bytes.Length < 3 || bytes[0] != 0xef || bytes[1] != 0xbb || bytes[2] != 0xbf || !csv.Contains("undefined:")) {
                 throw new Exception("Native launch did not preserve BOM and synchronize derived gaps.");
             }
@@ -149,4 +153,4 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: isolated desktop, startup window within work area, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, single-instance rejection and lock release. Artifacts: $taskDirectory"

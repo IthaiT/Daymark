@@ -600,8 +600,47 @@ void main() {
   );
 
   testWidgets(
+    'the first overnight sleep has no undefined row or timeline block before it',
+    (tester) async {
+      final sleep = Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        day.add(const Duration(hours: 23, minutes: 49)),
+        day.add(const Duration(days: 1, hours: 7, minutes: 40)),
+      );
+      final oldHead = Event(
+        undefinedHeadId(day),
+        '未定义',
+        null,
+        day,
+        sleep.start,
+      );
+      await journal.store.replaceEvents({sleep.id: sleep, oldHead.id: oldHead});
+      await open(tester);
+      expect(journal.rows, [sleep]);
+      expect(find.text('未定义'), findsNothing);
+      expect(find.text('事件明细 · 1'), findsOneWidget);
+      final rect = tester.getRect(find.byType(Timeline));
+      await tester.tapAt(Offset(rect.left + 80, rect.top + 100));
+      await tester.pumpAndSettle();
+      expect(journal.selected, isEmpty);
+      expect(journal.store.events, {sleep.id: sleep});
+    },
+  );
+
+  testWidgets(
     'gap time cells stay derived and tag assignment promotes renamed gap',
     (tester) async {
+      await journal.store.saveEvent(
+        Event(
+          'later',
+          '晚饭',
+          'life',
+          day.add(const Duration(hours: 18)),
+          day.add(const Duration(hours: 19)),
+        ),
+      );
       await open(tester);
       final gap = journal.rows.firstWhere((event) => event.isUndefined);
       await tester.tap(cell(gap.id, 'start'));
