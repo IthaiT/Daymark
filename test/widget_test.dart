@@ -104,6 +104,36 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('tapping a parent row folds and unfolds its subtree', (
+    tester,
+  ) async {
+    await open(tester);
+    // The default tree nests embedded → linux under work.
+    expect(find.byKey(const ValueKey('tag-work')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-embedded')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-linux')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('tag-work')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-work')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-embedded')), findsNothing);
+    expect(find.byKey(const ValueKey('tag-linux')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tag-work')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-embedded')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-linux')), findsOneWidget);
+    // Collapsing a mid-level tag only hides its own descendants.
+    await tester.tap(find.byKey(const ValueKey('tag-embedded')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-embedded')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-linux')), findsNothing);
+    // Leaf rows keep the selection behavior instead of toggling.
+    await tester.tap(find.byKey(const ValueKey('tag-embedded')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tag-linux')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-linux')), findsOneWidget);
+  });
+
   testWidgets(
     'layout retains all panels, columns, Chinese controls and no tag filtering',
     (tester) async {

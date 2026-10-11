@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../application/journal_controller.dart';
+import '../data/store.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'theme.dart';
@@ -74,6 +75,14 @@ class _TagSidebarState extends State<TagSidebar> {
       source != target &&
       (target == null ||
           !widget.journal.store.descendants(source).contains(target));
+
+  bool _hasChildren(Store store, Tag tag) =>
+      store.tags.values.any((child) => child.parentId == tag.id);
+
+  void _toggle(String id) {
+    if (!_collapsed.add(id)) _collapsed.remove(id);
+  }
+
   Future<void> _move(String source, String? target) async {
     if (!await widget.beforeAction()) return;
     try {
@@ -151,11 +160,6 @@ class _TagSidebarState extends State<TagSidebar> {
                               child: GestureDetector(
                                 onSecondaryTapDown: (details) =>
                                     _menu(details.globalPosition, tag),
-                                onDoubleTap: () => setState(() {
-                                  if (!_collapsed.add(tag.id)) {
-                                    _collapsed.remove(tag.id);
-                                  }
-                                }),
                                 child: ListTile(
                                   key: ValueKey('tag-${tag.id}'),
                                   dense: true,
@@ -186,16 +190,10 @@ class _TagSidebarState extends State<TagSidebar> {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                   ),
-                                  trailing:
-                                      store.tags.values.any(
-                                        (child) => child.parentId == tag.id,
-                                      )
+                                  trailing: _hasChildren(store, tag)
                                       ? GestureDetector(
-                                          onTap: () => setState(() {
-                                            if (!_collapsed.add(tag.id)) {
-                                              _collapsed.remove(tag.id);
-                                            }
-                                          }),
+                                          onTap: () =>
+                                              setState(() => _toggle(tag.id)),
                                           child: Padding(
                                             padding: const EdgeInsets.all(6),
                                             child: Icon(
@@ -210,7 +208,13 @@ class _TagSidebarState extends State<TagSidebar> {
                                           ),
                                         )
                                       : null,
+                                  // Tapping a parent row folds or unfolds its
+                                  // subtree; leaf rows keep the selection.
                                   onTap: () async {
+                                    if (_hasChildren(store, tag)) {
+                                      setState(() => _toggle(tag.id));
+                                      return;
+                                    }
                                     if (await widget.beforeAction() &&
                                         mounted) {
                                       setState(() => _selected = tag.id);
