@@ -3,20 +3,38 @@ import 'package:flutter/material.dart';
 import '../data/store.dart';
 import '../domain/model.dart';
 
-ThemeData daymarkTheme() => ThemeData(
-  useMaterial3: true,
-  brightness: Brightness.light,
-  fontFamily: 'Microsoft YaHei UI',
-  visualDensity: VisualDensity.compact,
-  inputDecorationTheme: const InputDecorationTheme(
-    border: OutlineInputBorder(),
-    isDense: true,
-    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-  ),
-  scrollbarTheme: const ScrollbarThemeData(
-    thickness: WidgetStatePropertyAll(7),
-  ),
-);
+/// Indigo-seeded Material 3 light theme: the accent, surfaces, menus and
+/// dialogs all derive from one seed color.
+ThemeData daymarkTheme() {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: Colors.indigo,
+    brightness: Brightness.light,
+  );
+  OutlineInputBorder inputBorder(Color color) => OutlineInputBorder(
+    borderRadius: BorderRadius.circular(10),
+    borderSide: BorderSide(color: color),
+  );
+  return ThemeData(
+    useMaterial3: true,
+    colorScheme: scheme,
+    brightness: Brightness.light,
+    fontFamily: 'Microsoft YaHei UI',
+    visualDensity: VisualDensity.compact,
+    scaffoldBackgroundColor: scheme.surfaceContainerLow,
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: scheme.surfaceContainerLowest,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      border: inputBorder(scheme.outlineVariant),
+      enabledBorder: inputBorder(scheme.outlineVariant),
+      focusedBorder: inputBorder(scheme.primary),
+    ),
+    scrollbarTheme: const ScrollbarThemeData(
+      thickness: WidgetStatePropertyAll(7),
+    ),
+  );
+}
 
 // Material's published swatches; descendants share their root's color.
 Color eventColor(Store store, Event event, {bool selected = false}) {
