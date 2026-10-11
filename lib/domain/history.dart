@@ -6,6 +6,11 @@ class History<T> {
   bool get canUndo => _undo.isNotEmpty;
   bool get canRedo => _redo.isNotEmpty;
 
+  void clear() {
+    _undo.clear();
+    _redo.clear();
+  }
+
   void record(T before, T after) {
     if (before == after) return;
     _undo.add((before, after));

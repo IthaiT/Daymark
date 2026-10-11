@@ -1,0 +1,256 @@
+import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
+
+import '../data/ledger_store.dart';
+import '../domain/history.dart';
+import '../domain/ledger.dart';
+import '../domain/model.dart';
+
+class MoneyInput {
+  const MoneyInput({
+    required this.kind,
+    required this.amountCents,
+    required this.date,
+    this.categoryId,
+    this.notes = '',
+  });
+  final MoneyKind kind;
+  final int amountCents;
+  final DateTime date;
+  final String? categoryId;
+  final String notes;
+}
+
+class LedgerController extends ChangeNotifier {
+  LedgerController(this.store, {DateTime Function()? clock})
+    : clock = clock ?? DateTime.now;
+  final LedgerStore store;
+  final DateTime Function() clock;
+  final history = History<LedgerState>();
+  LedgerState get state => store.state;
+  Future<void> _tail = Future.value();
+  bool _busy = false;
+  bool get busy => _busy;
+  String _id() => const Uuid().v4();
+
+  Future<T> _run<T>(Future<T> Function() action) {
+    final result = _tail.then((_) async {
+      _busy = true;
+      notifyListeners();
+      try {
+        return await action();
+      } finally {
+        _busy = false;
+        notifyListeners();
+      }
+    });
+    _tail = result.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {},
+    );
+    return result;
+  }
+
+  Future<void> _apply(LedgerState desired, {bool record = true}) async {
+    final before = state;
+    await store.replace(desired);
+    if (record) history.record(before, desired);
+  }
+
+  Future<void> initializeBalances(Map<String, int> balances) => _run(() async {
+    if (state.balanceEnabled) throw const FormatException('已启用余额联动，请使用余额校准。');
+    if (!setEquals(balances.keys.toSet(), state.accounts.keys.toSet())) {
+      throw const FormatException('请填写所有账户的当前余额。');
+    }
+    final accounts = {
+      for (final account in state.accounts.values)
+        account.id: MoneyAccount(
+          account.id,
+          account.name,
+          account.kind,
+          balances[account.id]!,
+          balances[account.id]!,
+        ),
+    };
+    await _apply(
+      state.copyWith(accounts: accounts, balanceEnabled: true),
+      record: false,
+    );
+    history.clear();
+  });
+
+  void _requireEnabled() {
+    if (!state.balanceEnabled) throw const FormatException('请先填写当前实际余额。');
+  }
+
+  /// Recalculate from explicit linkage, so retries and edits never double apply.
+  LedgerState _withRecords(Map<String, MoneyRecord> records) {
+    final balances = {
+      for (final account in state.accounts.values)
+        account.id: account.openingCents,
+    };
+    for (final record in records.values) {
+      for (final effect in record.balanceEffects.entries) {
+        if (!balances.containsKey(effect.key)) {
+          throw const FormatException('关联账户不存在。');
+        }
+        balances[effect.key] = balances[effect.key]! + effect.value;
+      }
+    }
+    return state.copyWith(
+      records: records,
+      accounts: {
+        for (final account in state.accounts.values)
+          account.id: account.withBalance(balances[account.id]!),
+      },
+    );
+  }
+
+  Future<void> saveInputs(List<MoneyInput> inputs, {String? editId}) => _run(
+    () async {
+      _requireEnabled();
+      if (inputs.isEmpty) return;
+      final previous = editId == null ? null : state.records[editId];
+      if (editId != null &&
+          (previous == null ||
+              inputs.length != 1 ||
+              ![MoneyKind.expense, MoneyKind.income].contains(previous.kind))) {
+        throw const FormatException('所编辑的收支不存在。');
+      }
+      final records = {...state.records};
+      for (final input in inputs) {
+        if (![MoneyKind.expense, MoneyKind.income].contains(input.kind)) {
+          throw const FormatException('请使用转账或校准入口。');
+        }
+        final record = MoneyRecord(
+          id: editId ?? _id(),
+          kind: input.kind,
+          amountCents: input.amountCents,
+          date: dayStart(input.date),
+          categoryId: input.categoryId,
+          notes: input.notes.trim(),
+          accountId: previous?.accountId ?? state.defaultCashId,
+          affectsBalance: previous?.affectsBalance ?? true,
+        );
+        records[record.id] = record;
+      }
+      await _apply(_withRecords(records));
+    },
+  );
+
+  Future<void> deleteRecord(String id) => _run(() async {
+    if (!state.records.containsKey(id)) throw const FormatException('流水不存在。');
+    await _apply(_withRecords({...state.records}..remove(id)));
+  });
+
+  Future<void> transfer(
+    String from,
+    String to,
+    int cents,
+    DateTime date, {
+    String notes = '',
+  }) => _run(() async {
+    _requireEnabled();
+    final record = MoneyRecord(
+      id: _id(),
+      kind: MoneyKind.transfer,
+      amountCents: cents,
+      date: dayStart(date),
+      accountId: from,
+      toAccountId: to,
+      notes: notes.trim(),
+      affectsBalance: true,
+    );
+    await _apply(_withRecords({...state.records, record.id: record}));
+  });
+
+  Future<void> calibrate(
+    String accountId,
+    int actualCents,
+    DateTime date, {
+    String notes = '',
+  }) => _run(() async {
+    _requireEnabled();
+    final account = state.accounts[accountId];
+    if (account == null || actualCents.abs() > maxMoneyCents) {
+      throw const FormatException('账户或余额不正确。');
+    }
+    final delta = actualCents - account.balanceCents;
+    if (delta == 0) throw const FormatException('实际余额与账面余额一致，无需校准。');
+    final record = MoneyRecord(
+      id: _id(),
+      kind: MoneyKind.adjustment,
+      amountCents: delta,
+      date: dayStart(date),
+      accountId: accountId,
+      notes: notes.trim(),
+      affectsBalance: true,
+    );
+    await _apply(_withRecords({...state.records, record.id: record}));
+  });
+
+  Future<void> saveCategory(
+    String name,
+    MoneyKind kind,
+    String? parentId, {
+    String? id,
+  }) => _run(() async {
+    final previous = id == null ? null : state.categories[id];
+    if (id != null && (previous == null || previous.kind != kind)) {
+      throw const FormatException('分类不存在或收支类型不同。');
+    }
+    final category = MoneyCategory(id ?? _id(), name.trim(), kind, parentId);
+    await _apply(
+      state.copyWith(categories: {...state.categories, category.id: category}),
+    );
+  });
+
+  Future<void> deleteCategory(String id) => _run(() async {
+    if (!state.categories.containsKey(id)) {
+      throw const FormatException('分类不存在。');
+    }
+    if (state.categories.values.any((item) => item.parentId == id) ||
+        state.records.values.any((item) => item.categoryId == id)) {
+      throw const FormatException('请先移走子分类和关联流水。');
+    }
+    await _apply(
+      state.copyWith(
+        categories: {...state.categories}..remove(id),
+        pinned: state.pinned.where((item) => item != id).toList(),
+      ),
+    );
+  });
+
+  Future<void> setPinned(List<String> ids) =>
+      _run(() => _apply(state.copyWith(pinned: ids)));
+
+  Future<void> saveAccount(String name, {String? id}) => _run(() async {
+    final previous = id == null ? null : state.accounts[id];
+    if (id != null && previous == null) throw const FormatException('账户不存在。');
+    final account =
+        previous?.renamed(name) ??
+        MoneyAccount(_id(), name.trim(), 'custom', 0, 0);
+    await _apply(
+      state.copyWith(accounts: {...state.accounts, account.id: account}),
+    );
+  });
+
+  Future<void> deleteAccount(String id) => _run(() async {
+    if (!state.accounts.containsKey(id)) throw const FormatException('账户不存在。');
+    if (id == state.defaultCashId ||
+        state.records.values.any(
+          (item) => item.accountId == id || item.toAccountId == id,
+        )) {
+      throw const FormatException('默认现金账户或有关联流水的账户不能删除。');
+    }
+    if (state.accounts[id]!.balanceCents != 0) {
+      throw const FormatException('请先转出账户余额。');
+    }
+    await _apply(state.copyWith(accounts: {...state.accounts}..remove(id)));
+  });
+
+  Future<bool> undo() =>
+      _run(() => history.undo((snapshot) => _apply(snapshot, record: false)));
+  Future<bool> redo() =>
+      _run(() => history.redo((snapshot) => _apply(snapshot, record: false)));
+}
