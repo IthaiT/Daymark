@@ -11,8 +11,9 @@ import 'dialogs.dart';
 import 'ledger_dialogs.dart';
 
 class LedgerScreen extends StatefulWidget {
-  const LedgerScreen({super.key, required this.ledger});
+  const LedgerScreen({super.key, required this.ledger, this.focusNode});
   final LedgerController ledger;
+  final FocusNode? focusNode;
   @override
   State<LedgerScreen> createState() => _LedgerScreenState();
 }
@@ -42,12 +43,11 @@ class _LedgerScreenState extends State<LedgerScreen> {
   );
   final _inputs = <String, _QuickInput>{};
   final _scroll = ScrollController();
-  final _focus = FocusNode();
+  late final _focus = widget.focusNode ?? FocusNode();
   int _limit = 40;
   bool _statistics = false;
   String? _statsParent;
   bool _saving = false;
-  String? _error;
   LedgerState get _state => widget.ledger.state;
   @override
   void initState() {
@@ -60,7 +60,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
     _monthText.dispose();
     _date.dispose();
     _scroll.dispose();
-    _focus.dispose();
+    if (widget.focusNode == null) _focus.dispose();
     for (final input in _inputs.values) {
       input.dispose();
     }
@@ -77,17 +77,30 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   Future<void> _action(Future<void> Function() action) async {
     if (_saving) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    setState(() => _saving = true);
     try {
       await action();
     } catch (error) {
-      if (mounted) setState(() => _error = errorText(error));
+      _showError(error);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  void _showError(Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..removeCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const ValueKey('ledger-error-toast'),
+          content: Text(errorText(error)),
+          behavior: SnackBarBehavior.floating,
+          width: 480,
+          showCloseIcon: true,
+        ),
+      );
   }
 
   Future<void> _saveQuick(List<String> ids, {String? focusId}) async {
@@ -98,16 +111,28 @@ class _LedgerScreenState extends State<LedgerScreen> {
           .where((id) => _inputs[id]?.amount.text.trim().isNotEmpty == true)
           .toList();
       if (selected.isEmpty) throw const FormatException('请填写金额。');
-      final inputs = [
-        for (final id in selected)
+      final inputs = <MoneyInput>[];
+      for (final id in selected) {
+        int cents;
+        try {
+          cents = parseMoney(_inputs[id]!.amount.text);
+          if (cents <= 0) throw const FormatException('金额必须大于零。');
+        } on FormatException catch (error) {
+          _inputs[id]!.focus.requestFocus();
+          throw FormatException(
+            '${_state.categories[id]!.name}：${error.message}',
+          );
+        }
+        inputs.add(
           MoneyInput(
             kind: MoneyKind.expense,
-            amountCents: parseMoney(_inputs[id]!.amount.text),
+            amountCents: cents,
             date: date,
             categoryId: id,
             notes: _inputs[id]!.notes.text,
           ),
-      ];
+        );
+      }
       await widget.ledger.saveInputs(inputs);
       if (!mounted) return;
       for (final id in selected) {
@@ -129,8 +154,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
       _monthText.text = dateText(_month).substring(0, 7);
       _limit = 40;
       _statsParent = null;
-      _error = null;
     });
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
     if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
@@ -138,7 +163,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
     try {
       _setMonth(parseDate('${_monthText.text.trim()}-01'));
     } catch (error) {
-      setState(() => _error = errorText(error));
+      _showError(error);
     }
   }
 
@@ -175,6 +200,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
         },
         child: Focus(
           focusNode: _focus,
+          autofocus: true,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -183,30 +209,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 const SizedBox(height: 16),
                 Row(
                   children: [
-                    IconButton(
-                      key: const ValueKey('ledger-undo'),
-                      tooltip: '撤销（Ctrl+Z）',
-                      onPressed: _saving || !widget.ledger.history.canUndo
-                          ? null
-                          : () => unawaited(
-                              _action(() async {
-                                await widget.ledger.undo();
-                              }),
-                            ),
-                      icon: const Icon(Icons.undo),
-                    ),
-                    IconButton(
-                      key: const ValueKey('ledger-redo'),
-                      tooltip: '重做（Ctrl+Y）',
-                      onPressed: _saving || !widget.ledger.history.canRedo
-                          ? null
-                          : () => unawaited(
-                              _action(() async {
-                                await widget.ledger.redo();
-                              }),
-                            ),
-                      icon: const Icon(Icons.redo),
-                    ),
                     const Spacer(),
                     TextButton.icon(
                       key: const ValueKey('add-income'),
@@ -250,20 +252,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     ),
                   ],
                 ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        _error!,
-                        key: const ValueKey('ledger-error'),
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  ),
                 const SizedBox(height: 12),
                 Expanded(
                   child: Row(
@@ -285,18 +273,11 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   Widget _balances(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Widget balance(
-      String title,
-      int amount, {
-      String? id,
-      bool primary = false,
-    }) => Container(
-      width: primary ? 220 : 180,
+    Widget balance(String title, int amount, {String? id}) => Container(
+      width: 180,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
-        color: primary
-            ? scheme.primaryContainer
-            : scheme.surfaceContainerLowest,
+        color: scheme.surfaceContainerLowest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -307,12 +288,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: primary
-                  ? scheme.onPrimaryContainer
-                  : scheme.onSurfaceVariant,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
           ),
           const SizedBox(height: 4),
           FittedBox(
@@ -324,9 +300,9 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   ? const ValueKey('balance-total')
                   : ValueKey('balance-$id'),
               maxLines: 1,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: primary ? scheme.onPrimaryContainer : scheme.onSurface,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(color: scheme.onSurface),
             ),
           ),
         ],
@@ -344,12 +320,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 children: [
                   balance('资金总额', _state.totalCents),
                   const SizedBox(width: 10),
-                  balance(
-                    '${cash.name} · 可支配',
-                    cash.balanceCents,
-                    id: cash.id,
-                    primary: true,
-                  ),
+                  balance('${cash.name} · 可支配', cash.balanceCents, id: cash.id),
                   for (final account in _state.accounts.values.where(
                     (item) => item.id != cash.id,
                   )) ...[
@@ -422,7 +393,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
             onPressed: _saving
                 ? null
                 : () => unawaited(_saveQuick(_state.pinned)),
-            child: const Text('保存已填项目（Ctrl+Enter）'),
+            child: const Text('保存已填项目'),
           ),
         ],
       ),

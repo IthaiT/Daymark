@@ -75,6 +75,19 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> shortcut(
+    WidgetTester tester,
+    LogicalKeyboardKey key, {
+    bool shift = false,
+  }) async {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(key);
+    if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+  }
+
   MoneyInput expense(
     int amount,
     String category, {
@@ -120,6 +133,10 @@ void main() {
     'Enter allows independent continuous entries, Tab reaches next amount, batch is atomic',
     (tester) async {
       await open(tester);
+      expect(find.byIcon(Icons.undo), findsNothing);
+      expect(find.byIcon(Icons.redo), findsNothing);
+      expect(find.text('保存已填项目'), findsOneWidget);
+      expect(find.textContaining('Ctrl+Enter'), findsNothing);
       await tester.enterText(quick('breakfast'), '8');
       await tester.sendKeyEvent(LogicalKeyboardKey.tab);
       await tester.pumpAndSettle();
@@ -160,12 +177,10 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
       expect(store.state.accounts[cashAccountId]!.balanceCents, 993200);
-      await tester.tap(find.byKey(const ValueKey('ledger-undo')));
-      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.records.length, 2);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 996000);
-      await tester.tap(find.byKey(const ValueKey('ledger-redo')));
-      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyZ, shift: true);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 993200);
     },
   );
@@ -174,19 +189,35 @@ void main() {
     'failed Enter and invalid batch keep all inputs, retry saves once',
     (tester) async {
       await open(tester);
+      final panelTop = tester.getTopLeft(find.text('记支出'));
       fail = true;
       await tester.enterText(quick('lunch'), '28');
       await enter(tester);
       expect(store.state.records, isEmpty);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
-      expect(find.byKey(const ValueKey('ledger-error')), findsOneWidget);
+      expect(find.byKey(const ValueKey('ledger-error-toast')), findsOneWidget);
+      expect(tester.getTopLeft(find.text('记支出')), panelTop);
       fail = false;
       await tester.enterText(quick('breakfast'), 'wrong');
       await tester.tap(find.byKey(const ValueKey('save-all-money')));
       await tester.pumpAndSettle();
       expect(store.state.records, isEmpty);
+      expect(find.text('早餐：请输入金额，最多保留两位小数。'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(quick('breakfast')).focusNode!.hasFocus,
+        isTrue,
+      );
+      expect(tester.getTopLeft(find.text('记支出')), panelTop);
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
+      await tester.tap(
+        find.descendant(
+          of: find.byType(SnackBar),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
       await tester.enterText(quick('breakfast'), '8');
       await tester.tap(find.byKey(const ValueKey('save-all-money')));
       await tester.pumpAndSettle();
@@ -328,6 +359,19 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('mode-1')));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
+      await tester.tap(quick('lunch'));
+      await enter(tester);
+      expect(store.state.records.length, 1);
+      await tester.tap(find.byKey(const ValueKey('mode-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.records, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyY);
+      expect(store.state.records.length, 1);
       expect(tester.takeException(), isNull);
     },
   );
@@ -403,6 +447,12 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('stats-food-false')));
     await tester.pumpAndSettle();
     await screenshot('ledger-statistics');
+    await tester.tap(find.text('流水'));
+    await tester.pumpAndSettle();
+    await tester.enterText(quick('breakfast'), 'a');
+    await enter(tester);
+    await screenshot('ledger-validation');
+    expect(tester.widget<TextField>(quick('breakfast')).controller!.text, 'a');
     expect(tester.takeException(), isNull);
   });
 
@@ -449,11 +499,9 @@ void main() {
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1000100);
-      await tester.tap(find.byKey(const ValueKey('ledger-undo')));
-      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 990000);
-      await tester.tap(find.byKey(const ValueKey('ledger-undo')));
-      await tester.pumpAndSettle();
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
       expect(store.state.accounts[investmentAccountId]!.balanceCents, 300000);
     },

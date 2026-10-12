@@ -18,10 +18,24 @@ class AppScreen extends StatefulWidget {
 
 class _AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
+  final _ledgerFocus = FocusNode();
   int _page = 0;
   bool _visitedLedger = false;
+  @override
+  void dispose() {
+    _ledgerFocus.dispose();
+    super.dispose();
+  }
+
+  void _focusPage() {
+    if (_page == 1) _ledgerFocus.requestFocus();
+  }
+
   Future<void> _switch(int page) async {
-    if (page == _page) return;
+    if (page == _page) {
+      _focusPage();
+      return;
+    }
     if (_page == 0 &&
         !await (_journal.currentState?.commit() ?? Future.value(true))) {
       return;
@@ -30,6 +44,9 @@ class _AppScreenState extends State<AppScreen> {
     setState(() {
       _page = page;
       if (page == 1) _visitedLedger = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusPage();
     });
   }
 
@@ -61,7 +78,10 @@ class _AppScreenState extends State<AppScreen> {
               FocusScope(
                 canRequestFocus: _page == 1,
                 child: _visitedLedger
-                    ? LedgerScreen(ledger: widget.ledger)
+                    ? LedgerScreen(
+                        ledger: widget.ledger,
+                        focusNode: _ledgerFocus,
+                      )
                     : const SizedBox.shrink(),
               ),
             ],
@@ -75,10 +95,10 @@ class _AppScreenState extends State<AppScreen> {
     onPressed: () => unawaited(_switch(index)),
     style: TextButton.styleFrom(
       foregroundColor: _page == index
-          ? Theme.of(context).colorScheme.primary
+          ? Theme.of(context).colorScheme.onSecondaryContainer
           : Theme.of(context).colorScheme.onSurfaceVariant,
       backgroundColor: _page == index
-          ? Theme.of(context).colorScheme.surfaceContainerHighest
+          ? Theme.of(context).colorScheme.secondaryContainer
           : null,
       padding: const EdgeInsets.symmetric(horizontal: 10),
     ),
