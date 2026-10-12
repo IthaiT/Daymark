@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/store.dart';
+import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/pickers.dart';
@@ -103,6 +104,141 @@ void main() {
     if (control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pumpAndSettle();
   }
+
+  String? clipboardText;
+  void mockClipboard() {
+    clipboardText = null;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      switch (call.method) {
+        case 'Clipboard.setData':
+          clipboardText =
+              (call.arguments as Map<Object?, Object?>)['text'] as String?;
+          return null;
+        case 'Clipboard.getData':
+          return clipboardText == null ? null : {'text': clipboardText};
+        case 'Clipboard.hasStrings':
+          return {'value': clipboardText?.isNotEmpty ?? false};
+      }
+      return null;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
+  }
+
+  testWidgets(
+    'table multi-selection copies and pastes onto another date with undo',
+    (tester) async {
+      mockClipboard();
+      await open(tester);
+      // Selecting a row must move focus away from the date's text field.
+      await tester.tap(find.byKey(const ValueKey('day-input')));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.escape);
+      await tester.tap(cell('a', 'title'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.tap(cell('b', 'title'));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      expect(EventClipboard.tryDecode(clipboardText)!.events.length, 2);
+      await key(tester, LogicalKeyboardKey.arrowRight, control: true);
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      final pasted = journal.visibleEvents;
+      expect(pasted.length, 2);
+      expect(pasted.map((event) => event.title).toSet(), {'做饭', '听播客'});
+      expect(
+        pasted.every(
+          (event) => event.start == day.add(const Duration(days: 1, hours: 13)),
+        ),
+        isTrue,
+      );
+      expect(journal.selected.length, 2);
+      await key(tester, LogicalKeyboardKey.keyZ, control: true);
+      expect(journal.visibleEvents, isEmpty);
+      await key(tester, LogicalKeyboardKey.keyY, control: true);
+      expect(journal.visibleEvents.length, 2);
+    },
+  );
+
+  testWidgets(
+    'timeline copy and paste retains selection and retries failed writes',
+    (tester) async {
+      mockClipboard();
+      await open(tester);
+      final rectangle = tester.getRect(find.byType(Timeline));
+      await tester.tapAt(
+        Offset(
+          rectangle.left + 24 + (rectangle.width - 50) * 14.5 / 24,
+          rectangle.top + 80,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(journal.selected, {'a'});
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      failWrites = true;
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(find.text('操作未完成'), findsOneWidget);
+      expect(journal.visibleEvents.length, 2);
+      expect(journal.selected, {'a'});
+      await tester.tap(find.text('确定'));
+      await tester.pumpAndSettle();
+      failWrites = false;
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(journal.visibleEvents.length, 3);
+      expect(journal.selected.length, 1);
+      expect(journal.event(journal.selected.single)!.title, '做饭');
+    },
+  );
+
+  testWidgets(
+    'text fields keep native copy and paste and unrelated text creates no events',
+    (tester) async {
+      mockClipboard();
+      await open(tester);
+      clipboardText = '普通文字';
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(journal.visibleEvents.length, 2);
+      clipboardText = 'Daymark events 1\n{}';
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(find.text('操作未完成'), findsOneWidget);
+      expect(journal.visibleEvents.length, 2);
+      await tester.tap(find.text('确定'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'title'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'title'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      expect(clipboardText, '做饭');
+      clipboardText = '新名称';
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(
+        tester.widget<TextField>(input('a', 'title')).controller!.text,
+        '新名称',
+      );
+      expect(journal.visibleEvents.length, 2);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.store.events['a']!.title, '新名称');
+      await tester.tap(find.byKey(const ValueKey('day-input')));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.escape);
+      clipboardText = '2026-10-09';
+      await key(tester, LogicalKeyboardKey.keyA, control: true);
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('day-input')))
+            .controller!
+            .text,
+        '2026-10-09',
+      );
+      expect(journal.visibleEvents.length, 2);
+    },
+  );
 
   testWidgets('tapping a parent row folds and unfolds its subtree', (
     tester,

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/store.dart';
+import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -46,6 +47,147 @@ void main() {
     'linux',
     day.add(Duration(hours: start)),
     day.add(Duration(hours: end)),
+  );
+
+  test(
+    'multi-event paste keeps full overnight intervals and is one undoable write',
+    () async {
+      final night = Event(
+        'night',
+        '夜间',
+        'work',
+        day.subtract(const Duration(minutes: 15)),
+        day.add(const Duration(hours: 2, seconds: 35)),
+        '备注',
+      );
+      final later = item('later', 4, 5);
+      await store.replaceEvents({night.id: night, later.id: later});
+      await controller.initialize();
+      controller.select(later.id);
+      controller.select(night.id, toggle: true);
+      final clipboard = EventClipboard.tryDecode(
+        controller.copySelected()!.encode(),
+      )!;
+      final originalEvents = store.events;
+      await controller.shiftDay(1);
+      final beforeWrites = writes;
+      final ids = await controller.pasteEvents(clipboard);
+      expect(writes - beforeWrites, 1);
+      expect(ids.toSet().intersection({night.id, later.id}), isEmpty);
+      expect(controller.selected, ids.toSet());
+      for (final (index, original) in [night, later].indexed) {
+        expect(
+          store.events[ids[index]],
+          original.copyWith(
+            id: ids[index],
+            start: original.start.add(const Duration(days: 1)),
+            end: original.end!.add(const Duration(days: 1)),
+          ),
+        );
+      }
+      expect((await Store.open(directory)).events, store.events);
+      await controller.undo();
+      expect(store.events, originalEvents);
+      await controller.redo();
+      expect(controller.selected, isEmpty);
+      expect(store.events.containsKey(ids.first), isTrue);
+    },
+  );
+
+  test(
+    'paste preserves blank drafts, incomplete records and normalizes missing tags',
+    () async {
+      final removed = await controller.saveTag('临时标签', null);
+      final clipboard = EventClipboard(day, [
+        item('old', 9, 10).copyWith(tagId: removed.id),
+        Event(
+          'draft',
+          '',
+          null,
+          day.add(const Duration(hours: 12)),
+          day.add(const Duration(hours: 13)),
+        ),
+        Event(
+          'legacy',
+          '待补全',
+          'work',
+          day.add(const Duration(hours: 14, seconds: 35)),
+          null,
+        ),
+        Event(
+          'undefined:gap',
+          '改名空档',
+          null,
+          day.add(const Duration(hours: 15)),
+          day.add(const Duration(hours: 16)),
+        ),
+      ]);
+      await controller.deleteTag(removed.id);
+      final ids = await controller.pasteEvents(clipboard);
+      expect(store.events[ids[0]]!.tagId, isNull);
+      expect(controller.drafts[ids[1]]!.title, '');
+      expect(store.events.containsKey(ids[1]), isFalse);
+      expect(store.events[ids[2]]!.end, isNull);
+      expect(store.events[ids[2]]!.start.second, 35);
+      expect(store.events[ids[3]]!.isUndefined, isFalse);
+      expect(store.events[ids[3]]!.title, '改名空档');
+      await controller.shiftDay(1);
+      expect(controller.drafts, isEmpty);
+    },
+  );
+
+  test(
+    'failed paste retains data, selection, history and clipboard for retry',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 10),
+        'b': item('b', 12, 13),
+      });
+      await controller.initialize();
+      controller.select('a');
+      final clipboard = controller.copySelected()!;
+      final originalRows = controller.rows;
+      final originalBytes = await store.eventsFile.readAsBytes();
+      final beforeWrites = writes;
+      failWrites = true;
+      await expectLater(
+        controller.pasteEvents(clipboard),
+        throwsFileSystemException,
+      );
+      expect(controller.rows, originalRows);
+      expect(controller.selected, {'a'});
+      expect(controller.history.canUndo, isFalse);
+      expect(await store.eventsFile.readAsBytes(), originalBytes);
+      failWrites = false;
+      final ids = await controller.pasteEvents(clipboard);
+      expect(writes - beforeWrites, 1);
+      expect(store.events[ids.single]!.title, 'a');
+    },
+  );
+
+  test(
+    'paste rejects date overflow and invalid batches before changing state',
+    () async {
+      final clipboard = EventClipboard(day, [
+        item('a', 9, 10),
+        item('bad', 12, 11),
+      ]);
+      await expectLater(
+        controller.pasteEvents(clipboard),
+        throwsFormatException,
+      );
+      expect(controller.rows, isEmpty);
+      final last = DateTime.utc(9999, 12, 31);
+      await controller.setDay(last);
+      await expectLater(
+        controller.pasteEvents(
+          EventClipboard(day, [item('overnight', 23, 25)]),
+        ),
+        throwsFormatException,
+      );
+      expect(controller.rows, isEmpty);
+      expect(controller.history.canUndo, isFalse);
+    },
   );
 
   test(

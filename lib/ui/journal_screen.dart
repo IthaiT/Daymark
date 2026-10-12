@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
+import '../domain/event_clipboard.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'event_table.dart';
@@ -156,6 +157,7 @@ class JournalScreenState extends State<JournalScreen> {
     final control = HardwareKeyboard.instance.isControlPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
     widget.journal.select(id, toggle: control, range: shift);
+    _focus.requestFocus();
     if (!control &&
         !shift &&
         column != null &&
@@ -196,6 +198,59 @@ class JournalScreenState extends State<JournalScreen> {
     setState(() => _edit = null);
     WidgetsBinding.instance.addPostFrameCallback((_) => session.dispose());
     _focus.requestFocus();
+  }
+
+  Future<void> _copy() async {
+    if (!await commit() || !mounted) return;
+    try {
+      final clipboard = widget.journal.copySelected();
+      if (clipboard != null) {
+        await Clipboard.setData(ClipboardData(text: clipboard.encode()));
+      }
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  Future<void> _paste() async {
+    if (!await commit() || !mounted) return;
+    _timeline.currentState?.cancelDrag();
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (!mounted) return;
+      final clipboard = EventClipboard.tryDecode(data?.text);
+      if (clipboard == null) return;
+      final ids = await widget.journal.pasteEvents(clipboard);
+      if (!mounted || ids.isEmpty) return;
+      _focus.requestFocus();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _table.currentState?.reveal(ids.first);
+      });
+    } catch (error) {
+      _showError(error);
+    }
+  }
+
+  KeyEventResult _clipboardKey(FocusNode node, KeyEvent event) {
+    final focused = FocusManager.instance.primaryFocus?.context;
+    if (focused?.widget is EditableText ||
+        focused?.findAncestorStateOfType<EditableTextState>() != null ||
+        event is! KeyDownEvent ||
+        !HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isShiftPressed ||
+        HardwareKeyboard.instance.isAltPressed ||
+        HardwareKeyboard.instance.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyC) {
+      unawaited(_copy());
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyV) {
+      unawaited(_paste());
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   Future<void> _next(bool backwards) async {
@@ -304,6 +359,7 @@ class JournalScreenState extends State<JournalScreen> {
     child: Focus(
       focusNode: _focus,
       autofocus: true,
+      onKeyEvent: _clipboardKey,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => unawaited(_clear()),

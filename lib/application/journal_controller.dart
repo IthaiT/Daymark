@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/store.dart';
+import '../domain/event_clipboard.dart';
 import '../domain/history.dart';
 import '../domain/model.dart';
 
@@ -187,6 +188,43 @@ class JournalController extends ChangeNotifier {
   });
   Future<void> discardDraft(String id) =>
       _run(() => _apply(store.events, {..._drafts}..remove(id)));
+
+  EventClipboard? copySelected() {
+    final events = rows.where((event) => _selected.contains(event.id)).toList();
+    return events.isEmpty ? null : EventClipboard(day, events);
+  }
+
+  Future<List<String>> pasteEvents(EventClipboard clipboard) => _run(() async {
+    if (clipboard.events.isEmpty) return [];
+    final offset = day.difference(clipboard.day);
+    final events = {...store.events};
+    final drafts = {..._drafts};
+    final ids = <String>[];
+    for (final original in clipboard.events) {
+      final id = const Uuid().v4().replaceAll('-', '');
+      final pasted = original.copyWith(
+        id: id,
+        start: civilTime(original.start).add(offset),
+        end: original.end == null ? null : civilTime(original.end!).add(offset),
+        clearTag: !store.tags.containsKey(original.tagId),
+      );
+      store.validateEvent(
+        pasted.title.trim().isEmpty ? pasted.copyWith(title: '新事件') : pasted,
+        allowIncomplete: true,
+      );
+      if (pasted.title.trim().isEmpty) {
+        drafts[id] = pasted;
+      } else {
+        events[id] = pasted;
+      }
+      ids.add(id);
+    }
+    await _apply(events, drafts);
+    _selected = ids.toSet();
+    _selectionAnchor = ids.first;
+    notifyListeners();
+    return ids;
+  });
 
   Future<String> editCell(
     String id,
