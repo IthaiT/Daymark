@@ -4,7 +4,7 @@ import '../application/journal_controller.dart';
 import '../data/store.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
-import 'theme.dart';
+import 'tag_tree_tile.dart';
 
 class TagSidebar extends StatefulWidget {
   const TagSidebar({
@@ -158,53 +158,16 @@ class _TagSidebarState extends State<TagSidebar> {
                               child: GestureDetector(
                                 onSecondaryTapDown: (details) =>
                                     _menu(details.globalPosition, tag),
-                                child: ListTile(
+                                child: TagTreeTile(
                                   key: ValueKey('tag-${tag.id}'),
-                                  dense: true,
+                                  store: store,
+                                  tagId: tag.id,
+                                  label: tag.name,
+                                  depth: store.ancestors(tag.id).length - 1,
                                   selected: _selected == tag.id,
-                                  selectedTileColor: Theme.of(
-                                    context,
-                                  ).colorScheme.primaryContainer,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  contentPadding: EdgeInsets.only(
-                                    left:
-                                        4 +
-                                        (store.ancestors(tag.id).length - 1) *
-                                            20.0,
-                                    right: 4,
-                                  ),
-                                  leading: Container(
-                                    width: 10,
-                                    height: 10,
-                                    decoration: BoxDecoration(
-                                      color: tagDot(store, tag.id),
-                                      borderRadius: BorderRadius.circular(5),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    tag.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  trailing: _hasChildren(store, tag)
-                                      ? GestureDetector(
-                                          onTap: () =>
-                                              setState(() => _toggle(tag.id)),
-                                          child: Padding(
-                                            padding: const EdgeInsets.all(6),
-                                            child: Icon(
-                                              _collapsed.contains(tag.id)
-                                                  ? Icons.chevron_right
-                                                  : Icons.keyboard_arrow_down,
-                                              size: 20,
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                          ),
-                                        )
+                                  collapsed: _collapsed.contains(tag.id),
+                                  onToggle: _hasChildren(store, tag)
+                                      ? () => setState(() => _toggle(tag.id))
                                       : null,
                                   // Tapping a parent row folds or unfolds its
                                   // subtree; leaf rows keep the selection.

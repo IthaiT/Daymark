@@ -444,6 +444,75 @@ void main() {
     expect(journal.store.events['a']!.tagId, isNull);
   });
 
+  testWidgets('tag picker shares sidebar styling and folds without choosing', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('b', 'tag'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('b', 'tag'));
+    await tester.pumpAndSettle();
+    ListTile tile(String key) => tester.widget<ListTile>(
+      find.descendant(
+        of: find.byKey(ValueKey(key)),
+        matching: find.byType(ListTile),
+      ),
+    );
+    final sidebar = tile('tag-work');
+    final picker = tile('tag-choice-work');
+    expect(picker.selected, isTrue);
+    expect(picker.selectedTileColor, sidebar.selectedTileColor);
+    expect(picker.shape, sidebar.shape);
+    expect(picker.contentPadding, sidebar.contentPadding);
+    expect(
+      tester
+          .getSize(
+            find.descendant(
+              of: find.byKey(const ValueKey('tag-work')),
+              matching: find.byType(ListTile),
+            ),
+          )
+          .height,
+      tester
+          .getSize(
+            find.descendant(
+              of: find.byKey(const ValueKey('tag-choice-work')),
+              matching: find.byType(ListTile),
+            ),
+          )
+          .height,
+    );
+    final leftDot = sidebar.leading! as Container;
+    final pickerDot = picker.leading! as Container;
+    expect(pickerDot.decoration, leftDot.decoration);
+    expect(
+      tile('tag-choice-linux').contentPadding,
+      tile('tag-linux').contentPadding,
+    );
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('tag-choice-work')),
+        matching: find.byTooltip('收起主业'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-choice-linux')), findsNothing);
+    expect(find.byType(TagChoices), findsOneWidget);
+    expect(journal.store.events['b']!.tagId, 'work');
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('tag-choice-work')),
+        matching: find.byTooltip('展开主业'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('tag-choice-linux')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('tag-choice-linux')));
+    await tester.pumpAndSettle();
+    expect(journal.store.events['b']!.tagId, 'linux');
+    expect(find.byType(TagChoices), findsNothing);
+  });
+
   testWidgets('new draft follows the last end and choosing a tag names it', (
     tester,
   ) async {
@@ -975,6 +1044,9 @@ void main() {
   testWidgets(
     'renders a deterministic synthetic screenshot using system CJK and Material fonts',
     (tester) async {
+      final previousShadows = debugDisableShadows;
+      debugDisableShadows = false;
+      addTearDown(() => debugDisableShadows = previousShadows);
       final fonts = [
         ('Microsoft YaHei UI', 'C:/Windows/Fonts/msyh.ttc'),
         (
@@ -1016,6 +1088,23 @@ void main() {
         ).writeAsBytes(bytes!.buffer.asUint8List()),
       );
       image.dispose();
+      await tester.tap(cell('b', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('b', 'tag'));
+      await tester.pumpAndSettle();
+      final pickerImage = (await tester.runAsync(
+        () => boundary.toImage(pixelRatio: 1),
+      ))!;
+      final pickerBytes = await tester.runAsync(
+        () => pickerImage.toByteData(format: ui.ImageByteFormat.png),
+      );
+      await tester.runAsync(
+        () => File(
+          '.test-artifacts/flutter-tag-picker.png',
+        ).writeAsBytes(pickerBytes!.buffer.asUint8List()),
+      );
+      pickerImage.dispose();
+      debugDisableShadows = previousShadows;
       expect(tester.takeException(), isNull);
     },
   );

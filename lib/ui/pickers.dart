@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../data/store.dart';
 import '../domain/model.dart';
+import 'tag_tree_tile.dart';
 
 /// Open a picker at the current input without replacing invalid typed text.
 DateTime pickerInitialTime(String text, DateTime fallback) {
@@ -23,6 +24,7 @@ class PickerPopup extends StatefulWidget {
     required this.onClose,
     this.width = 340,
     this.groupId,
+    this.color,
   });
   final Widget anchor;
   final Widget Function(BuildContext, VoidCallback) builder;
@@ -30,6 +32,7 @@ class PickerPopup extends StatefulWidget {
   final VoidCallback onClose;
   final double width;
   final Object? groupId;
+  final Color? color;
   @override
   State<PickerPopup> createState() => _PickerPopupState();
 }
@@ -107,6 +110,7 @@ class _PickerPopupState extends State<PickerPopup> {
                     return KeyEventResult.ignored;
                   },
                   child: Material(
+                    color: widget.color,
                     elevation: 8,
                     borderRadius: BorderRadius.circular(12),
                     clipBehavior: Clip.antiAlias,
@@ -176,10 +180,11 @@ class _TagChoicesState extends State<TagChoices> {
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      ListTile(
-        dense: true,
+      TagTreeTile(
+        key: const ValueKey('tag-choice-unclassified'),
+        store: widget.store,
         selected: widget.selected == null,
-        title: Text(widget.emptyLabel),
+        label: widget.emptyLabel,
         onTap: () => widget.onChoose(null),
       ),
       for (final tag in widget.store.orderedTags())
@@ -188,31 +193,23 @@ class _TagChoicesState extends State<TagChoices> {
                 .ancestors(tag.id)
                 .take(widget.store.ancestors(tag.id).length - 1)
                 .any((parent) => _collapsed.contains(parent.id)))
-          Padding(
-            padding: EdgeInsets.only(
-              left: (widget.store.ancestors(tag.id).length - 1) * 16,
-            ),
-            child: ListTile(
-              dense: true,
-              selected: widget.selected == tag.id,
-              leading:
-                  widget.store.tags.values.any(
-                    (child) => child.parentId == tag.id,
-                  )
-                  ? IconButton(
-                      icon: Icon(
-                        _collapsed.contains(tag.id)
-                            ? Icons.chevron_right
-                            : Icons.expand_more,
-                      ),
-                      onPressed: () => setState(() {
-                        if (!_collapsed.add(tag.id)) _collapsed.remove(tag.id);
-                      }),
-                    )
-                  : const SizedBox(width: 32),
-              title: Text(tag.name),
-              onTap: () => widget.onChoose(tag.id),
-            ),
+          TagTreeTile(
+            key: ValueKey('tag-choice-${tag.id}'),
+            store: widget.store,
+            tagId: tag.id,
+            label: tag.name,
+            depth: widget.store.ancestors(tag.id).length - 1,
+            selected: widget.selected == tag.id,
+            collapsed: _collapsed.contains(tag.id),
+            onToggle:
+                widget.store.tags.values.any(
+                  (child) => child.parentId == tag.id,
+                )
+                ? () => setState(() {
+                    if (!_collapsed.add(tag.id)) _collapsed.remove(tag.id);
+                  })
+                : null,
+            onTap: () => widget.onChoose(tag.id),
           ),
     ],
   );
@@ -241,6 +238,7 @@ class _TagFieldState extends State<TagField> {
   @override
   Widget build(BuildContext context) => PickerPopup(
     open: _open,
+    color: Theme.of(context).colorScheme.surfaceContainer,
     onClose: () => setState(() => _open = false),
     anchor: OutlinedButton(
       onPressed: () => setState(() => _open = !_open),

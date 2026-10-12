@@ -118,6 +118,9 @@ class _InlineEditorState extends State<InlineEditor> {
       onKeyEvent: _handleKey,
       child: PickerPopup(
         open: session.pickerOpen,
+        color: session.column == EventColumn.tag
+            ? Theme.of(context).colorScheme.surfaceContainer
+            : null,
         groupId: session,
         onClose: _closePicker,
         anchor: TextField(
