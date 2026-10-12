@@ -529,4 +529,85 @@ void main() {
       expect(() => LedgerStore.decode(invalid), throwsFormatException);
     },
   );
+  test(
+    'transfer and calibration notes are atomic and reversible without balance effects',
+    () async {
+      await ledger.transfer(
+        cashAccountId,
+        investmentAccountId,
+        1000,
+        october,
+        notes: '转入储蓄',
+      );
+      await ledger.calibrate(providentAccountId, 200100, october, notes: '对账');
+      for (final record in ledger.state.records.values.toList()) {
+        final balances = ledger.state.accounts.map(
+          (id, account) => MapEntry(id, account.balanceCents),
+        );
+        final before = ledger.state;
+        fail = true;
+        await expectLater(
+          ledger.updateNotes(record.id, '新备注\n第二行'),
+          throwsA(isA<FileSystemException>()),
+        );
+        expect(identical(ledger.state, before), isTrue);
+        fail = false;
+        await ledger.updateNotes(record.id, '新备注\n第二行');
+        expect(
+          ledger.state.accounts.map(
+            (id, account) => MapEntry(id, account.balanceCents),
+          ),
+          balances,
+        );
+        expect(
+          (await LedgerStore.open(directory)).state.records[record.id]!.notes,
+          '新备注\n第二行',
+        );
+        await ledger.undo();
+        expect(ledger.state.records[record.id]!.notes, record.notes);
+        await ledger.redo();
+        expect(ledger.state.records[record.id]!.notes, '新备注\n第二行');
+      }
+    },
+  );
+
+  test(
+    'requested preset categories are complete and old custom IDs win name conflicts',
+    () {
+      final state = LedgerState.empty();
+      expect(
+        state.categories.values
+            .where(
+              (item) => item.kind == MoneyKind.expense && item.parentId == null,
+            )
+            .map((item) => item.name),
+        [
+          '餐饮',
+          '住房',
+          '日用',
+          '交通',
+          '服饰',
+          '爱好',
+          '医疗',
+          '充值',
+          '消费',
+          '购物',
+          '娱乐',
+          '缴费',
+          '其他',
+        ],
+      );
+      final source = state.toJson()..remove('category_presets_version');
+      source['pinned'] = <String>[];
+      source['categories'] = [
+        const MoneyCategory('custom-daily', '日用', MoneyKind.expense).toJson(),
+        const MoneyCategory('food', '自定义收入', MoneyKind.income).toJson(),
+      ];
+      final migrated = LedgerStore.decode(source);
+      expect(migrated.categories, contains('custom-daily'));
+      expect(migrated.categories, isNot(contains('daily')));
+      expect(migrated.categories, isNot(contains('lunch')));
+      expect(migrated.categories['food']!.name, '自定义收入');
+    },
+  );
 }

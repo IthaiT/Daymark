@@ -194,7 +194,7 @@ class LedgerStore {
           previous.color ?? preset.color,
         );
       } else if ((preset.parentId == null ||
-              upgraded.containsKey(preset.parentId)) &&
+              upgraded[preset.parentId]?.kind == preset.kind) &&
           !upgraded.values.any(
             (item) =>
                 item.kind == preset.kind &&

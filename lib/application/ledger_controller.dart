@@ -117,6 +117,23 @@ class LedgerController extends ChangeNotifier {
     await _apply(_withRecords({...state.records}..remove(id)));
   });
 
+  Future<void> updateNotes(String id, String notes) => _run(() async {
+    final previous = state.records[id];
+    if (previous == null) throw const FormatException('流水不存在。');
+    final record = MoneyRecord(
+      id: previous.id,
+      kind: previous.kind,
+      amountCents: previous.amountCents,
+      date: previous.date,
+      categoryId: previous.categoryId,
+      notes: notes.trim(),
+      accountId: previous.accountId,
+      toAccountId: previous.toAccountId,
+      affectsBalance: previous.affectsBalance,
+    );
+    await _apply(state.copyWith(records: {...state.records, id: record}));
+  });
+
   Future<void> transfer(
     String from,
     String to,

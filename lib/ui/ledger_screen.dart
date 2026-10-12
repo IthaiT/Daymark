@@ -11,6 +11,7 @@ import 'dialogs.dart';
 import 'ledger_dialogs.dart';
 import 'ledger_category_style.dart';
 import 'ledger_sidebar.dart';
+import 'ledger_statistics.dart';
 
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key, required this.ledger, this.focusNode});
@@ -33,6 +34,9 @@ class _LedgerScreenState extends State<LedgerScreen> {
   late final _focus = widget.focusNode ?? FocusNode();
   int _limit = 40;
   bool _statistics = false;
+  LedgerPeriod _period = LedgerPeriod.month;
+  MoneyKind _statsKind = MoneyKind.expense;
+  LedgerPeriod get _displayPeriod => _statistics ? _period : LedgerPeriod.month;
   String? _statsParent;
   bool _saving = false;
   LedgerState get _state => widget.ledger.state;
@@ -59,7 +63,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
   }
 
   Future<void> _action(Future<void> Function() action) async {
-    if (_saving) return;
+    if (_saving || widget.ledger.busy) return;
     ScaffoldMessenger.of(context).removeCurrentSnackBar();
     setState(() => _saving = true);
     try {
@@ -90,7 +94,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
     if (value.year < 1 || value.year > 9999) return;
     setState(() {
       _month = DateTime.utc(value.year, value.month);
-      _monthText.text = dateText(_month).substring(0, 7);
+      _updatePeriodText();
       _limit = 40;
       _statsParent = null;
     });
@@ -100,11 +104,30 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   void _parseMonth() {
     try {
-      _setMonth(parseDate('${_monthText.text.trim()}-01'));
+      final text = _monthText.text.trim();
+      if (_displayPeriod == LedgerPeriod.year &&
+          !RegExp(r'^\d{4}$').hasMatch(text)) {
+        throw const FormatException('请输入四位年份。');
+      }
+      _setMonth(
+        parseDate(
+          _displayPeriod == LedgerPeriod.year ? '$text-01-01' : '$text-01',
+        ),
+      );
     } catch (error) {
       _showError(error);
     }
   }
+
+  void _updatePeriodText() => _monthText.text = dateText(
+    _month,
+  ).substring(0, _displayPeriod == LedgerPeriod.year ? 4 : 7);
+
+  void _stepPeriod(int delta) => _setMonth(
+    _displayPeriod == LedgerPeriod.year
+        ? DateTime.utc(_month.year + delta, _month.month)
+        : DateTime.utc(_month.year, _month.month + delta),
+  );
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -215,8 +238,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   Widget _balances(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    Widget balance(String title, int amount, {String? id}) => Container(
-      width: 180,
+    Widget balance(
+      String title,
+      int amount, {
+      String? id,
+      double width = 180,
+    }) => Container(
+      width: width,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
@@ -256,21 +284,41 @@ class _LedgerScreenState extends State<LedgerScreen> {
       child: Row(
         children: [
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  balance('资金总额', _state.totalCents),
-                  const SizedBox(width: 10),
-                  balance('${cash.name} · 可支配', cash.balanceCents, id: cash.id),
-                  for (final account in _state.accounts.values.where(
-                    (item) => item.id != cash.id,
-                  )) ...[
-                    const SizedBox(width: 10),
-                    balance(account.name, account.balanceCents, id: account.id),
-                  ],
-                ],
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final count = _state.accounts.length + 1;
+                final width =
+                    ((constraints.maxWidth - (count - 1) * 10) / count).clamp(
+                      130.0,
+                      180.0,
+                    );
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      balance('资金总额', _state.totalCents, width: width),
+                      const SizedBox(width: 10),
+                      balance(
+                        '${cash.name} · 可支配',
+                        cash.balanceCents,
+                        id: cash.id,
+                        width: width,
+                      ),
+                      for (final account in _state.accounts.values.where(
+                        (item) => item.id != cash.id,
+                      )) ...[
+                        const SizedBox(width: 10),
+                        balance(
+                          account.name,
+                          account.balanceCents,
+                          id: account.id,
+                          width: width,
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
             ),
           ),
           IconButton(
@@ -296,9 +344,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
             children: [
               IconButton(
                 key: const ValueKey('money-previous-month'),
-                tooltip: '上个月',
-                onPressed: () =>
-                    _setMonth(DateTime.utc(_month.year, _month.month - 1)),
+                tooltip: _displayPeriod == LedgerPeriod.year ? '上一年' : '上个月',
+                onPressed: () => _stepPeriod(-1),
                 icon: const Icon(Icons.chevron_left),
               ),
               SizedBox(
@@ -306,20 +353,23 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 child: TextField(
                   key: const ValueKey('money-month'),
                   controller: _monthText,
-                  decoration: const InputDecoration(hintText: 'YYYY-MM'),
+                  decoration: InputDecoration(
+                    hintText: _displayPeriod == LedgerPeriod.year
+                        ? 'YYYY'
+                        : 'YYYY-MM',
+                  ),
                   onSubmitted: (_) => _parseMonth(),
                 ),
               ),
               IconButton(
                 key: const ValueKey('money-next-month'),
-                tooltip: '下个月',
-                onPressed: () =>
-                    _setMonth(DateTime.utc(_month.year, _month.month + 1)),
+                tooltip: _displayPeriod == LedgerPeriod.year ? '下一年' : '下个月',
+                onPressed: () => _stepPeriod(1),
                 icon: const Icon(Icons.chevron_right),
               ),
               TextButton(
                 onPressed: () => _setMonth(widget.ledger.clock()),
-                child: const Text('本月'),
+                child: Text(_displayPeriod == LedgerPeriod.year ? '本年' : '本月'),
               ),
               const Spacer(),
               SegmentedButton<bool>(
@@ -328,22 +378,58 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   ButtonSegment(value: true, label: Text('分类统计')),
                 ],
                 selected: {_statistics},
-                onSelectionChanged: (values) =>
-                    setState(() => _statistics = values.single),
+                onSelectionChanged: (values) => setState(() {
+                  _statistics = values.single;
+                  _updatePeriodText();
+                }),
               ),
             ],
           ),
           const SizedBox(height: 16),
+          if (_statistics) ...[
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                SegmentedButton<LedgerPeriod>(
+                  key: const ValueKey('stats-period'),
+                  segments: const [
+                    ButtonSegment(value: LedgerPeriod.month, label: Text('按月')),
+                    ButtonSegment(value: LedgerPeriod.year, label: Text('按年')),
+                  ],
+                  selected: {_period},
+                  onSelectionChanged: (values) => setState(() {
+                    _period = values.single;
+                    _statsParent = null;
+                    _updatePeriodText();
+                  }),
+                ),
+                SegmentedButton<MoneyKind>(
+                  key: const ValueKey('stats-kind'),
+                  segments: const [
+                    ButtonSegment(value: MoneyKind.expense, label: Text('支出')),
+                    ButtonSegment(value: MoneyKind.income, label: Text('收入')),
+                  ],
+                  selected: {_statsKind},
+                  onSelectionChanged: (values) => setState(() {
+                    _statsKind = values.single;
+                    _statsParent = null;
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+          ],
           Row(
             children: [
               Text(
-                '支出  ¥ ${moneyText(_state.monthlyTotal(_month, MoneyKind.expense))}',
+                '支出  ¥ ${moneyText(_state.periodTotal(_month, _displayPeriod, MoneyKind.expense))}',
                 key: const ValueKey('month-expense'),
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(width: 28),
               Text(
-                '收入  ¥ ${moneyText(_state.monthlyTotal(_month, MoneyKind.income))}',
+                '收入  ¥ ${moneyText(_state.periodTotal(_month, _displayPeriod, MoneyKind.income))}',
                 key: const ValueKey('month-income'),
               ),
             ],
@@ -427,6 +513,10 @@ class _LedgerScreenState extends State<LedgerScreen> {
                               () => widget.ledger.deleteRecord(record.id),
                             ),
                           );
+                        } else if (value == 'notes') {
+                          unawaited(
+                            showMoneyNotes(context, widget.ledger, record),
+                          );
                         } else {
                           unawaited(
                             showMoneyEditor(
@@ -438,6 +528,10 @@ class _LedgerScreenState extends State<LedgerScreen> {
                         }
                       },
                       itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          value: 'notes',
+                          child: Text('修改备注'),
+                        ),
                         if ([
                           MoneyKind.expense,
                           MoneyKind.income,
@@ -448,15 +542,19 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     ),
                   ],
                 ),
-                onTap:
-                    _saving ||
-                        ![
-                          MoneyKind.expense,
-                          MoneyKind.income,
-                        ].contains(record.kind)
+                onTap: _saving || widget.ledger.busy
                     ? null
                     : () => unawaited(
-                        showMoneyEditor(context, widget.ledger, record: record),
+                        [
+                              MoneyKind.expense,
+                              MoneyKind.income,
+                            ].contains(record.kind)
+                            ? showMoneyEditor(
+                                context,
+                                widget.ledger,
+                                record: record,
+                              )
+                            : showMoneyNotes(context, widget.ledger, record),
                       ),
               ),
             ],
@@ -466,76 +564,12 @@ class _LedgerScreenState extends State<LedgerScreen> {
     );
   }
 
-  Widget _stats(BuildContext context) {
-    final parent = _state.categories[_statsParent];
-    final rows = _state.expenseBreakdown(_month, parentId: parent?.id);
-    final total = rows.fold<int>(0, (sum, row) => sum + row.amountCents);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            if (parent != null)
-              IconButton(
-                key: const ValueKey('stats-back'),
-                tooltip: '返回上一级',
-                onPressed: () => setState(() => _statsParent = parent.parentId),
-                icon: const Icon(Icons.arrow_back),
-              ),
-            Expanded(
-              child: Text(
-                parent == null ? '全部支出' : _state.categoryPath(parent.id),
-                key: const ValueKey('stats-path'),
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            Text('¥ ${moneyText(total)}'),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: rows.isEmpty
-              ? const Center(child: Text('本月暂无支出'))
-              : ListView(
-                  children: [
-                    for (final row in rows)
-                      ListTile(
-                        key: ValueKey(
-                          'stats-${row.categoryId ?? 'unclassified'}-${row.direct}',
-                        ),
-                        title: Text(
-                          row.direct
-                              ? (parent == null
-                                    ? '未分类'
-                                    : '${parent.name}（直接记录）')
-                              : _state.categories[row.categoryId]!.name,
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: LinearProgressIndicator(
-                            value: row.amountCents / total,
-                            minHeight: 4,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '¥ ${moneyText(row.amountCents)}  ${(row.amountCents * 100 / total).toStringAsFixed(1)}%',
-                            ),
-                            if (!row.direct) const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: row.direct
-                            ? null
-                            : () =>
-                                  setState(() => _statsParent = row.categoryId),
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    );
-  }
+  Widget _stats(BuildContext context) => LedgerStatistics(
+    state: _state,
+    anchor: _month,
+    period: _period,
+    kind: _statsKind,
+    parentId: _statsParent,
+    onParentChanged: (id) => setState(() => _statsParent = id),
+  );
 }

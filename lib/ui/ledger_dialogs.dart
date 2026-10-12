@@ -196,6 +196,8 @@ class _MoneyEditorState extends State<_MoneyEditor> {
               key: const ValueKey('record-notes'),
               controller: _notes,
               enabled: !_saving,
+              minLines: 1,
+              maxLines: 3,
               decoration: const InputDecoration(labelText: '备注（可选）'),
               onSubmitted: (_) => unawaited(_save()),
             ),
@@ -239,6 +241,93 @@ Future<void> showMoneyMovement(
   builder: (_) =>
       _MovementDialog(ledger: ledger, kind: kind, accountId: accountId),
 );
+
+Future<void> showMoneyNotes(
+  BuildContext context,
+  LedgerController ledger,
+  MoneyRecord record,
+) => showDialog<void>(
+  context: context,
+  builder: (_) => _NotesDialog(ledger: ledger, record: record),
+);
+
+class _NotesDialog extends StatefulWidget {
+  const _NotesDialog({required this.ledger, required this.record});
+  final LedgerController ledger;
+  final MoneyRecord record;
+  @override
+  State<_NotesDialog> createState() => _NotesDialogState();
+}
+
+class _NotesDialogState extends State<_NotesDialog> {
+  late final _notes = TextEditingController(text: widget.record.notes);
+  bool _saving = false;
+  String? _error;
+  @override
+  void dispose() {
+    _notes.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.ledger.updateNotes(widget.record.id, _notes.text);
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _error = errorText(error);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('修改备注'),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            key: const ValueKey('bill-notes'),
+            controller: _notes,
+            autofocus: true,
+            enabled: !_saving,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: '备注（可选）'),
+          ),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: _saving ? null : () => Navigator.pop(context),
+        child: const Text('取消'),
+      ),
+      FilledButton(
+        onPressed: _saving ? null : () => unawaited(_save()),
+        child: const Text('保存'),
+      ),
+    ],
+  );
+}
 
 class _MovementDialog extends StatefulWidget {
   const _MovementDialog({

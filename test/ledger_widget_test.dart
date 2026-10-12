@@ -455,6 +455,17 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('stats-food-false')));
     await tester.pumpAndSettle();
     await screenshot('ledger-statistics');
+    await tester.tap(find.byKey(const ValueKey('stats-back')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('按年'));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-year-statistics');
+    tester.view.physicalSize = const Size(1100, 740);
+    await tester.pumpAndSettle();
+    await screenshot('ledger-statistics-compact');
+    expect(tester.takeException(), isNull);
+    tester.view.physicalSize = const Size(1360, 900);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('流水'));
     await tester.pumpAndSettle();
     await tester.enterText(quick('breakfast'), 'a');
@@ -702,6 +713,113 @@ void main() {
       await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.categories['lunch']!.parentId, 'food');
       expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'year totals and income drilldown fit desktop and preserve selected period',
+    (tester) async {
+      await open(tester, size: const Size(1100, 740));
+      await ledger.saveInputs([
+        expense(1000, 'lunch'),
+        expense(2000, 'housing', date: DateTime.utc(2026, 1, 1)),
+        expense(3000, 'daily', date: DateTime.utc(2025, 12, 31)),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 4000,
+          date: day,
+          categoryId: 'salary',
+        ),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 5000,
+          date: DateTime.utc(2026, 12, 31),
+        ),
+      ]);
+      await ledger.transfer(cashAccountId, investmentAccountId, 6000, day);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('分类统计'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('ledger-donut')), findsOneWidget);
+      await tester.tap(find.text('按年'));
+      await tester.pumpAndSettle();
+      expect(find.text('支出  ¥ 30.00'), findsOneWidget);
+      expect(find.text('收入  ¥ 90.00'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('money-month')))
+            .controller!
+            .text,
+        '2026',
+      );
+      await tester.tap(find.text('收入'));
+      await tester.pumpAndSettle();
+      expect(find.text('全部收入'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('stats-unclassified-true')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('stats-salary-false')));
+      await tester.pumpAndSettle();
+      expect(find.text('工资（直接记录）'), findsOneWidget);
+      expect(find.text('¥ 40.00  100.0%'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('money-previous-month')));
+      await tester.pumpAndSettle();
+      expect(find.text('本年暂无收入'), findsOneWidget);
+      await tester.tap(find.text('支出'));
+      await tester.pumpAndSettle();
+      expect(find.text('支出  ¥ 30.00'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('money-next-month')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('流水'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('money-month')))
+            .controller!
+            .text,
+        '2026-10',
+      );
+      expect(find.text('支出  ¥ 10.00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'movement notes dialog preserves failed input and leaves balances unchanged',
+    (tester) async {
+      await open(tester);
+      await ledger.transfer(
+        cashAccountId,
+        investmentAccountId,
+        1000,
+        day,
+        notes: '原备注',
+      );
+      await tester.pumpAndSettle();
+      final id = store.state.records.keys.single;
+      await tester.tap(find.byKey(ValueKey('money-record-$id')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('bill-notes')),
+        '转账备注\n第二行',
+      );
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[id]!.notes, '原备注');
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('bill-notes')))
+            .controller!
+            .text,
+        '转账备注\n第二行',
+      );
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[id]!.notes, '转账备注\n第二行');
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 999000);
+      expect(store.state.accounts[investmentAccountId]!.balanceCents, 301000);
     },
   );
 }
