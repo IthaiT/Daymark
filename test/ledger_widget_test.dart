@@ -10,6 +10,7 @@ import 'package:daymark/main.dart';
 import 'package:daymark/ui/ledger_screen.dart';
 import 'package:daymark/ui/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -592,6 +593,115 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.state.pinned[store.state.pinned.length - 2], 'lunch');
       expect(store.state.categories['lunch']!.name, '工作餐');
+    },
+  );
+
+  testWidgets(
+    'day arrows cross year boundaries and discard drafts on date change',
+    (tester) async {
+      await open(tester);
+      final date = find.byKey(const ValueKey('money-date'));
+      await tester.enterText(date, '2026-12-31');
+      await tester.enterText(quick('lunch'), '28');
+      await tester.tap(find.byKey(const ValueKey('notes-toggle-lunch')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('quick-notes-lunch')),
+        '跨年草稿',
+      );
+      await tester.tap(find.byKey(const ValueKey('money-next-day')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(date).controller!.text, '2027-01-01');
+      expect(
+        tester.widget<TextField>(quick('lunch')).controller!.text,
+        isEmpty,
+      );
+      expect(find.byKey(const ValueKey('quick-notes-lunch')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('money-previous-day')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(date).controller!.text, '2026-12-31');
+      await tester.enterText(date, '0001-01-01');
+      await tester.tap(find.byKey(const ValueKey('money-previous-day')));
+      expect(tester.widget<TextField>(date).controller!.text, '0001-01-01');
+      await tester.enterText(date, '9999-12-31');
+      await tester.tap(find.byKey(const ValueKey('money-next-day')));
+      expect(tester.widget<TextField>(date).controller!.text, '9999-12-31');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('visible note entry survives failure, saves and edits per bill', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(find.byKey(const ValueKey('notes-toggle-lunch')));
+    await tester.pumpAndSettle();
+    final notes = find.byKey(const ValueKey('quick-notes-lunch'));
+    await tester.enterText(quick('lunch'), '28');
+    await tester.enterText(notes, '午饭\n同事聚餐');
+    fail = true;
+    await tester.tap(find.byKey(const ValueKey('save-all-money')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(notes).controller!.text, '午饭\n同事聚餐');
+    expect(store.state.records, isEmpty);
+    fail = false;
+    await tester.tap(find.byKey(const ValueKey('save-all-money')));
+    await tester.pumpAndSettle();
+    final record = store.state.records.values.single;
+    expect(record.notes, '午饭\n同事聚餐');
+    expect(find.text(record.notes), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('money-record-${record.id}')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const ValueKey('record-notes')), '更新备注');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.state.records[record.id]!.notes, '更新备注');
+    expect(store.state.accounts[cashAccountId]!.balanceCents, 997200);
+  });
+
+  testWidgets(
+    'ledger tree folds, right-click colors and drag moves preserve associations',
+    (tester) async {
+      await open(tester);
+      await ledger.saveInputs([expense(2800, 'lunch')]);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-fold-food')));
+      await tester.pumpAndSettle();
+      expect(quick('lunch'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('ledger-fold-food')));
+      await tester.pumpAndSettle();
+      expect(quick('lunch'), findsOneWidget);
+      await tester.tap(find.text('午餐'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改标签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('category-color-pink')));
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.categories['lunch']!.color, isNull);
+      expect(
+        tester
+            .widget<ChoiceChip>(
+              find.byKey(const ValueKey('category-color-pink')),
+            )
+            .selected,
+        isTrue,
+      );
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.categories['lunch']!.color, CategoryColor.pink);
+      final source = tester.getCenter(find.text('午餐'));
+      final target = tester.getCenter(find.text('住房'));
+      await tester.dragFrom(source, target - source);
+      await tester.pumpAndSettle();
+      expect(store.state.categories['lunch']!.parentId, 'housing');
+      expect(store.state.records.values.single.categoryId, 'lunch');
+      expect(store.state.categories['lunch']!.color, CategoryColor.pink);
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.categories['lunch']!.parentId, 'food');
+      expect(tester.takeException(), isNull);
     },
   );
 }

@@ -6,6 +6,7 @@ import '../application/ledger_controller.dart';
 import '../domain/ledger.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
+import 'ledger_category_style.dart';
 
 String moneyKindText(MoneyKind kind) => switch (kind) {
   MoneyKind.expense => '支出',
@@ -454,7 +455,11 @@ class _CategoryManagerState extends State<_CategoryManager> {
                   onPressed: widget.ledger.busy
                       ? null
                       : () => unawaited(
-                          _editCategory(context, widget.ledger, _kind),
+                          showLedgerCategoryEditor(
+                            context,
+                            widget.ledger,
+                            _kind,
+                          ),
                         ),
                   icon: const Icon(Icons.add),
                   label: const Text('新增分类'),
@@ -478,7 +483,17 @@ class _CategoryManagerState extends State<_CategoryManager> {
                                     1) *
                                 22.0,
                       ),
-                      title: Text(category.name),
+                      title: Row(
+                        children: [
+                          LedgerCategoryBadge(
+                            state: widget.ledger.state,
+                            id: category.id,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(category.name)),
+                        ],
+                      ),
                       leading: _kind == MoneyKind.expense
                           ? IconButton(
                               tooltip:
@@ -525,7 +540,7 @@ class _CategoryManagerState extends State<_CategoryManager> {
                             );
                           } else {
                             unawaited(
-                              _editCategory(
+                              showLedgerCategoryEditor(
                                 context,
                                 widget.ledger,
                                 _kind,
@@ -563,7 +578,7 @@ class _CategoryManagerState extends State<_CategoryManager> {
   );
 }
 
-Future<void> _editCategory(
+Future<void> showLedgerCategoryEditor(
   BuildContext context,
   LedgerController ledger,
   MoneyKind kind, {
@@ -601,6 +616,7 @@ class _NameDialogState extends State<_NameDialog> {
     text: widget.category?.name ?? widget.account?.name ?? '',
   );
   late String? _parent = widget.category?.parentId ?? widget.parentId;
+  late CategoryColor? _color = widget.category?.color;
   bool _saving = false;
   String? _error;
   @override
@@ -622,6 +638,8 @@ class _NameDialogState extends State<_NameDialog> {
           widget.kind!,
           _parent,
           id: widget.category?.id,
+          color: _color,
+          inheritColor: _color == null,
         );
       } else {
         await widget.ledger.saveAccount(_name.text, id: widget.account?.id);
@@ -646,52 +664,89 @@ class _NameDialogState extends State<_NameDialog> {
     ),
     content: SizedBox(
       width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            key: const ValueKey('ledger-name'),
-            controller: _name,
-            autofocus: true,
-            enabled: !_saving,
-            decoration: const InputDecoration(labelText: '名称'),
-            onSubmitted: (_) => unawaited(_save()),
-          ),
-          if (widget.kind != null) ...[
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: _parent ?? '',
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: '父分类'),
-              items: [
-                const DropdownMenuItem(value: '', child: Text('一级分类')),
-                for (final item in widget.ledger.state.orderedCategories(
-                  widget.kind!,
-                ))
-                  if (widget.category == null ||
-                      !widget.ledger.state
-                          .descendants(widget.category!.id)
-                          .contains(item.id))
-                    DropdownMenuItem(
-                      value: item.id,
-                      child: Text(widget.ledger.state.categoryPath(item.id)),
-                    ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (value) =>
-                        setState(() => _parent = value == '' ? null : value),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              key: const ValueKey('ledger-name'),
+              controller: _name,
+              autofocus: true,
+              enabled: !_saving,
+              decoration: const InputDecoration(labelText: '名称'),
+              onSubmitted: (_) => unawaited(_save()),
             ),
-          ],
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+            if (widget.kind != null) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                initialValue: _parent ?? '',
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: '父分类'),
+                items: [
+                  const DropdownMenuItem(value: '', child: Text('一级分类')),
+                  for (final item in widget.ledger.state.orderedCategories(
+                    widget.kind!,
+                  ))
+                    if (widget.category == null ||
+                        !widget.ledger.state
+                            .descendants(widget.category!.id)
+                            .contains(item.id))
+                      DropdownMenuItem(
+                        value: item.id,
+                        child: Text(widget.ledger.state.categoryPath(item.id)),
+                      ),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (value) =>
+                          setState(() => _parent = value == '' ? null : value),
               ),
-            ),
-        ],
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '标签颜色',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  ChoiceChip(
+                    label: const Text('自动／继承'),
+                    selected: _color == null,
+                    onSelected: _saving
+                        ? null
+                        : (_) => setState(() => _color = null),
+                  ),
+                  for (final color in CategoryColor.values)
+                    ChoiceChip(
+                      key: ValueKey('category-color-${color.name}'),
+                      avatar: CircleAvatar(
+                        backgroundColor: categorySwatch(color)[500],
+                        radius: 8,
+                      ),
+                      label: Text(categoryColorText(color)),
+                      selected: _color == color,
+                      onSelected: _saving
+                          ? null
+                          : (_) => setState(() => _color = color),
+                    ),
+                ],
+              ),
+            ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
       ),
     ),
     actions: [

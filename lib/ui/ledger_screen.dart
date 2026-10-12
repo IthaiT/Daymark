@@ -9,6 +9,8 @@ import '../domain/ledger.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'ledger_dialogs.dart';
+import 'ledger_category_style.dart';
+import 'ledger_sidebar.dart';
 
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key, required this.ledger, this.focusNode});
@@ -16,18 +18,6 @@ class LedgerScreen extends StatefulWidget {
   final FocusNode? focusNode;
   @override
   State<LedgerScreen> createState() => _LedgerScreenState();
-}
-
-class _QuickInput {
-  final amount = TextEditingController();
-  final notes = TextEditingController();
-  final focus = FocusNode();
-  bool notesOpen = false;
-  void dispose() {
-    amount.dispose();
-    notes.dispose();
-    focus.dispose();
-  }
 }
 
 class _LedgerScreenState extends State<LedgerScreen> {
@@ -38,10 +28,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
   late final _monthText = TextEditingController(
     text: dateText(_month).substring(0, 7),
   );
-  late final _date = TextEditingController(
-    text: dateText(widget.ledger.clock()),
-  );
-  final _inputs = <String, _QuickInput>{};
+  final _sidebar = GlobalKey<LedgerSidebarState>();
   final _scroll = ScrollController();
   late final _focus = widget.focusNode ?? FocusNode();
   int _limit = 40;
@@ -58,12 +45,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
   @override
   void dispose() {
     _monthText.dispose();
-    _date.dispose();
     _scroll.dispose();
     if (widget.focusNode == null) _focus.dispose();
-    for (final input in _inputs.values) {
-      input.dispose();
-    }
     super.dispose();
   }
 
@@ -103,50 +86,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
       );
   }
 
-  Future<void> _saveQuick(List<String> ids, {String? focusId}) async {
-    if (_saving) return;
-    await _action(() async {
-      final date = parseDate(_date.text);
-      final selected = ids
-          .where((id) => _inputs[id]?.amount.text.trim().isNotEmpty == true)
-          .toList();
-      if (selected.isEmpty) throw const FormatException('请填写金额。');
-      final inputs = <MoneyInput>[];
-      for (final id in selected) {
-        int cents;
-        try {
-          cents = parseMoney(_inputs[id]!.amount.text);
-          if (cents <= 0) throw const FormatException('金额必须大于零。');
-        } on FormatException catch (error) {
-          _inputs[id]!.focus.requestFocus();
-          throw FormatException(
-            '${_state.categories[id]!.name}：${error.message}',
-          );
-        }
-        inputs.add(
-          MoneyInput(
-            kind: MoneyKind.expense,
-            amountCents: cents,
-            date: date,
-            categoryId: id,
-            notes: _inputs[id]!.notes.text,
-          ),
-        );
-      }
-      await widget.ledger.saveInputs(inputs);
-      if (!mounted) return;
-      for (final id in selected) {
-        _inputs[id]!.amount.clear();
-        _inputs[id]!.notes.clear();
-      }
-      if (focusId != null) {
-        _inputs[focusId]!.focus.requestFocus();
-      } else if (_state.pinned.isNotEmpty) {
-        _inputs[_state.pinned.first]?.focus.requestFocus();
-      }
-    });
-  }
-
   void _setMonth(DateTime value) {
     if (value.year < 1 || value.year > 9999) return;
     setState(() {
@@ -170,104 +109,108 @@ class _LedgerScreenState extends State<LedgerScreen> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
-    builder: (context, _) {
-      return CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
-              unawaited(
-                _action(() async {
-                  await widget.ledger.undo();
-                }),
+    builder: (context, _) => CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+            unawaited(
+              _action(() async {
+                await widget.ledger.undo();
+              }),
+            ),
+        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
+            unawaited(
+              _action(() async {
+                await widget.ledger.redo();
+              }),
+            ),
+        const SingleActivator(
+          LogicalKeyboardKey.keyZ,
+          control: true,
+          shift: true,
+        ): () => unawaited(
+          _action(() async {
+            await widget.ledger.redo();
+          }),
+        ),
+        const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+            unawaited(_sidebar.currentState?.saveAll() ?? Future.value()),
+      },
+      child: Focus(
+        focusNode: _focus,
+        autofocus: true,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 320,
+              child: LedgerSidebar(
+                key: _sidebar,
+                ledger: widget.ledger,
+                onError: _showError,
               ),
-          const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
-              unawaited(
-                _action(() async {
-                  await widget.ledger.redo();
-                }),
-              ),
-          const SingleActivator(
-            LogicalKeyboardKey.keyZ,
-            control: true,
-            shift: true,
-          ): () => unawaited(
-            _action(() async {
-              await widget.ledger.redo();
-            }),
-          ),
-          const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
-              unawaited(_saveQuick(_state.pinned)),
-        },
-        child: Focus(
-          focusNode: _focus,
-          autofocus: true,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              children: [
-                _balances(context),
-                const SizedBox(height: 16),
-                Row(
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
                   children: [
-                    const Spacer(),
-                    TextButton.icon(
-                      key: const ValueKey('add-income'),
-                      onPressed: _saving
-                          ? null
-                          : () => unawaited(
-                              showMoneyEditor(
-                                context,
-                                widget.ledger,
-                                kind: MoneyKind.income,
-                              ),
-                            ),
-                      icon: const Icon(Icons.add),
-                      label: const Text('记收入'),
+                    _balances(context),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton.icon(
+                          key: const ValueKey('add-income'),
+                          onPressed: _saving || widget.ledger.busy
+                              ? null
+                              : () => unawaited(
+                                  showMoneyEditor(
+                                    context,
+                                    widget.ledger,
+                                    kind: MoneyKind.income,
+                                  ),
+                                ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('记收入'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _saving || widget.ledger.busy
+                              ? null
+                              : () => unawaited(
+                                  showMoneyMovement(
+                                    context,
+                                    widget.ledger,
+                                    MoneyKind.transfer,
+                                  ),
+                                ),
+                          icon: const Icon(Icons.swap_horiz),
+                          label: const Text('转账'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _saving || widget.ledger.busy
+                              ? null
+                              : () => unawaited(
+                                  showMoneyMovement(
+                                    context,
+                                    widget.ledger,
+                                    MoneyKind.adjustment,
+                                  ),
+                                ),
+                          icon: const Icon(Icons.balance),
+                          label: const Text('余额校准'),
+                        ),
+                      ],
                     ),
-                    TextButton.icon(
-                      onPressed: _saving
-                          ? null
-                          : () => unawaited(
-                              showMoneyMovement(
-                                context,
-                                widget.ledger,
-                                MoneyKind.transfer,
-                              ),
-                            ),
-                      icon: const Icon(Icons.swap_horiz),
-                      label: const Text('转账'),
-                    ),
-                    TextButton.icon(
-                      onPressed: _saving
-                          ? null
-                          : () => unawaited(
-                              showMoneyMovement(
-                                context,
-                                widget.ledger,
-                                MoneyKind.adjustment,
-                              ),
-                            ),
-                      icon: const Icon(Icons.balance),
-                      label: const Text('余额校准'),
-                    ),
+                    const SizedBox(height: 12),
+                    Expanded(child: _browse(context)),
                   ],
                 ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(width: 350, child: _quickEntry(context)),
-                      const SizedBox(width: 20),
-                      Expanded(child: _browse(context)),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
-      );
-    },
+      ),
+    ),
   );
 
   Widget _balances(BuildContext context) {
@@ -337,163 +280,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 : () => unawaited(showLedgerAccounts(context, widget.ledger)),
             icon: const Icon(Icons.account_balance_wallet_outlined),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _quickEntry(BuildContext context) => Card.outlined(
-    margin: EdgeInsets.zero,
-    child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text('记支出', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
-              IconButton(
-                tooltip: '管理分类',
-                onPressed: _saving
-                    ? null
-                    : () => unawaited(
-                        showLedgerCategories(context, widget.ledger),
-                      ),
-                icon: const Icon(Icons.tune),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          MoneyDateField(controller: _date, enabled: !_saving),
-          const SizedBox(height: 12),
-          Expanded(
-            child: FocusTraversalGroup(
-              policy: OrderedTraversalPolicy(),
-              child: ListView(
-                children: [
-                  for (final id in _state.pinned) _quickRow(context, id),
-                  TextButton.icon(
-                    onPressed: _saving
-                        ? null
-                        : () => unawaited(
-                            showMoneyEditor(context, widget.ledger),
-                          ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('其他支出'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton(
-            key: const ValueKey('save-all-money'),
-            onPressed: _saving
-                ? null
-                : () => unawaited(_saveQuick(_state.pinned)),
-            child: const Text('保存已填项目'),
-          ),
-        ],
-      ),
-    ),
-  );
-
-  Widget _quickRow(BuildContext context, String id) {
-    final input = _inputs.putIfAbsent(id, _QuickInput.new);
-    final category = _state.categories[id]!;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: Tooltip(
-                  message: _state.categoryPath(id),
-                  child: Text(category.name, overflow: TextOverflow.ellipsis),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 3,
-                child: FocusTraversalOrder(
-                  order: NumericFocusOrder(_state.pinned.indexOf(id) * 2.0),
-                  child: TextField(
-                    key: ValueKey('quick-$id'),
-                    controller: input.amount,
-                    focusNode: input.focus,
-                    readOnly: _saving,
-                    decoration: const InputDecoration(
-                      prefixText: '¥ ',
-                      hintText: '金额',
-                    ),
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) =>
-                        unawaited(_saveQuick([id], focusId: id)),
-                  ),
-                ),
-              ),
-              FocusTraversalOrder(
-                order: NumericFocusOrder(
-                  1000 + _state.pinned.indexOf(id).toDouble(),
-                ),
-                child: PopupMenuButton<String>(
-                  tooltip: '备注与常用顺序',
-                  enabled: !_saving,
-                  onSelected: (value) {
-                    if (value == 'notes') {
-                      setState(() => input.notesOpen = !input.notesOpen);
-                      return;
-                    }
-                    final ids = [..._state.pinned];
-                    final index = ids.indexOf(id);
-                    if (value == 'unpin') {
-                      ids.remove(id);
-                    }
-                    if (value == 'up' && index > 0) {
-                      ids.removeAt(index);
-                      ids.insert(index - 1, id);
-                    }
-                    if (value == 'down' && index < ids.length - 1) {
-                      ids.removeAt(index);
-                      ids.insert(index + 1, id);
-                    }
-                    unawaited(_action(() => widget.ledger.setPinned(ids)));
-                  },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'notes', child: Text('填写备注')),
-                    PopupMenuItem(
-                      value: 'up',
-                      enabled: _state.pinned.first != id,
-                      child: const Text('向上移'),
-                    ),
-                    PopupMenuItem(
-                      value: 'down',
-                      enabled: _state.pinned.last != id,
-                      child: const Text('向下移'),
-                    ),
-                    const PopupMenuItem(value: 'unpin', child: Text('取消固定')),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (input.notesOpen)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: FocusTraversalOrder(
-                order: NumericFocusOrder(_state.pinned.indexOf(id) * 2.0 + 1),
-                child: TextField(
-                  key: ValueKey('quick-notes-$id'),
-                  controller: input.notes,
-                  readOnly: _saving,
-                  decoration: const InputDecoration(hintText: '备注（可选）'),
-                  onSubmitted: (_) => unawaited(_saveQuick([id], focusId: id)),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -611,17 +397,19 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 key: ValueKey('money-record-${record.id}'),
                 title: Text(title),
                 subtitle: record.notes.isEmpty ? null : Text(record.notes),
-                leading: Icon(
-                  switch (record.kind) {
-                    MoneyKind.expense => Icons.remove_circle_outline,
-                    MoneyKind.income => Icons.add_circle_outline,
-                    MoneyKind.transfer => Icons.swap_horiz,
-                    MoneyKind.adjustment => Icons.balance,
-                  },
-                  color: record.kind == MoneyKind.income
-                      ? Colors.green[700]
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                leading: record.categoryId != null
+                    ? LedgerCategoryBadge(state: _state, id: record.categoryId)
+                    : Icon(
+                        switch (record.kind) {
+                          MoneyKind.expense => Icons.remove_circle_outline,
+                          MoneyKind.income => Icons.add_circle_outline,
+                          MoneyKind.transfer => Icons.swap_horiz,
+                          MoneyKind.adjustment => Icons.balance,
+                        },
+                        color: record.kind == MoneyKind.income
+                            ? Colors.green[700]
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [

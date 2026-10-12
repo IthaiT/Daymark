@@ -54,35 +54,48 @@ class _AppScreenState extends State<AppScreen> {
   Widget build(BuildContext context) => Scaffold(
     body: Column(
       children: [
-        WindowTitleBar(
-          leading: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _mode(0, '时间记录', Icons.schedule),
-              _mode(1, '记账', Icons.account_balance_wallet_outlined),
-            ],
-          ),
-        ),
+        const WindowTitleBar(leadingWidth: 64),
         Expanded(
-          child: IndexedStack(
-            index: _page,
+          child: Row(
             children: [
-              FocusScope(
-                canRequestFocus: _page == 0,
-                child: JournalScreen(
-                  key: _journal,
-                  journal: widget.journal,
-                  showTitleBar: false,
+              Material(
+                color: Theme.of(context).colorScheme.surfaceContainer,
+                child: SizedBox(
+                  width: 64,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 16),
+                      _mode(0, '时间记录', Icons.schedule),
+                      const SizedBox(height: 8),
+                      _mode(1, '记账', Icons.account_balance_wallet_outlined),
+                    ],
+                  ),
                 ),
               ),
-              FocusScope(
-                canRequestFocus: _page == 1,
-                child: _visitedLedger
-                    ? LedgerScreen(
-                        ledger: widget.ledger,
-                        focusNode: _ledgerFocus,
-                      )
-                    : const SizedBox.shrink(),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: IndexedStack(
+                  index: _page,
+                  children: [
+                    FocusScope(
+                      canRequestFocus: _page == 0,
+                      child: JournalScreen(
+                        key: _journal,
+                        journal: widget.journal,
+                        showTitleBar: false,
+                      ),
+                    ),
+                    FocusScope(
+                      canRequestFocus: _page == 1,
+                      child: _visitedLedger
+                          ? LedgerScreen(
+                              ledger: widget.ledger,
+                              focusNode: _ledgerFocus,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -90,19 +103,20 @@ class _AppScreenState extends State<AppScreen> {
       ],
     ),
   );
-  Widget _mode(int index, String label, IconData icon) => TextButton.icon(
+  Widget _mode(int index, String label, IconData icon) => IconButton(
     key: ValueKey('mode-$index'),
     onPressed: () => unawaited(_switch(index)),
-    style: TextButton.styleFrom(
+    tooltip: label,
+    isSelected: _page == index,
+    style: IconButton.styleFrom(
       foregroundColor: _page == index
           ? Theme.of(context).colorScheme.onSecondaryContainer
           : Theme.of(context).colorScheme.onSurfaceVariant,
       backgroundColor: _page == index
           ? Theme.of(context).colorScheme.secondaryContainer
           : null,
-      padding: const EdgeInsets.symmetric(horizontal: 10),
+      fixedSize: const Size(44, 44),
     ),
-    icon: Icon(icon, size: 16),
-    label: Text(label),
+    icon: Icon(icon, size: 22),
   );
 }

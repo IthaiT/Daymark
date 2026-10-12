@@ -389,8 +389,9 @@ class LedgerState {
         0,
         (sum, record) => sum + record.amountCents,
       );
-      if (amount > 0)
+      if (amount > 0) {
         result.add(CategoryAmount(child.id, amount, count: matches.length));
+      }
     }
     result.sort((a, b) {
       final amount = b.amountCents.compareTo(a.amountCents);
