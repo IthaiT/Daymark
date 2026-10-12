@@ -36,7 +36,20 @@ void main() {
       },
     );
     ledger = LedgerController(store);
-    await ledger.initializeBalances(opening);
+    await store.replace(
+      store.state.copyWith(
+        accounts: {
+          for (final account in store.state.accounts.values)
+            account.id: MoneyAccount(
+              account.id,
+              account.name,
+              account.kind,
+              opening[account.id]!,
+              opening[account.id]!,
+            ),
+        },
+      ),
+    );
   });
   tearDown(() async {
     ledger.dispose();
@@ -199,7 +212,6 @@ void main() {
       expect(cash(), 1000000);
       expect(ledger.state.balanceEnabled, isFalse);
       expect(ledger.state.records['old']!.affectsBalance, isFalse);
-      await ledger.initializeBalances(opening);
       await ledger.saveInputs([expense(5000, date: september)], editId: 'old');
       expect(cash(), 1000000);
       await ledger.saveInputs([income(8000)], editId: 'old');
@@ -372,6 +384,149 @@ void main() {
         );
         expect(await store.file.readAsString(), source);
       }
+    },
+  );
+
+  test(
+    'new ledger starts at zero and first expense is atomic without setup',
+    () async {
+      await store.replace(LedgerState.empty());
+      final bytes = await store.file.readAsBytes();
+      fail = true;
+      await expectLater(
+        ledger.saveInputs([expense(1234)]),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(cash(), 0);
+      expect(await store.file.readAsBytes(), bytes);
+      fail = false;
+      await ledger.saveInputs([expense(1234)]);
+      expect(cash(), -1234);
+      expect((await LedgerStore.open(directory)).state.totalCents, -1234);
+    },
+  );
+
+  test(
+    'year statistics partition nested tags and exclude other years and movements',
+    () async {
+      await ledger.saveInputs([
+        expense(1000, category: 'food', date: DateTime.utc(2026, 1, 1)),
+        expense(2000, date: DateTime.utc(2026, 12, 31)),
+        expense(3000, category: 'breakfast', date: DateTime.utc(2025, 12, 31)),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 4000,
+          date: DateTime.utc(2026, 1, 1),
+          categoryId: 'salary',
+        ),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 5000,
+          date: DateTime.utc(2026, 12, 31),
+        ),
+      ]);
+      await ledger.transfer(cashAccountId, investmentAccountId, 6000, october);
+      await ledger.calibrate(providentAccountId, 7000, october);
+      final expenses = ledger.state.categoryBreakdown(
+        october,
+        LedgerPeriod.year,
+        MoneyKind.expense,
+        parentId: 'food',
+      );
+      expect(expenses.fold<int>(0, (sum, row) => sum + row.amountCents), 3000);
+      expect(expenses.fold<int>(0, (sum, row) => sum + row.count), 2);
+      expect(expenses.singleWhere((row) => row.direct).amountCents, 1000);
+      expect(
+        ledger.state.periodTotal(october, LedgerPeriod.year, MoneyKind.income),
+        9000,
+      );
+      expect(
+        ledger.state
+            .categoryBreakdown(october, LedgerPeriod.year, MoneyKind.income)
+            .singleWhere((row) => row.direct)
+            .amountCents,
+        5000,
+      );
+      expect(ledger.state.monthlyTotal(october, MoneyKind.expense), 0);
+    },
+  );
+
+  test(
+    'colors and multiline notes persist, moves retain colors and failed edits retain state',
+    () async {
+      await ledger.saveCategory(
+        '午餐',
+        MoneyKind.expense,
+        'food',
+        id: 'lunch',
+        color: CategoryColor.pink,
+      );
+      await ledger.saveInputs([
+        MoneyInput(
+          kind: MoneyKind.expense,
+          amountCents: 100,
+          date: october,
+          categoryId: 'lunch',
+          notes: '第一行\n第二行',
+        ),
+      ]);
+      final id = ledger.state.records.keys.single;
+      await ledger.saveCategory('工作餐', MoneyKind.expense, null, id: 'lunch');
+      expect(ledger.state.categories['lunch']!.color, CategoryColor.pink);
+      final before = ledger.state;
+      fail = true;
+      await expectLater(
+        ledger.saveInputs([
+          MoneyInput(
+            kind: MoneyKind.expense,
+            amountCents: 100,
+            date: october,
+            notes: '修改备注',
+          ),
+        ], editId: id),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(identical(ledger.state, before), isTrue);
+      final reopened = (await LedgerStore.open(directory)).state;
+      expect(reopened.records[id]!.notes, '第一行\n第二行');
+      expect(reopened.categories['lunch']!.color, CategoryColor.pink);
+      fail = false;
+      await ledger.saveCategory(
+        '工作餐',
+        MoneyKind.expense,
+        'food',
+        id: 'lunch',
+        inheritColor: true,
+      );
+      expect(ledger.state.categories['lunch']!.color, isNull);
+    },
+  );
+
+  test(
+    'old presets upgrade once without overwriting customization or recreating deleted defaults',
+    () async {
+      final source = ledger.state.toJson()..remove('category_presets_version');
+      source['categories'] = [
+        for (final category in ledger.state.categories.values.where(
+          (item) => item.id != 'daily',
+        ))
+          category.toJson()..remove('color'),
+      ];
+      final upgraded = LedgerStore.decode(source);
+      expect(upgraded.categories['daily']!.name, '日用');
+      expect(upgraded.categories['food']!.color, CategoryColor.green);
+      await store.replace(upgraded);
+      await ledger.deleteCategory('daily');
+      expect(
+        (await LedgerStore.open(directory)).state.categories,
+        isNot(contains('daily')),
+      );
+      final invalid = ledger.state.toJson();
+      invalid['categories'] = [
+        for (final category in ledger.state.categories.values)
+          category.toJson()..['color'] = 'invalid',
+      ];
+      expect(() => LedgerStore.decode(invalid), throwsFormatException);
     },
   );
 }

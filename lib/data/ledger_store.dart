@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../domain/ledger.dart';
 import '../domain/model.dart';
+import '../domain/unicode.dart';
 import 'atomic_file.dart';
 import 'store.dart';
 
@@ -131,6 +132,12 @@ class LedgerStore {
         string(row, 'name'),
         kind(row),
         optionalString(row, 'parent_id'),
+        optionalString(row, 'color') == null
+            ? null
+            : CategoryColor.values.firstWhere(
+                (color) => color.name == row['color'],
+                orElse: () => throw const FormatException('标签颜色不支持。'),
+              ),
       );
     }
     // v1 had no automatic balance linkage. Never replay its historical entries.
@@ -169,6 +176,36 @@ class LedgerStore {
       pinned: pins.cast<String>(),
     );
     state.validate();
-    return state;
+    final presets = payload['category_presets_version'];
+    if (presets != null && presets != 1) {
+      throw const FormatException('不支持的预设标签版本。');
+    }
+    if (presets != null) return state;
+    // Upgrade defaults once, preserving customized names, IDs and associations.
+    final upgraded = {...categories};
+    for (final preset in defaultMoneyCategories) {
+      final previous = upgraded[preset.id];
+      if (previous != null) {
+        upgraded[preset.id] = MoneyCategory(
+          previous.id,
+          previous.name,
+          previous.kind,
+          previous.parentId,
+          previous.color ?? preset.color,
+        );
+      } else if ((preset.parentId == null ||
+              upgraded.containsKey(preset.parentId)) &&
+          !upgraded.values.any(
+            (item) =>
+                item.kind == preset.kind &&
+                item.parentId == preset.parentId &&
+                caseFold(item.name.trim()) == caseFold(preset.name),
+          )) {
+        upgraded[preset.id] = preset;
+      }
+    }
+    final migrated = state.copyWith(categories: upgraded);
+    migrated.validate();
+    return migrated;
   }
 }

@@ -464,6 +464,7 @@ class _CategoryManagerState extends State<_CategoryManager> {
             const SizedBox(height: 12),
             Expanded(
               child: ListView(
+                key: const ValueKey('category-manager-list'),
                 children: [
                   for (final category in widget.ledger.state.orderedCategories(
                     _kind,

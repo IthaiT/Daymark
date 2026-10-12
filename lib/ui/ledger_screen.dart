@@ -171,7 +171,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
     builder: (context, _) {
-      if (!_state.balanceEnabled) return _BalanceSetup(ledger: widget.ledger);
       return CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
@@ -751,106 +750,4 @@ class _LedgerScreenState extends State<LedgerScreen> {
       ],
     );
   }
-}
-
-class _BalanceSetup extends StatefulWidget {
-  const _BalanceSetup({required this.ledger});
-  final LedgerController ledger;
-  @override
-  State<_BalanceSetup> createState() => _BalanceSetupState();
-}
-
-class _BalanceSetupState extends State<_BalanceSetup> {
-  late final _balances = {
-    for (final account in widget.ledger.state.accounts.values)
-      account.id: TextEditingController(text: moneyText(account.balanceCents)),
-  };
-  bool _saving = false;
-  String? _error;
-  @override
-  void dispose() {
-    for (final field in _balances.values) {
-      field.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_saving) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await widget.ledger.initializeBalances({
-        for (final entry in _balances.entries)
-          entry.key: parseMoney(entry.value.text, signed: true),
-      });
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _saving = false;
-          _error = errorText(error);
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Center(
-    child: SizedBox(
-      width: 500,
-      child: Card.outlined(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  '设置当前余额',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  '以今天的实际余额为起点。现金包括纸币、银行卡、微信和支付宝余额；历史流水保留用于查询和统计，不会再次扣款。',
-                ),
-                const SizedBox(height: 24),
-                for (final account in widget.ledger.state.accounts.values)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: TextField(
-                      key: ValueKey('opening-${account.id}'),
-                      controller: _balances[account.id],
-                      enabled: !_saving,
-                      decoration: InputDecoration(
-                        labelText: account.name,
-                        prefixText: '¥ ',
-                      ),
-                      onSubmitted: (_) => unawaited(_save()),
-                    ),
-                  ),
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
-                      ),
-                    ),
-                  ),
-                FilledButton(
-                  key: const ValueKey('enable-balances'),
-                  onPressed: _saving ? null : () => unawaited(_save()),
-                  child: const Text('启用记账'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }

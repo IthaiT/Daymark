@@ -57,32 +57,6 @@ class LedgerController extends ChangeNotifier {
     if (record) history.record(before, desired);
   }
 
-  Future<void> initializeBalances(Map<String, int> balances) => _run(() async {
-    if (state.balanceEnabled) throw const FormatException('已启用余额联动，请使用余额校准。');
-    if (!setEquals(balances.keys.toSet(), state.accounts.keys.toSet())) {
-      throw const FormatException('请填写所有账户的当前余额。');
-    }
-    final accounts = {
-      for (final account in state.accounts.values)
-        account.id: MoneyAccount(
-          account.id,
-          account.name,
-          account.kind,
-          balances[account.id]!,
-          balances[account.id]!,
-        ),
-    };
-    await _apply(
-      state.copyWith(accounts: accounts, balanceEnabled: true),
-      record: false,
-    );
-    history.clear();
-  });
-
-  void _requireEnabled() {
-    if (!state.balanceEnabled) throw const FormatException('请先填写当前实际余额。');
-  }
-
   /// Recalculate from explicit linkage, so retries and edits never double apply.
   LedgerState _withRecords(Map<String, MoneyRecord> records) {
     final balances = {
@@ -98,6 +72,7 @@ class LedgerController extends ChangeNotifier {
       }
     }
     return state.copyWith(
+      balanceEnabled: true,
       records: records,
       accounts: {
         for (final account in state.accounts.values)
@@ -108,7 +83,6 @@ class LedgerController extends ChangeNotifier {
 
   Future<void> saveInputs(List<MoneyInput> inputs, {String? editId}) => _run(
     () async {
-      _requireEnabled();
       if (inputs.isEmpty) return;
       final previous = editId == null ? null : state.records[editId];
       if (editId != null &&
@@ -150,7 +124,6 @@ class LedgerController extends ChangeNotifier {
     DateTime date, {
     String notes = '',
   }) => _run(() async {
-    _requireEnabled();
     final record = MoneyRecord(
       id: _id(),
       kind: MoneyKind.transfer,
@@ -170,7 +143,6 @@ class LedgerController extends ChangeNotifier {
     DateTime date, {
     String notes = '',
   }) => _run(() async {
-    _requireEnabled();
     final account = state.accounts[accountId];
     if (account == null || actualCents.abs() > maxMoneyCents) {
       throw const FormatException('账户或余额不正确。');
@@ -194,12 +166,20 @@ class LedgerController extends ChangeNotifier {
     MoneyKind kind,
     String? parentId, {
     String? id,
+    CategoryColor? color,
+    bool inheritColor = false,
   }) => _run(() async {
     final previous = id == null ? null : state.categories[id];
     if (id != null && (previous == null || previous.kind != kind)) {
       throw const FormatException('分类不存在或收支类型不同。');
     }
-    final category = MoneyCategory(id ?? _id(), name.trim(), kind, parentId);
+    final category = MoneyCategory(
+      id ?? _id(),
+      name.trim(),
+      kind,
+      parentId,
+      inheritColor ? null : color ?? previous?.color,
+    );
     await _apply(
       state.copyWith(categories: {...state.categories, category.id: category}),
     );

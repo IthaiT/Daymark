@@ -8,6 +8,23 @@ const maxMoneyCents = 999999999999;
 
 enum MoneyKind { expense, income, transfer, adjustment }
 
+enum CategoryColor {
+  green,
+  teal,
+  cyan,
+  blue,
+  indigo,
+  purple,
+  pink,
+  red,
+  orange,
+  amber,
+  lightGreen,
+  blueGrey,
+}
+
+enum LedgerPeriod { month, year }
+
 /// Decimal input is converted directly to cents, without floating point math.
 int parseMoney(String text, {bool signed = false}) {
   final value = text.trim();
@@ -59,18 +76,75 @@ class MoneyAccount {
 }
 
 class MoneyCategory {
-  const MoneyCategory(this.id, this.name, this.kind, [this.parentId]);
+  const MoneyCategory(
+    this.id,
+    this.name,
+    this.kind, [
+    this.parentId,
+    this.color,
+  ]);
   final String id;
   final String name;
   final MoneyKind kind;
   final String? parentId;
+
+  /// Null inherits the closest ancestor's color.
+  final CategoryColor? color;
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'kind': kind.name,
     'parent_id': parentId,
+    if (color != null) 'color': color!.name,
   };
 }
+
+const defaultMoneyCategories = [
+  MoneyCategory('food', '餐饮', MoneyKind.expense, null, CategoryColor.green),
+  MoneyCategory('breakfast', '早餐', MoneyKind.expense, 'food'),
+  MoneyCategory('lunch', '午餐', MoneyKind.expense, 'food'),
+  MoneyCategory('dinner', '晚餐', MoneyKind.expense, 'food'),
+  MoneyCategory('other-food', '其他', MoneyKind.expense, 'food'),
+  MoneyCategory('housing', '住房', MoneyKind.expense, null, CategoryColor.teal),
+  MoneyCategory('daily', '日用', MoneyKind.expense, null, CategoryColor.cyan),
+  MoneyCategory('transport', '交通', MoneyKind.expense, null, CategoryColor.teal),
+  MoneyCategory(
+    'clothing',
+    '服饰',
+    MoneyKind.expense,
+    null,
+    CategoryColor.lightGreen,
+  ),
+  MoneyCategory('hobby', '爱好', MoneyKind.expense, null, CategoryColor.pink),
+  MoneyCategory('health', '医疗', MoneyKind.expense, null, CategoryColor.amber),
+  MoneyCategory('topup', '充值', MoneyKind.expense, null, CategoryColor.orange),
+  MoneyCategory('spending', '消费', MoneyKind.expense, null, CategoryColor.cyan),
+  MoneyCategory('shopping', '购物', MoneyKind.expense, null, CategoryColor.amber),
+  MoneyCategory(
+    'entertainment',
+    '娱乐',
+    MoneyKind.expense,
+    null,
+    CategoryColor.purple,
+  ),
+  MoneyCategory('bills', '缴费', MoneyKind.expense, null, CategoryColor.blue),
+  MoneyCategory(
+    'other-expense',
+    '其他',
+    MoneyKind.expense,
+    null,
+    CategoryColor.orange,
+  ),
+  MoneyCategory('salary', '工资', MoneyKind.income, null, CategoryColor.green),
+  MoneyCategory('bonus', '奖金', MoneyKind.income, null, CategoryColor.amber),
+  MoneyCategory(
+    'other-income',
+    '其他收入',
+    MoneyKind.income,
+    null,
+    CategoryColor.blue,
+  ),
+];
 
 class MoneyRecord {
   const MoneyRecord({
@@ -126,10 +200,12 @@ class CategoryAmount {
     this.categoryId,
     this.amountCents, {
     this.direct = false,
+    this.count = 0,
   });
   final String? categoryId;
   final int amountCents;
   final bool direct;
+  final int count;
 }
 
 /// A single immutable snapshot contains every balance and its linked records.
@@ -153,22 +229,6 @@ class LedgerState {
   final List<String> pinned;
 
   factory LedgerState.empty() {
-    const categories = [
-      MoneyCategory('food', '餐饮', MoneyKind.expense),
-      MoneyCategory('breakfast', '早餐', MoneyKind.expense, 'food'),
-      MoneyCategory('lunch', '午餐', MoneyKind.expense, 'food'),
-      MoneyCategory('dinner', '晚餐', MoneyKind.expense, 'food'),
-      MoneyCategory('other-food', '其他餐饮', MoneyKind.expense, 'food'),
-      MoneyCategory('coffee', '咖啡', MoneyKind.expense, 'food'),
-      MoneyCategory('transport', '交通', MoneyKind.expense),
-      MoneyCategory('shopping', '购物', MoneyKind.expense),
-      MoneyCategory('housing', '居住', MoneyKind.expense),
-      MoneyCategory('health', '医疗', MoneyKind.expense),
-      MoneyCategory('other-expense', '其他支出', MoneyKind.expense),
-      MoneyCategory('salary', '工资', MoneyKind.income),
-      MoneyCategory('bonus', '奖金', MoneyKind.income),
-      MoneyCategory('other-income', '其他收入', MoneyKind.income),
-    ];
     return LedgerState(
       accounts: const {
         cashAccountId: MoneyAccount(cashAccountId, '现金', 'cash', 0, 0),
@@ -187,11 +247,13 @@ class LedgerState {
           0,
         ),
       },
-      categories: {for (final category in categories) category.id: category},
+      categories: {
+        for (final category in defaultMoneyCategories) category.id: category,
+      },
       records: const {},
       defaultCashId: cashAccountId,
-      balanceEnabled: false,
-      pinned: const ['breakfast', 'lunch', 'dinner', 'coffee', 'transport'],
+      balanceEnabled: true,
+      pinned: const ['breakfast', 'lunch', 'dinner', 'other-food', 'transport'],
     );
   }
 
@@ -271,13 +333,42 @@ class LedgerState {
       .where((record) => record.kind == kind)
       .fold(0, (sum, record) => sum + record.amountCents);
 
+  List<MoneyRecord> periodRecords(DateTime anchor, LedgerPeriod period) =>
+      records.values
+          .where(
+            (record) =>
+                record.date.year == anchor.year &&
+                (period == LedgerPeriod.year ||
+                    record.date.month == anchor.month),
+          )
+          .toList();
+
+  int periodTotal(DateTime anchor, LedgerPeriod period, MoneyKind kind) =>
+      periodRecords(anchor, period)
+          .where((record) => record.kind == kind)
+          .fold(0, (sum, record) => sum + record.amountCents);
+
   /// Direct parent spending is a separate bucket; children partition descendants.
-  List<CategoryAmount> expenseBreakdown(DateTime month, {String? parentId}) {
-    final expenses = monthRecords(
-      month,
-    ).where((record) => record.kind == MoneyKind.expense).toList();
+  List<CategoryAmount> expenseBreakdown(DateTime month, {String? parentId}) =>
+      categoryBreakdown(
+        month,
+        LedgerPeriod.month,
+        MoneyKind.expense,
+        parentId: parentId,
+      );
+
+  List<CategoryAmount> categoryBreakdown(
+    DateTime anchor,
+    LedgerPeriod period,
+    MoneyKind kind, {
+    String? parentId,
+  }) {
+    final expenses = periodRecords(
+      anchor,
+      period,
+    ).where((record) => record.kind == kind).toList();
     final children = categories.values.where(
-      (item) => item.kind == MoneyKind.expense && item.parentId == parentId,
+      (item) => item.kind == kind && item.parentId == parentId,
     );
     final result = <CategoryAmount>[
       CategoryAmount(
@@ -286,16 +377,30 @@ class LedgerState {
             .where((record) => record.categoryId == parentId)
             .fold(0, (sum, record) => sum + record.amountCents),
         direct: true,
+        count: expenses.where((record) => record.categoryId == parentId).length,
       ),
     ]..removeWhere((item) => item.amountCents == 0);
     for (final child in children) {
       final ids = descendants(child.id);
-      final amount = expenses
+      final matches = expenses
           .where((record) => ids.contains(record.categoryId))
-          .fold<int>(0, (sum, record) => sum + record.amountCents);
-      if (amount > 0) result.add(CategoryAmount(child.id, amount));
+          .toList();
+      final amount = matches.fold<int>(
+        0,
+        (sum, record) => sum + record.amountCents,
+      );
+      if (amount > 0)
+        result.add(CategoryAmount(child.id, amount, count: matches.length));
     }
-    result.sort((a, b) => b.amountCents.compareTo(a.amountCents));
+    result.sort((a, b) {
+      final amount = b.amountCents.compareTo(a.amountCents);
+      return amount != 0
+          ? amount
+          : compareUnicode(
+              categoryPath(a.categoryId),
+              categoryPath(b.categoryId),
+            );
+    });
     return result;
   }
 
@@ -420,6 +525,7 @@ class LedgerState {
 
   Map<String, Object?> toJson() => {
     'version': 2,
+    'category_presets_version': 1,
     'default_cash_account_id': defaultCashId,
     'balance_enabled': balanceEnabled,
     'accounts': accounts.values.map((item) => item.toJson()).toList(),

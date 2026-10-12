@@ -47,11 +47,25 @@ void main() {
   }) async {
     ledger = LedgerController(store, clock: () => day);
     if (initialized) {
-      await ledger.initializeBalances({
+      const opening = {
         cashAccountId: 1000000,
         providentAccountId: 200000,
         investmentAccountId: 300000,
-      });
+      };
+      await store.replace(
+        store.state.copyWith(
+          accounts: {
+            for (final account in store.state.accounts.values)
+              account.id: MoneyAccount(
+                account.id,
+                account.name,
+                account.kind,
+                opening[account.id]!,
+                opening[account.id]!,
+              ),
+          },
+        ),
+      );
     }
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -101,33 +115,26 @@ void main() {
     notes: notes,
   );
 
-  testWidgets(
-    'setup preserves input on failure and starts from actual balances',
-    (tester) async {
-      await open(tester, initialized: false);
-      await tester.enterText(
-        find.byKey(const ValueKey('opening-cash')),
-        '10000',
-      );
-      fail = true;
-      await tester.tap(find.byKey(const ValueKey('enable-balances')));
-      await tester.pumpAndSettle();
-      expect(store.state.balanceEnabled, isFalse);
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('opening-cash')))
-            .controller!
-            .text,
-        '10000',
-      );
-      expect(find.textContaining('模拟保存失败'), findsOneWidget);
-      fail = false;
-      await tester.tap(find.byKey(const ValueKey('enable-balances')));
-      await tester.pumpAndSettle();
-      expect(find.text('¥ 10000.00'), findsNWidgets(2));
-      expect(find.byKey(const ValueKey('balance-cash')), findsOneWidget);
-    },
-  );
+  testWidgets('fresh ledger opens directly at zero and retains failed entry', (
+    tester,
+  ) async {
+    await open(tester, initialized: false);
+    expect(find.text('设置当前余额'), findsNothing);
+    expect(find.text('¥ 0.00'), findsNWidgets(4));
+    await tester.enterText(quick('lunch'), '28');
+    fail = true;
+    await enter(tester);
+    await tester.pumpAndSettle();
+    expect(store.state.totalCents, 0);
+    expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
+    expect(find.textContaining('模拟保存失败'), findsOneWidget);
+    fail = false;
+    await tester.tap(quick('lunch'));
+    await enter(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('¥ -28.00'), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('balance-cash')), findsOneWidget);
+  });
 
   testWidgets(
     'Enter allows independent continuous entries, Tab reaches next amount, batch is atomic',
@@ -278,7 +285,7 @@ void main() {
         expense(2000, 'lunch'),
         expense(3000, 'breakfast'),
         expense(4000, nested),
-        expense(500, 'coffee', date: DateTime.utc(2026, 9, 30)),
+        expense(500, 'other-food', date: DateTime.utc(2026, 9, 30)),
         MoneyInput(
           kind: MoneyKind.income,
           amountCents: 100000,
@@ -412,7 +419,7 @@ void main() {
     await ledger.saveInputs([
       expense(2800, 'lunch', notes: '工作日午餐'),
       expense(800, 'breakfast'),
-      expense(1800, 'coffee'),
+      expense(1800, 'other-food'),
       expense(3500, 'dinner'),
       expense(300, 'transport'),
       MoneyInput(
@@ -516,6 +523,11 @@ void main() {
       await tester.tap(find.byTooltip('管理分类'));
       await tester.pumpAndSettle();
       final lunch = find.byKey(const ValueKey('category-manage-lunch'));
+      final managerScroll = find.descendant(
+        of: find.byKey(const ValueKey('category-manager-list')),
+        matching: find.byType(Scrollable),
+      );
+      await tester.scrollUntilVisible(lunch, 180, scrollable: managerScroll);
       await tester.ensureVisible(lunch);
       await tester.tap(
         find.descendant(
@@ -535,6 +547,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.state.categories['lunch']!.parentId, isNull);
       expect(store.state.records.values.single.categoryId, 'lunch');
+      tester.state<ScrollableState>(managerScroll).position.jumpTo(0);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(lunch, 100, scrollable: managerScroll);
       await tester.ensureVisible(lunch);
       await tester.tap(
         find.descendant(of: lunch, matching: find.byTooltip('取消固定')),
