@@ -86,6 +86,11 @@ class _InlineEditorState extends State<InlineEditor> {
       widget.onNext(HardwareKeyboard.instance.isShiftPressed);
       return KeyEventResult.handled;
     }
+    if (event.logicalKey == LogicalKeyboardKey.enter &&
+        session.column == EventColumn.tag) {
+      widget.onCommit();
+      return KeyEventResult.handled;
+    }
     return KeyEventResult.ignored;
   }
 

@@ -168,27 +168,38 @@ String durationText(Duration duration) {
       : '$minutes 分钟';
 }
 
-Interval defaultEventInterval(DateTime day, {DateTime? start, DateTime? now}) {
+Interval defaultEventInterval(
+  DateTime day, {
+  DateTime? start,
+  DateTime? now,
+  Iterable<Event> events = const [],
+}) {
   final origin = dayStart(day);
+  if (start != null) start = minuteTime(civilTime(start));
   if (start == null) {
-    now = civilTime(now ?? DateTime.now());
-    if (dayStart(now) == origin) {
-      final end = minuteTime(now);
-      if (end == origin) {
-        return Interval(origin, origin.add(const Duration(minutes: 1)));
+    for (final event in events) {
+      if (event.isUndefined) continue;
+      final end = event.intervalOn(origin)?.end;
+      if (end != null && (start == null || end.isAfter(start))) {
+        start = end;
       }
-      final left = end.subtract(const Duration(hours: 1));
-      return Interval(left.isBefore(origin) ? origin : left, end);
     }
-    start = origin.add(const Duration(hours: 9));
+    if (start == null) {
+      now = civilTime(now ?? DateTime.now());
+      start = dayStart(now) == origin
+          ? minuteTime(now)
+          : origin.add(const Duration(hours: 9));
+    }
   }
-  final latest = minuteTime(dayEnd(day).subtract(const Duration(hours: 1)));
-  start = minuteTime(start);
+  // A full day has no remaining start time; keep its new draft visible.
   start = start.isBefore(origin)
       ? origin
-      : start.isAfter(latest)
-      ? latest
+      : !start.isBefore(dayEnd(day))
+      ? dayEnd(day).subtract(const Duration(hours: 1))
       : start;
+  if (start.add(const Duration(hours: 1)).year > 9999) {
+    start = dayEnd(day).subtract(const Duration(hours: 1));
+  }
   return Interval(start, start.add(const Duration(hours: 1)));
 }
 

@@ -190,7 +190,12 @@ class _EventEditorState extends State<_EventEditor> {
             TagField(
               store: widget.journal.store,
               value: _tag,
-              onChanged: (value) => setState(() => _tag = value),
+              onChanged: (value) => setState(() {
+                _tag = value;
+                if (value != null && _title.text.trim().isEmpty) {
+                  _title.text = widget.journal.store.tagName(value);
+                }
+              }),
             ),
             const SizedBox(height: 16),
             for (final start in [true, false])

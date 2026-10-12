@@ -308,6 +308,35 @@ void main() {
     expect(journal.store.events['a']!.tagId, isNull);
   });
 
+  testWidgets('new draft follows the last end and choosing a tag names it', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(find.byKey(const ValueKey('add-event')));
+    await tester.pumpAndSettle();
+    final id = journal.drafts.keys.single;
+    expect(journal.event(id)!.start, day.add(const Duration(hours: 15)));
+    expect(journal.event(id)!.end, day.add(const Duration(hours: 16)));
+    await key(tester, LogicalKeyboardKey.tab);
+    await key(tester, LogicalKeyboardKey.tab);
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(find.byType(TagChoices), findsOneWidget);
+    failWrites = true;
+    await tester.tap(
+      find.descendant(of: find.byType(TagChoices), matching: find.text('主业')),
+    );
+    await tester.pumpAndSettle();
+    expect(input(id, 'tag'), findsOneWidget);
+    expect(journal.drafts[id]!.title, '');
+    failWrites = false;
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.store.events[id]!.title, '主业');
+    expect(journal.store.events[id]!.tagId, 'work');
+    expect(journal.drafts, isEmpty);
+    await key(tester, LogicalKeyboardKey.keyZ, control: true);
+    expect(journal.drafts[id]!.title, '');
+  });
+
   testWidgets(
     'Del deletes selected events and Ctrl+Z/Ctrl+Y restore and reapply',
     (tester) async {

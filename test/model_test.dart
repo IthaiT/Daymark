@@ -14,31 +14,71 @@ Event event(String id, String start, String? end) => Event(
 );
 
 void main() {
-  test(
-    'default drafts use recent hour, including early morning and midnight',
-    () {
-      for (final entry in [
-        (0, 0, '00:00', '00:01'),
-        (0, 10, '00:00', '00:10'),
-        (12, 34, '11:34', '12:34'),
-      ]) {
-        final interval = defaultEventInterval(
-          day,
-          now: DateTime.utc(2026, 10, 7, entry.$1, entry.$2, 59),
-        );
-        expect(clockText(interval.start), entry.$3);
-        expect(clockText(interval.end), entry.$4);
-      }
-      final past = defaultEventInterval(day, now: DateTime.utc(2026, 10, 8));
-      expect(clockText(past.start), '09:00');
-      final late = defaultEventInterval(
+  test('empty-day drafts start now for one hour, including midnight', () {
+    for (final entry in [
+      (0, 0, '00:00', '01:00'),
+      (0, 10, '00:10', '01:10'),
+      (12, 34, '12:34', '13:34'),
+    ]) {
+      final interval = defaultEventInterval(
         day,
-        start: DateTime.utc(2026, 10, 7, 23, 55),
+        now: DateTime.utc(2026, 10, 7, entry.$1, entry.$2, 59),
       );
-      expect(late.start, DateTime.utc(2026, 10, 7, 23));
-      expect(late.end, DateTime.utc(2026, 10, 8));
-    },
-  );
+      expect(clockText(interval.start), entry.$3);
+      expect(clockText(interval.end), entry.$4);
+    }
+    final past = defaultEventInterval(day, now: DateTime.utc(2026, 10, 8));
+    expect(clockText(past.start), '09:00');
+    final late = defaultEventInterval(
+      day,
+      start: DateTime.utc(2026, 10, 7, 23, 55),
+    );
+    expect(late.start, DateTime.utc(2026, 10, 7, 23, 55));
+    expect(late.end, DateTime.utc(2026, 10, 8, 0, 55));
+    final lastDay = defaultEventInterval(
+      DateTime.utc(9999, 12, 31),
+      start: DateTime.utc(9999, 12, 31, 23, 55),
+    );
+    expect(lastDay.end.year, 9999);
+    expect(lastDay.duration, const Duration(hours: 1));
+  });
+
+  test('drafts follow the latest completed end and retain legacy seconds', () {
+    final long = event('long', '09:00:00', '14:00:35');
+    final short = event('short', '12:00:00', '13:00:00');
+    final unfinished = event('unfinished', '16:00:00', null);
+    final gap = Event(
+      'undefined:ignored',
+      '未定义',
+      null,
+      day.add(const Duration(hours: 18)),
+      day.add(const Duration(hours: 19)),
+    );
+    final interval = defaultEventInterval(
+      day,
+      events: [short, gap, long, unfinished],
+    );
+    expect(interval.start, long.end);
+    expect(interval.duration, const Duration(hours: 1));
+    final late = event('late', '22:00:00', '23:45:00');
+    expect(
+      defaultEventInterval(day, events: [late]).end,
+      DateTime.utc(2026, 10, 8, 0, 45),
+    );
+    final overnight = late.copyWith(end: DateTime.utc(2026, 10, 8, 8));
+    expect(
+      defaultEventInterval(day, events: [overnight]).start,
+      DateTime.utc(2026, 10, 7, 23),
+    );
+    expect(
+      defaultEventInterval(
+        DateTime.utc(2026, 10, 8),
+        events: [overnight],
+      ).start,
+      overnight.end,
+    );
+    expect(defaultEventInterval(day, events: [long], start: day).start, day);
+  });
 
   test('calendar parsing rejects normalization and zone suffixes', () {
     for (final invalid in [

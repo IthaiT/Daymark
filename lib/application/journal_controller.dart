@@ -173,7 +173,12 @@ class JournalController extends ChangeNotifier {
   }
 
   Future<String> addDraft({DateTime? start}) => _run(() async {
-    final interval = defaultEventInterval(day, start: start, now: clock());
+    final interval = defaultEventInterval(
+      day,
+      start: start,
+      now: clock(),
+      events: regularEvents,
+    );
     final id = const Uuid().v4().replaceAll('-', '');
     final draft = Event(id, '', null, interval.start, interval.end);
     await _apply(store.events, {..._drafts, id: draft});
@@ -203,6 +208,11 @@ class JournalController extends ChangeNotifier {
       EventColumn.start => current.copyWith(start: value! as DateTime),
       EventColumn.end => current.copyWith(end: value! as DateTime),
     };
+    if (changed.tagId != null &&
+        (changed.title.trim().isEmpty ||
+            current.isUndefined && current.title == '未定义')) {
+      changed = changed.copyWith(title: store.tagName(changed.tagId));
+    }
     final events = {...store.events};
     final drafts = {..._drafts};
     if (current.isUndefined) {
@@ -240,6 +250,9 @@ class JournalController extends ChangeNotifier {
   Future<void> updateEvent(Event changed) => _run(() async {
     final current = event(changed.id);
     if (current == null || current.isUndefined) return;
+    if (changed.title.trim().isEmpty && changed.tagId != null) {
+      changed = changed.copyWith(title: store.tagName(changed.tagId));
+    }
     final drafts = {..._drafts};
     final events = {...store.events};
     if (drafts.containsKey(changed.id)) {

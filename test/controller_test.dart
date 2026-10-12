@@ -62,11 +62,80 @@ void main() {
       expect(store.events.values.where((event) => !event.isUndefined), isEmpty);
       await controller.editCell(first, EventColumn.title, '独立命名');
       expect(controller.drafts.keys, [second]);
-      expect(store.events[first]!.start.hour, 12);
+      expect(store.events[first]!.start.hour, 13);
       await controller.undo();
       expect(controller.drafts[first]!.title, '');
       await controller.redo();
       expect(store.events[first]!.title, '独立命名');
+    },
+  );
+
+  test(
+    'new drafts follow completed events and other drafts on the viewed day',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 14),
+        'b': item('b', 12, 13),
+      });
+      final first = await controller.addDraft();
+      final second = await controller.addDraft();
+      expect(controller.event(first)!.start.hour, 14);
+      expect(controller.event(second)!.start.hour, 15);
+      expect(controller.event(second)!.end!.hour, 16);
+      await controller.shiftDay(-1);
+      final past = await controller.addDraft();
+      expect(
+        controller.event(past)!.start,
+        day.subtract(const Duration(days: 1)).add(const Duration(hours: 9)),
+      );
+    },
+  );
+
+  test(
+    'tag supplies a blank title, persists the draft and undoes atomically',
+    () async {
+      final id = await controller.addDraft();
+      await controller.editCell(id, EventColumn.tag, 'linux');
+      expect(store.events[id]!.title, store.tagName('linux'));
+      expect(controller.drafts, isEmpty);
+      expect((await Store.open(directory)).events[id], store.events[id]);
+      await controller.undo();
+      expect(controller.drafts[id]!.title, '');
+      expect(controller.drafts[id]!.tagId, isNull);
+      await controller.redo();
+      await controller.editCell(id, EventColumn.title, '自定义名称');
+      await controller.editCell(id, EventColumn.tag, 'work');
+      expect(store.events[id]!.title, '自定义名称');
+      await controller.editCell(id, EventColumn.tag, null);
+      expect(store.events[id]!.title, '自定义名称');
+    },
+  );
+
+  test('tag names a generic gap but keeps a renamed gap title', () async {
+    await store.replaceEvents({'a': item('a', 9, 10), 'b': item('b', 12, 13)});
+    await controller.initialize();
+    final gap = controller.rows.singleWhere((event) => event.isUndefined);
+    final promoted = await controller.editCell(gap.id, EventColumn.tag, 'work');
+    expect(store.events[promoted]!.title, store.tagName('work'));
+  });
+
+  test(
+    'failed tag default retains blank draft and selection for retry',
+    () async {
+      final id = await controller.addDraft();
+      final before = await store.eventsFile.readAsBytes();
+      failWrites = true;
+      await expectLater(
+        controller.editCell(id, EventColumn.tag, 'work'),
+        throwsFileSystemException,
+      );
+      expect(controller.drafts[id]!.title, '');
+      expect(controller.drafts[id]!.tagId, isNull);
+      expect(controller.selected, {id});
+      expect(await store.eventsFile.readAsBytes(), before);
+      failWrites = false;
+      await controller.editCell(id, EventColumn.tag, 'work');
+      expect(store.events[id]!.title, store.tagName('work'));
     },
   );
 
