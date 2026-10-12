@@ -45,6 +45,7 @@ public static class DaymarkPrivateDesktop {
     [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr desktop);
     [DllImport("user32.dll")] static extern bool EnumDesktopWindows(IntPtr desktop, WindowCallback callback, IntPtr data);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder name, int count);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
@@ -80,7 +81,12 @@ public static class DaymarkPrivateDesktop {
             IntPtr found = IntPtr.Zero;
             EnumDesktopWindows(desktop, (window, _) => {
                 uint pid; GetWindowThreadProcessId(window, out pid);
-                if (pid == process.Id && IsWindowVisible(window)) found = window;
+                if (pid == process.Id && IsWindowVisible(window)) {
+                    // Input indicators may be visible under the same process.
+                    var windowClass = new StringBuilder(256);
+                    GetClassNameW(window, windowClass, windowClass.Capacity);
+                    if (windowClass.ToString() == "FLUTTER_RUNNER_WIN32_WINDOW") found = window;
+                }
                 return true;
             }, IntPtr.Zero);
             if (found != IntPtr.Zero) return found;
@@ -104,7 +110,7 @@ public static class DaymarkPrivateDesktop {
             }
             if (bounds.left < info.work.left || bounds.top < info.work.top ||
                 bounds.right > info.work.right || bounds.bottom > info.work.bottom) {
-                throw new Exception("Startup window extends beyond the monitor work area, including its title bar.");
+                throw new Exception($"Startup window ({bounds.left}, {bounds.top}, {bounds.right}, {bounds.bottom}) extends beyond work area ({info.work.left}, {info.work.top}, {info.work.right}, {info.work.bottom}), including its title bar.");
             }
         } finally {
             if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous);
