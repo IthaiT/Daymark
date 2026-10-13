@@ -98,8 +98,12 @@ public static class DaymarkPrivateDesktop {
             if (Encoding.ASCII.GetString(bytes, record, 4) == "cmap") cmap = checked((int)Read32(bytes, record + 8));
         }
         // Incremental Windows builds can retain an icon subset from older Dart code.
-        // These codepoints correspond to the journal view switch's actual Material icons.
-        foreach (int codepoint in new[] {0xe556, 0xf48f}) {
+        // Cover journal controls, every ledger category badge and the notes control.
+        foreach (int codepoint in new[] {
+            0xe556, 0xf48f, 0xf316, 0xf107, 0xef56, 0xefc4, 0xef4c,
+            0xe25c, 0xf1be, 0xee33, 0xf266, 0xf37d, 0xf3ca, 0xf2ef,
+            0xf336, 0xe364, 0xe44c, 0xf231
+        }) {
             if (cmap < 0 || !HasGlyph(bytes, cmap, codepoint)) {
                 throw new Exception($"Release icon font is missing U+{codepoint:X4}. Regenerate Flutter assets by invalidating release_bundle_windows-x64_assets.stamp before rebuilding.");
             }
@@ -124,7 +128,8 @@ public static class DaymarkPrivateDesktop {
         return Process.GetProcessById((int)info.processId);
     }
     static IntPtr WaitForWindow(IntPtr desktop, Process process) {
-        for (int attempt = 0; attempt < 100; attempt++) {
+        // Allow cold Flutter/font initialization on an inactive desktop.
+        for (int attempt = 0; attempt < 300; attempt++) {
             if (process.HasExited) throw new Exception("Application exited before creating a window: " + process.ExitCode);
             IntPtr found = IntPtr.Zero;
             EnumDesktopWindows(desktop, (window, _) => {
@@ -217,4 +222,4 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: journal view icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"

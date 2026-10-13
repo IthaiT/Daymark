@@ -40,7 +40,7 @@ MaterialColor ledgerCategorySwatch(LedgerState state, String? id) {
   }
   final hash = path.first.id.codeUnits.fold<int>(
     0,
-    (sum, unit) => sum * 31 + unit,
+    (sum, unit) => (sum * 31 + unit) & 0x7fffffff,
   );
   return categorySwatch(
     CategoryColor.values[hash.abs() % CategoryColor.values.length],
@@ -51,11 +51,45 @@ Color ledgerCategoryColor(LedgerState state, String? id) {
   final family = ledgerCategorySwatch(state, id);
   if (id == null || !state.categories.containsKey(id)) return family[500]!;
   final category = state.categories[id]!;
-  final shade = category.parentId == null || category.color != null
-      ? 500
-      : 300 + id.codeUnits.fold<int>(0, (sum, unit) => sum + unit) % 4 * 100;
+  final ordered = state.orderedCategories(category.kind);
+  int shade;
+  if (category.parentId == null) {
+    final peers = ordered
+        .where(
+          (item) =>
+              item.parentId == null &&
+              ledgerCategorySwatch(state, item.id) == family,
+        )
+        .toList();
+    // Repeated root hues still differ visibly, as do inherited sibling tags.
+    const steps = [500, 700, 300, 800, 400, 600];
+    shade = steps[peers.indexWhere((item) => item.id == id) % steps.length];
+  } else if (category.color != null) {
+    shade = 500;
+  } else {
+    final path = state.ancestors(id);
+    final anchor = path.reversed.firstWhere(
+      (item) => item.color != null,
+      orElse: () => path.first,
+    );
+    final members = ordered
+        .where(
+          (item) =>
+              item.id != anchor.id &&
+              state
+                  .ancestors(item.id)
+                  .any((parent) => parent.id == anchor.id) &&
+              ledgerCategorySwatch(state, item.id) == family,
+        )
+        .toList();
+    const steps = [400, 600, 300, 700, 800, 500];
+    shade = steps[members.indexWhere((item) => item.id == id) % steps.length];
+  }
   return family[shade]!;
 }
+
+Color ledgerCategoryInk(Color fill) =>
+    fill.computeLuminance() > .179 ? Colors.black : Colors.white;
 
 IconData ledgerCategoryIcon(LedgerState state, String? id) {
   if (id == null || !state.categories.containsKey(id)) {
@@ -90,17 +124,17 @@ class LedgerCategoryBadge extends StatelessWidget {
   final String? id;
   final double size;
   @override
-  Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
-    decoration: BoxDecoration(
-      color: ledgerCategorySwatch(state, id)[50],
-      shape: BoxShape.circle,
-    ),
-    child: Icon(
-      ledgerCategoryIcon(state, id),
-      size: size * .58,
-      color: ledgerCategorySwatch(state, id)[800],
-    ),
-  );
+  Widget build(BuildContext context) {
+    final fill = ledgerCategoryColor(state, id);
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
+      child: Icon(
+        ledgerCategoryIcon(state, id),
+        size: size * .58,
+        color: ledgerCategoryInk(fill),
+      ),
+    );
+  }
 }
