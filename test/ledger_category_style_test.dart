@@ -6,10 +6,21 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   final state = LedgerState.empty();
   test('inherited siblings and repeated root hues remain distinguishable', () {
-    final children = ['breakfast', 'lunch', 'dinner', 'other-food'];
+    final children = ['breakfast', 'lunch', 'dinner', 'other-food', 'coffee'];
+    final withCoffee = state.copyWith(
+      categories: {
+        ...state.categories,
+        'coffee': const MoneyCategory(
+          'coffee',
+          '咖啡',
+          MoneyKind.expense,
+          'food',
+        ),
+      },
+    );
     expect(
-      children.map((id) => ledgerCategoryColor(state, id)).toSet().length,
-      4,
+      children.map((id) => ledgerCategoryColor(withCoffee, id)).toSet().length,
+      5,
     );
     expect(
       ledgerCategoryColor(state, 'housing'),
@@ -26,15 +37,31 @@ void main() {
   });
 
   test(
-    'badge foreground stays readable across all Material families and shades',
+    'soft badges keep readable colored icons across every Material family',
     () {
       for (final family in CategoryColor.values) {
-        for (final shade in [300, 400, 500, 600, 700, 800]) {
-          final fill = categorySwatch(family)[shade]!;
-          final ink = ledgerCategoryInk(fill);
-          final ratio = ink == Colors.black
-              ? (fill.computeLuminance() + .05) / .05
-              : 1.05 / (fill.computeLuminance() + .05);
+        final colored = state.copyWith(
+          categories: {
+            ...state.categories,
+            'food': MoneyCategory(
+              'food',
+              '餐饮',
+              MoneyKind.expense,
+              null,
+              family,
+            ),
+          },
+        );
+        for (final id in [
+          'food',
+          'breakfast',
+          'lunch',
+          'dinner',
+          'other-food',
+        ]) {
+          final (fill, ink) = ledgerCategoryBadgeColors(colored, id);
+          final ratio =
+              (fill.computeLuminance() + .05) / (ink.computeLuminance() + .05);
           expect(ratio, greaterThanOrEqualTo(4.5));
         }
       }

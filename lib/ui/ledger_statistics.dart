@@ -80,8 +80,8 @@ class LedgerStatistics extends StatelessWidget {
                       return Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(width: 280, height: 280, child: chart),
-                          const SizedBox(width: 20),
+                          SizedBox(width: 300, height: 300, child: chart),
+                          const SizedBox(width: 24),
                           Expanded(child: list),
                         ],
                       );
@@ -137,19 +137,18 @@ class LedgerStatistics extends StatelessWidget {
                 children: [
                   Text(
                     '总${moneyKindText(kind)}',
-                    style: Theme.of(context).textTheme.bodyMedium,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   FittedBox(
                     child: Text(
                       '¥ ${moneyText(total)}',
-                      style: Theme.of(context).textTheme.titleLarge,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$count 笔',
-                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
               ),
@@ -177,7 +176,8 @@ class LedgerStatistics extends StatelessWidget {
         key: ValueKey(
           'stats-${row.categoryId ?? 'unclassified'}-${row.direct}',
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         leading: LedgerCategoryBadge(
           state: state,
           id: row.categoryId,
@@ -186,7 +186,14 @@ class LedgerStatistics extends StatelessWidget {
         title: Row(
           children: [
             Expanded(
-              child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+              child: Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
+              ),
             ),
             const SizedBox(width: 8),
             Text(
@@ -207,7 +214,7 @@ class LedgerStatistics extends StatelessWidget {
               const SizedBox(height: 6),
               LinearProgressIndicator(
                 value: percentage,
-                minHeight: 4,
+                minHeight: 5,
                 borderRadius: BorderRadius.circular(4),
                 color: ledgerCategoryColor(state, row.categoryId),
                 backgroundColor: swatch[50],
@@ -233,7 +240,7 @@ class _DonutPainter extends CustomPainter {
   final Color background;
   @override
   void paint(Canvas canvas, Size size) {
-    final width = size.shortestSide * .16;
+    final width = size.shortestSide * .18;
     final rect = Rect.fromCircle(
       center: size.center(Offset.zero),
       radius: (size.shortestSide - width) / 2,
@@ -248,8 +255,9 @@ class _DonutPainter extends CustomPainter {
     var start = -math.pi / 2;
     for (var i = 0; i < amounts.length; i++) {
       final sweep = amounts[i] / total * math.pi * 2;
+      final gap = amounts.length > 1 ? math.min(.024, sweep * .12) : 0.0;
       paint.color = colors[i];
-      canvas.drawArc(rect, start, sweep, false, paint);
+      canvas.drawArc(rect, start + gap / 2, sweep - gap, false, paint);
       start += sweep;
     }
   }

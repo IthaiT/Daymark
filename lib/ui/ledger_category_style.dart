@@ -62,10 +62,19 @@ Color ledgerCategoryColor(LedgerState state, String? id) {
         )
         .toList();
     // Repeated root hues still differ visibly, as do inherited sibling tags.
-    const steps = [500, 700, 300, 800, 400, 600];
+    final presetOrder = {
+      for (final (index, item) in defaultMoneyCategories.indexed)
+        item.id: index,
+    };
+    peers.sort(
+      (a, b) => (presetOrder[a.id] ?? 1000 + ordered.indexOf(a)).compareTo(
+        presetOrder[b.id] ?? 1000 + ordered.indexOf(b),
+      ),
+    );
+    const steps = [300, 400, 500, 200, 600, 100];
     shade = steps[peers.indexWhere((item) => item.id == id) % steps.length];
   } else if (category.color != null) {
-    shade = 500;
+    shade = 400;
   } else {
     final path = state.ancestors(id);
     final anchor = path.reversed.firstWhere(
@@ -82,14 +91,26 @@ Color ledgerCategoryColor(LedgerState state, String? id) {
               ledgerCategorySwatch(state, item.id) == family,
         )
         .toList();
-    const steps = [400, 600, 300, 700, 800, 500];
+    const steps = [300, 400, 200, 500, 600, 100];
     shade = steps[members.indexWhere((item) => item.id == id) % steps.length];
+  }
+  // These two teal presets separate housing's emerald from transport's aqua.
+  if (family == Colors.teal) {
+    if (id == 'housing') return Colors.tealAccent[700]!;
+    if (id == 'transport') return Colors.teal[300]!;
   }
   return family[shade]!;
 }
 
-Color ledgerCategoryInk(Color fill) =>
-    fill.computeLuminance() > .179 ? Colors.black : Colors.white;
+/// Soft category badges use a dark hue, while charts keep the full accent.
+(Color, Color) ledgerCategoryBadgeColors(LedgerState state, String? id) {
+  final accent = ledgerCategoryColor(state, id);
+  final fill = Color.alphaBlend(accent.withValues(alpha: .24), Colors.white);
+  final ink = ledgerCategorySwatch(state, id)[900]!;
+  final contrast =
+      (fill.computeLuminance() + .05) / (ink.computeLuminance() + .05);
+  return (fill, contrast >= 4.5 ? ink : Colors.grey[800]!);
+}
 
 IconData ledgerCategoryIcon(LedgerState state, String? id) {
   if (id == null || !state.categories.containsKey(id)) {
@@ -125,16 +146,15 @@ class LedgerCategoryBadge extends StatelessWidget {
   final double size;
   @override
   Widget build(BuildContext context) {
-    final fill = ledgerCategoryColor(state, id);
+    final (fill, ink) = ledgerCategoryBadgeColors(state, id);
     return Container(
       width: size,
       height: size,
-      decoration: BoxDecoration(color: fill, shape: BoxShape.circle),
-      child: Icon(
-        ledgerCategoryIcon(state, id),
-        size: size * .58,
-        color: ledgerCategoryInk(fill),
+      decoration: BoxDecoration(
+        color: fill,
+        borderRadius: BorderRadius.circular(size * .3),
       ),
+      child: Icon(ledgerCategoryIcon(state, id), size: size * .58, color: ink),
     );
   }
 }
