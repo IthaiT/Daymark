@@ -1,6 +1,6 @@
 import 'model.dart';
 
-typedef EventGroupKey = ({String? tagId, String? title, String? draftId});
+typedef EventGroupKey = ({String? tagId, String? draftId});
 
 class EventGroup {
   EventGroup(this.key, Iterable<Event> events, DateTime day)
@@ -34,11 +34,10 @@ class EventGroup {
   bool get isDraft => key.draftId != null;
   bool get isUnclassified => key.tagId == null && !isDraft;
   bool get hasSummary => !isDraft && (isUnclassified || events.length > 1);
-  String get title => isUnclassified ? '未分类 / 未定义' : events.first.title;
   int get incompleteCount => events.where((event) => event.end == null).length;
 }
 
-/// Group exact names and tag identities; unclassified records form a final bucket.
+/// Group stable tag identities while preserving each record's original name.
 List<EventGroup> eventGroups(
   Iterable<Event> events,
   DateTime day, {
@@ -59,7 +58,6 @@ List<EventGroup> eventGroups(
     final unclassified = event.isUndefined || event.tagId == null;
     final key = (
       tagId: draft || unclassified ? null : event.tagId,
-      title: unclassified ? null : event.title,
       draftId: draft ? event.id : null,
     );
     (buckets[key] ??= []).add(event);

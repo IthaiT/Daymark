@@ -134,8 +134,8 @@ void main() {
     );
   }
 
-  Finder group(String title, String tagId) {
-    final EventGroupKey groupKey = (tagId: tagId, title: title, draftId: null);
+  Finder group(String tagId) {
+    final EventGroupKey groupKey = (tagId: tagId, draftId: null);
     return find.byKey(ValueKey(('event-group', groupKey)));
   }
 
@@ -186,22 +186,22 @@ void main() {
   }
 
   testWidgets(
-    'summary groups exact names, puts unclassified last and keeps single-event clipboard',
+    'summary groups tags across different names and keeps single-event clipboard',
     (tester) async {
       mockClipboard();
       final tagId = await seedSummary();
       await open(tester, grouped: true);
-      final workGroup = group('Daymark', tagId);
+      final workGroup = group(tagId);
       expect(
-        find.descendant(of: workGroup, matching: find.text('6 小时 30 分')),
+        find.descendant(of: workGroup, matching: find.text('6 小时 40 分')),
         findsOneWidget,
       );
       expect(
-        find.descendant(of: workGroup, matching: find.text('4 条')),
+        find.descendant(of: workGroup, matching: find.text('5 条')),
         findsOneWidget,
       );
       expect(cell('work-a', 'title'), findsNothing);
-      expect(cell('different', 'title'), findsOneWidget);
+      expect(cell('different', 'title'), findsNothing);
       final bucket = find.byKey(const ValueKey('group-unclassified'));
       expect(
         tester.getTopLeft(bucket).dy,
@@ -216,6 +216,13 @@ void main() {
       await tester.tap(workGroup);
       await tester.pumpAndSettle();
       expect(journal.selected, isEmpty);
+      expect(
+        find.descendant(
+          of: cell('different', 'title'),
+          matching: find.text('Daymark开发'),
+        ),
+        findsOneWidget,
+      );
       await tester.tap(cell('work-a', 'title'));
       await tester.pumpAndSettle();
       await key(tester, LogicalKeyboardKey.keyC, control: true);
@@ -234,7 +241,7 @@ void main() {
         5,
       );
       expect(
-        find.descendant(of: workGroup, matching: find.text('6 小时 30 分')),
+        find.descendant(of: workGroup, matching: find.text('6 小时 40 分')),
         findsOneWidget,
       );
       expect(cell(journal.selected.single, 'title'), findsOneWidget);
@@ -254,11 +261,11 @@ void main() {
   );
 
   testWidgets(
-    'summary editing splits only the renamed record and failed writes block folding and mode changes',
+    'tag summary keeps renamed records together and failed writes block mode changes',
     (tester) async {
       final tagId = await seedSummary();
       await open(tester, grouped: true);
-      await tester.tap(group('Daymark', tagId));
+      await tester.tap(group(tagId));
       await tester.pumpAndSettle();
       await tester.tap(cell('work-a', 'title'));
       await tester.pumpAndSettle();
@@ -266,7 +273,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(input('work-a', 'title'), 'Daymark设计');
       failWrites = true;
-      await tester.tap(group('Daymark', tagId));
+      await tester.tap(group(tagId));
       await tester.pumpAndSettle();
       expect(input('work-a', 'title'), findsOneWidget);
       expect(
@@ -275,16 +282,13 @@ void main() {
       );
       await tester.tap(find.text('时间顺序'));
       await tester.pumpAndSettle();
-      expect(group('Daymark', tagId), findsOneWidget);
+      expect(group(tagId), findsOneWidget);
       expect(journal.store.events['work-a']!.title, 'Daymark');
       failWrites = false;
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.store.events['work-a']!.title, 'Daymark设计');
       expect(
-        find.descendant(
-          of: group('Daymark', tagId),
-          matching: find.text('5 小时 30 分'),
-        ),
+        find.descendant(of: group(tagId), matching: find.text('6 小时 40 分')),
         findsOneWidget,
       );
       expect(cell('work-a', 'title'), findsOneWidget);
@@ -299,7 +303,7 @@ void main() {
       mockClipboard();
       final tagId = await seedSummary();
       await open(tester, grouped: true);
-      await tester.tap(group('Daymark', tagId));
+      await tester.tap(group(tagId));
       await tester.pumpAndSettle();
       await tester.tap(cell('work-a', 'title'));
       await tester.pumpAndSettle();
@@ -311,15 +315,9 @@ void main() {
       await tester.tap(cell('different', 'title'));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
       await tester.pumpAndSettle();
-      expect(journal.selected, {
-        'work-a',
-        'work-b',
-        'work-c',
-        'work-d',
-        'different',
-      });
+      expect(journal.selected, {'work-a', 'different'});
       await key(tester, LogicalKeyboardKey.keyC, control: true);
-      expect(EventClipboard.tryDecode(clipboardText)!.events.length, 5);
+      expect(EventClipboard.tryDecode(clipboardText)!.events.length, 2);
       journal.clearSelection();
       tester.state<EventTableState>(find.byType(EventTable)).reveal('work-a');
       await tester.pumpAndSettle();
@@ -330,10 +328,7 @@ void main() {
       expect(journal.store.events.containsKey('work-a'), isFalse);
       expect(journal.store.events.containsKey('work-b'), isTrue);
       expect(
-        find.descendant(
-          of: group('Daymark', tagId),
-          matching: find.text('5 小时 30 分'),
-        ),
+        find.descendant(of: group(tagId), matching: find.text('5 小时 40 分')),
         findsOneWidget,
       );
     },
@@ -354,7 +349,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(journal.selected, {'work-a'});
       expect(cell('work-a', 'title'), findsOneWidget);
-      await tester.tap(group('Daymark', tagId));
+      await tester.tap(group(tagId));
       await tester.pumpAndSettle();
       expect(cell('work-a', 'title'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('add-event')));
@@ -1352,7 +1347,7 @@ void main() {
       await tester.pumpAndSettle();
       for (final expanded in [false, true]) {
         if (expanded) {
-          await tester.tap(group('Daymark', summaryTag));
+          await tester.tap(group(summaryTag));
           await tester.pumpAndSettle();
         }
         final summaryImage = (await tester.runAsync(

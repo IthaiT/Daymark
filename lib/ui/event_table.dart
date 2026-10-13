@@ -287,6 +287,9 @@ class EventTableState extends State<EventTable> {
   }
 
   Widget _summaryRow(EventGroup group, List<double> widths) {
+    final title = group.isUnclassified
+        ? '未分类 / 未定义'
+        : widget.journal.store.tagName(group.key.tagId);
     final expanded = _expanded.contains(group.key);
     final selected = group.events
         .where((event) => widget.journal.selected.contains(event.id))
@@ -321,7 +324,7 @@ class EventTableState extends State<EventTable> {
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
-                          group.title,
+                          title,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.w600),

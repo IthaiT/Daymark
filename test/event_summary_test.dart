@@ -14,7 +14,7 @@ void main() {
       );
 
   test(
-    'exact titles and stable tag IDs define groups, sorted by daily time',
+    'stable tag IDs group different titles and preserve all original names',
     () {
       final events = [
         event('a', 'Daymark', 'project', 690, 750),
@@ -24,9 +24,20 @@ void main() {
         event('e', 'daymark', 'project', 1300, 1320),
       ];
       final groups = eventGroups(events.reversed, day);
-      expect(groups.length, 4);
-      expect(groups.first.events.map((event) => event.id), ['a', 'b']);
-      expect(groups.first.duration, const Duration(minutes: 150));
+      expect(groups.length, 2);
+      expect(groups.first.events.map((event) => event.id), [
+        'a',
+        'b',
+        'c',
+        'e',
+      ]);
+      expect(groups.first.events.map((event) => event.title), [
+        'Daymark',
+        'Daymark',
+        'Daymark开发',
+        'daymark',
+      ]);
+      expect(groups.first.duration, const Duration(minutes: 230));
       expect(groups.first.hasSummary, isTrue);
       expect(groups.skip(1).every((group) => !group.hasSummary), isTrue);
       expect(events.first.title, 'Daymark');
@@ -44,7 +55,6 @@ void main() {
       ], day);
       expect(groups.length, 2);
       expect(groups.last.isUnclassified, isTrue);
-      expect(groups.last.title, '未分类 / 未定义');
       expect(groups.last.events.map((event) => event.title), [
         '赖床',
         '吃饭 看番',
@@ -58,9 +68,9 @@ void main() {
     'daily totals clip midnight, union overlaps and keep second precision',
     () {
       final events = [
-        event('night', 'Daymark', 'project', -110, 10),
-        event('a', 'Daymark', 'project', 60, 180),
-        event('b', 'Daymark', 'project', 120, 240),
+        event('night', 'Daymark开发', 'project', -110, 10),
+        event('a', 'Daymark设计', 'project', 60, 180),
+        event('b', 'Daymark排查', 'project', 120, 240),
         event('c', 'Daymark', 'project', 240, 300),
         event('late', 'Daymark', 'project', 1380, 1500),
         Event(
