@@ -156,7 +156,12 @@ class JournalScreenState extends State<JournalScreen> {
     if (!await commit() || !mounted) return;
     final control = HardwareKeyboard.instance.isControlPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
-    widget.journal.select(id, toggle: control, range: shift);
+    widget.journal.select(
+      id,
+      toggle: control,
+      range: shift,
+      orderedIds: _table.currentState?.selectionOrder,
+    );
     _focus.requestFocus();
     if (!control &&
         !shift &&

@@ -5,8 +5,10 @@ import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
+import 'package:daymark/domain/event_summary.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
+import 'package:daymark/ui/event_table.dart';
 import 'package:daymark/ui/pickers.dart';
 import 'package:daymark/ui/startup_window.dart';
 import 'package:daymark/ui/tag_sidebar.dart';
@@ -64,7 +66,7 @@ void main() {
     journal.dispose();
     await directory.delete(recursive: true);
   });
-  Future<void> open(WidgetTester tester) async {
+  Future<void> open(WidgetTester tester, {bool grouped = false}) async {
     final store = journal.store;
     journal.dispose();
     // Construct the asynchronous queue inside the Widget binding's clock zone.
@@ -80,6 +82,10 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(DaymarkApp(journal: journal));
     await tester.pumpAndSettle();
+    if (!grouped) {
+      await tester.tap(find.text('时间顺序'));
+      await tester.pumpAndSettle();
+    }
   }
 
   Finder cell(String id, String column) =>
@@ -127,6 +133,241 @@ void main() {
       () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
     );
   }
+
+  Finder group(String title, String tagId) {
+    final EventGroupKey groupKey = (tagId: tagId, title: title, draftId: null);
+    return find.byKey(ValueKey(('event-group', groupKey)));
+  }
+
+  Future<String> seedSummary() async {
+    final tag = await journal.store.saveTag('Daymark', 'explore');
+    Event work(String id, int start, int end) => Event(
+      id,
+      'Daymark',
+      tag.id,
+      day.add(Duration(minutes: start)),
+      day.add(Duration(minutes: end)),
+    );
+    final events = [
+      Event(
+        'different',
+        'Daymark开发',
+        tag.id,
+        day.subtract(const Duration(hours: 2)),
+        day.add(const Duration(minutes: 10)),
+      ),
+      Event(
+        'sleep',
+        '睡觉',
+        'rest',
+        day.add(const Duration(minutes: 56)),
+        day.add(const Duration(minutes: 612)),
+      ),
+      work('work-a', 690, 750),
+      work('work-b', 870, 960),
+      work('work-c', 1020, 1080),
+      work('work-d', 1200, 1380),
+      Event(
+        'unclassified',
+        '吃饭 看番',
+        null,
+        day.add(const Duration(minutes: 750)),
+        day.add(const Duration(minutes: 870)),
+      ),
+    ];
+    final gaps = undefinedEvents(events).map(
+      (event) =>
+          event.copyWith(title: event.start.hour == 10 ? '赖床' : event.title),
+    );
+    await journal.store.replaceEvents({
+      for (final event in [...events, ...gaps]) event.id: event,
+    });
+    return tag.id;
+  }
+
+  testWidgets(
+    'summary groups exact names, puts unclassified last and keeps single-event clipboard',
+    (tester) async {
+      mockClipboard();
+      final tagId = await seedSummary();
+      await open(tester, grouped: true);
+      final workGroup = group('Daymark', tagId);
+      expect(
+        find.descendant(of: workGroup, matching: find.text('6 小时 30 分')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: workGroup, matching: find.text('4 条')),
+        findsOneWidget,
+      );
+      expect(cell('work-a', 'title'), findsNothing);
+      expect(cell('different', 'title'), findsOneWidget);
+      final bucket = find.byKey(const ValueKey('group-unclassified'));
+      expect(
+        tester.getTopLeft(bucket).dy,
+        greaterThan(tester.getTopLeft(workGroup).dy),
+      );
+      await tester.tap(bucket);
+      await tester.pumpAndSettle();
+      expect(cell('unclassified', 'title'), findsOneWidget);
+      expect(find.text('赖床'), findsWidgets);
+      await tester.tap(bucket);
+      await tester.pumpAndSettle();
+      await tester.tap(workGroup);
+      await tester.pumpAndSettle();
+      expect(journal.selected, isEmpty);
+      await tester.tap(cell('work-a', 'title'));
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      final copied = EventClipboard.tryDecode(clipboardText)!;
+      expect(copied.events.length, 1);
+      expect(copied.events.single.start, day.add(const Duration(minutes: 690)));
+      await tester.tap(workGroup);
+      await tester.pumpAndSettle();
+      expect(cell('work-a', 'title'), findsNothing);
+      expect(journal.selected, {'work-a'});
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      expect(EventClipboard.tryDecode(clipboardText)!.events.length, 1);
+      await key(tester, LogicalKeyboardKey.keyV, control: true);
+      expect(
+        journal.visibleEvents.where((event) => event.title == 'Daymark').length,
+        5,
+      );
+      expect(
+        find.descendant(of: workGroup, matching: find.text('6 小时 30 分')),
+        findsOneWidget,
+      );
+      expect(cell(journal.selected.single, 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.keyZ, control: true);
+      expect(
+        journal.visibleEvents.where((event) => event.title == 'Daymark').length,
+        4,
+      );
+      await tester.tap(find.text('时间顺序'));
+      await tester.pumpAndSettle();
+      expect(workGroup, findsNothing);
+      expect(cell('different', 'title'), findsOneWidget);
+      await tester.tap(find.text('汇总'));
+      await tester.pumpAndSettle();
+      expect(workGroup, findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'summary editing splits only the renamed record and failed writes block folding and mode changes',
+    (tester) async {
+      final tagId = await seedSummary();
+      await open(tester, grouped: true);
+      await tester.tap(group('Daymark', tagId));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('work-a', 'title'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('work-a', 'title'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input('work-a', 'title'), 'Daymark设计');
+      failWrites = true;
+      await tester.tap(group('Daymark', tagId));
+      await tester.pumpAndSettle();
+      expect(input('work-a', 'title'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(input('work-a', 'title')).controller!.text,
+        'Daymark设计',
+      );
+      await tester.tap(find.text('时间顺序'));
+      await tester.pumpAndSettle();
+      expect(group('Daymark', tagId), findsOneWidget);
+      expect(journal.store.events['work-a']!.title, 'Daymark');
+      failWrites = false;
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.store.events['work-a']!.title, 'Daymark设计');
+      expect(
+        find.descendant(
+          of: group('Daymark', tagId),
+          matching: find.text('5 小时 30 分'),
+        ),
+        findsOneWidget,
+      );
+      expect(cell('work-a', 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.keyZ, control: true);
+      expect(journal.store.events['work-a']!.title, 'Daymark');
+    },
+  );
+
+  testWidgets(
+    'grouped Shift selection follows displayed children and context deletes one record',
+    (tester) async {
+      mockClipboard();
+      final tagId = await seedSummary();
+      await open(tester, grouped: true);
+      await tester.tap(group('Daymark', tagId));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('work-a', 'title'));
+      await tester.pumpAndSettle();
+      tester
+          .state<EventTableState>(find.byType(EventTable))
+          .reveal('different');
+      await tester.pumpAndSettle();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.tap(cell('different', 'title'));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(journal.selected, {
+        'work-a',
+        'work-b',
+        'work-c',
+        'work-d',
+        'different',
+      });
+      await key(tester, LogicalKeyboardKey.keyC, control: true);
+      expect(EventClipboard.tryDecode(clipboardText)!.events.length, 5);
+      journal.clearSelection();
+      tester.state<EventTableState>(find.byType(EventTable)).reveal('work-a');
+      await tester.pumpAndSettle();
+      await tester.tap(cell('work-a', 'title'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+      expect(journal.store.events.containsKey('work-a'), isFalse);
+      expect(journal.store.events.containsKey('work-b'), isTrue);
+      expect(
+        find.descendant(
+          of: group('Daymark', tagId),
+          matching: find.text('5 小时 30 分'),
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'timeline selection expands its group and new blank drafts stay separate',
+    (tester) async {
+      final tagId = await seedSummary();
+      await open(tester, grouped: true);
+      final rectangle = tester.getRect(find.byType(Timeline));
+      await tester.tapAt(
+        Offset(
+          rectangle.left + 24 + (rectangle.width - 50) * 11.75 / 24,
+          rectangle.top + 80,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(journal.selected, {'work-a'});
+      expect(cell('work-a', 'title'), findsOneWidget);
+      await tester.tap(group('Daymark', tagId));
+      await tester.pumpAndSettle();
+      expect(cell('work-a', 'title'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('add-event')));
+      await tester.pumpAndSettle();
+      final first = journal.drafts.keys.single;
+      expect(input(first, 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.keyN, control: true);
+      final second = journal.drafts.keys.last;
+      expect(journal.drafts.length, 2);
+      expect(input(second, 'title'), findsOneWidget);
+      expect(cell(first, 'title'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'table multi-selection copies and pastes onto another date with undo',
@@ -1104,6 +1345,31 @@ void main() {
         ).writeAsBytes(pickerBytes!.buffer.asUint8List()),
       );
       pickerImage.dispose();
+      await key(tester, LogicalKeyboardKey.escape);
+      await key(tester, LogicalKeyboardKey.escape);
+      final summaryTag = await seedSummary();
+      await journal.initialize();
+      await tester.pumpAndSettle();
+      for (final expanded in [false, true]) {
+        if (expanded) {
+          await tester.tap(group('Daymark', summaryTag));
+          await tester.pumpAndSettle();
+        }
+        final summaryImage = (await tester.runAsync(
+          () => boundary.toImage(pixelRatio: 1),
+        ))!;
+        final summaryBytes = await tester.runAsync(
+          () => summaryImage.toByteData(format: ui.ImageByteFormat.png),
+        );
+        await tester.runAsync(
+          () => File(
+            expanded
+                ? '.test-artifacts/flutter-event-summary-expanded.png'
+                : '.test-artifacts/flutter-event-summary.png',
+          ).writeAsBytes(summaryBytes!.buffer.asUint8List()),
+        );
+        summaryImage.dispose();
+      }
       debugDisableShadows = previousShadows;
       expect(tester.takeException(), isNull);
     },
