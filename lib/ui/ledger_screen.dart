@@ -181,6 +181,11 @@ class _LedgerScreenState extends State<LedgerScreen> {
           ),
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
               unawaited(_sidebar.currentState?.saveAll() ?? Future.value()),
+          const SingleActivator(
+            LogicalKeyboardKey.numpadEnter,
+            control: true,
+          ): () =>
+              unawaited(_sidebar.currentState?.saveAll() ?? Future.value()),
         },
         child: Focus(
           focusNode: _focus,
@@ -206,20 +211,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          TextButton.icon(
-                            key: const ValueKey('add-income'),
-                            onPressed: _saving || widget.ledger.busy
-                                ? null
-                                : () => unawaited(
-                                    showMoneyEditor(
-                                      context,
-                                      widget.ledger,
-                                      kind: MoneyKind.income,
-                                    ),
-                                  ),
-                            icon: const Icon(Icons.add),
-                            label: const Text('记收入'),
-                          ),
                           TextButton.icon(
                             onPressed: _saving || widget.ledger.busy
                                 ? null
@@ -324,7 +315,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                       balance('资金总额', _state.totalCents, width: width),
                       const SizedBox(width: 10),
                       balance(
-                        '${cash.name} · 可支配',
+                        cash.name,
                         cash.balanceCents,
                         id: cash.id,
                         width: width,
@@ -468,6 +459,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
 
   Widget _records(BuildContext context) {
     final records = _state.recordsThrough(_month);
+    final dailyTotals = _state.dailyTotals;
     if (records.isEmpty) return const Center(child: Text('暂无流水'));
     final count = math.min(_limit, records.length);
     return Scrollbar(
@@ -478,6 +470,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
         itemCount: count,
         itemBuilder: (context, index) {
           final record = records[index];
+          final totals = dailyTotals[record.date]!;
           final newDay = index == 0 || records[index - 1].date != record.date;
           final title = switch (record.kind) {
             MoneyKind.expense ||
@@ -498,10 +491,38 @@ class _LedgerScreenState extends State<LedgerScreen> {
             children: [
               if (newDay)
                 Padding(
-                  padding: const EdgeInsets.only(top: 12, bottom: 6, left: 12),
-                  child: Text(
-                    dateText(record.date),
-                    style: Theme.of(context).textTheme.titleSmall,
+                  key: ValueKey('money-day-${dateText(record.date)}'),
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    spacing: 16,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        dateText(record.date),
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 4,
+                        children: [
+                          Text(
+                            '支出  ¥ ${moneyText(totals.expenseCents)}',
+                            key: ValueKey(
+                              'day-expense-${dateText(record.date)}',
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          Text(
+                            '收入  ¥ ${moneyText(totals.incomeCents)}',
+                            key: ValueKey(
+                              'day-income-${dateText(record.date)}',
+                            ),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ListTile(

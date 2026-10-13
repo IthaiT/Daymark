@@ -351,6 +351,8 @@ class LedgerSidebarState extends State<LedgerSidebar> {
   @override
   Widget build(BuildContext context) {
     final categories = _categories();
+    final totals =
+        _state.dailyTotals[_day] ?? (expenseCents: 0, incomeCents: 0);
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainer,
       child: Padding(
@@ -420,6 +422,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                 Expanded(
                   child: MoneyDateField(
                     controller: _date,
+                    showLabel: false,
                     enabled: !_busy,
                     onChanged: _dateChanged,
                   ),
@@ -429,6 +432,23 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                   tooltip: '下一天',
                   onPressed: _busy ? null : () => _stepDay(1),
                   icon: const Icon(Icons.chevron_right),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              children: [
+                Text(
+                  '当日支出  ¥ ${moneyText(totals.expenseCents)}',
+                  key: const ValueKey('entry-day-expense'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                Text(
+                  '当日收入  ¥ ${moneyText(totals.incomeCents)}',
+                  key: const ValueKey('entry-day-income'),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),

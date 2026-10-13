@@ -245,13 +245,10 @@ void main() {
     'income and editing type update cash, failed dialog preserves amount and notes',
     (tester) async {
       await open(tester);
-      await tester.tap(find.byKey(const ValueKey('add-income')));
+      await tester.tap(find.text('收入标签'));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const ValueKey('record-amount')),
-        '1000',
-      );
-      await tester.tap(find.text('保存'));
+      await tester.enterText(quick('salary'), '1000');
+      await enter(tester);
       await tester.pumpAndSettle();
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1100000);
       final id = store.state.records.keys.single;
@@ -304,8 +301,14 @@ void main() {
       await ledger.transfer(cashAccountId, investmentAccountId, 20000, day);
       await ledger.calibrate(providentAccountId, 230000, day);
       await tester.pumpAndSettle();
-      expect(find.text('支出  ¥ 100.00'), findsOneWidget);
-      expect(find.text('收入  ¥ 1000.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 100.00',
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-income'))).data,
+        '收入  ¥ 1000.00',
+      );
       await tester.tap(find.text('分类统计'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('stats-food-false')));
@@ -317,8 +320,14 @@ void main() {
       expect(find.text('¥ 40.00  66.7%'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('money-previous-month')));
       await tester.pumpAndSettle();
-      expect(find.text('支出  ¥ 5.00'), findsOneWidget);
-      expect(find.text('收入  ¥ 0.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 5.00',
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-income'))).data,
+        '收入  ¥ 0.00',
+      );
     },
   );
 
@@ -394,11 +403,23 @@ void main() {
   testWidgets('synthetic screenshots cover ledger and nested statistics', (
     tester,
   ) async {
+    const releaseIconFont = String.fromEnvironment('DAYMARK_ICON_FONT');
+    if (releaseIconFont.isNotEmpty) {
+      expect(
+        File(releaseIconFont).existsSync(),
+        isTrue,
+        reason: '必须使用存在的 Release 图标字体',
+      );
+    }
     for (final entry in [
       ('Microsoft YaHei UI', 'C:/Windows/Fonts/msyh.ttc'),
       (
         'MaterialIcons',
-        '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+        const String.fromEnvironment(
+          'DAYMARK_ICON_FONT',
+          defaultValue:
+              '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+        ),
       ),
     ]) {
       if (File(entry.$2).existsSync()) {
@@ -501,7 +522,10 @@ void main() {
       expect(store.state.accounts[cashAccountId]!.balanceCents, 990000);
       expect(store.state.accounts[investmentAccountId]!.balanceCents, 310000);
       expect(store.state.totalCents, 1500000);
-      expect(find.text('支出  ¥ 0.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 0.00',
+      );
       await tester.tap(find.text('余额校准'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -749,8 +773,14 @@ void main() {
       expect(find.byKey(const ValueKey('ledger-donut')), findsOneWidget);
       await tester.tap(find.text('按年'));
       await tester.pumpAndSettle();
-      expect(find.text('支出  ¥ 30.00'), findsOneWidget);
-      expect(find.text('收入  ¥ 90.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 30.00',
+      );
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-income'))).data,
+        '收入  ¥ 90.00',
+      );
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('money-month')))
@@ -774,7 +804,10 @@ void main() {
       expect(find.text('本年暂无收入'), findsOneWidget);
       await tester.tap(find.text('支出'));
       await tester.pumpAndSettle();
-      expect(find.text('支出  ¥ 30.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 30.00',
+      );
       await tester.tap(find.byKey(const ValueKey('money-next-month')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('流水'));
@@ -786,7 +819,10 @@ void main() {
             .text,
         '2026-10',
       );
-      expect(find.text('支出  ¥ 10.00'), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
+        '支出  ¥ 10.00',
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -932,6 +968,16 @@ void main() {
       expect(store.state.records, isEmpty);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '83');
+      fail = true;
+      Actions.invoke(
+        FocusManager.instance.primaryFocus!.context!,
+        const RedoTextIntent(SelectionChangedCause.keyboard),
+      );
+      await tester.pumpAndSettle();
+      expect(store.state.records, isEmpty);
+      expect(ledger.history.canRedo, isTrue);
+      expect(tester.widget<TextField>(quick('lunch')).controller!.text, '83');
+      fail = false;
       Actions.invoke(
         FocusManager.instance.primaryFocus!.context!,
         const RedoTextIntent(SelectionChangedCause.keyboard),
@@ -970,4 +1016,107 @@ void main() {
       expect(store.state.accounts[cashAccountId]!.balanceCents, 1007200);
     },
   );
+  testWidgets(
+    'daily totals include unloaded records, exclude movements and follow the selected date',
+    (tester) async {
+      await open(tester, size: const Size(1100, 740));
+      await ledger.saveInputs([
+        for (var i = 0; i < 45; i++) expense(1000, 'lunch'),
+        expense(2300, 'lunch', date: day.add(const Duration(days: 1))),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 2500,
+          date: day,
+          categoryId: 'salary',
+        ),
+      ]);
+      await ledger.transfer(cashAccountId, investmentAccountId, 10000, day);
+      await ledger.calibrate(providentAccountId, 200100, day);
+      await tester.pumpAndSettle();
+      String label(String key) =>
+          tester.widget<Text>(find.byKey(ValueKey(key))).data!;
+      expect(label('day-expense-2026-10-11'), '支出  ¥ 450.00');
+      expect(label('day-income-2026-10-11'), '收入  ¥ 25.00');
+      expect(label('day-expense-2026-10-12'), '支出  ¥ 23.00');
+      expect(label('entry-day-expense'), '当日支出  ¥ 450.00');
+      expect(label('entry-day-income'), '当日收入  ¥ 25.00');
+      final list = tester.widget<ListView>(
+        find.byKey(const ValueKey('money-records')),
+      );
+      expect(list.childrenDelegate.estimatedChildCount, 40);
+      await tester.tap(find.byKey(const ValueKey('money-next-day')));
+      await tester.pumpAndSettle();
+      expect(label('entry-day-expense'), '当日支出  ¥ 23.00');
+      expect(label('entry-day-income'), '当日收入  ¥ 0.00');
+      await tester.tap(find.byKey(const ValueKey('money-next-day')));
+      await tester.pumpAndSettle();
+      expect(label('entry-day-expense'), '当日支出  ¥ 0.00');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'compact ledger keeps income entry in the sidebar and removes redundant captions',
+    (tester) async {
+      await open(tester, size: const Size(1100, 740));
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('money-date')))
+            .decoration!
+            .labelText,
+        isNull,
+      );
+      expect(find.textContaining('可支配'), findsNothing);
+      expect(find.byKey(const ValueKey('add-income')), findsNothing);
+      expect(find.text('记收入'), findsNothing);
+      await tester.tap(find.text('收入标签'));
+      await tester.pumpAndSettle();
+      expect(find.text('记收入'), findsOneWidget);
+      await tester.enterText(quick('salary'), '100');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(store.state.records.values.single.kind, MoneyKind.income);
+      expect(store.state.records.values.single.amountCents, 10000);
+      expect(find.text('当日收入  ¥ 100.00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets('Enter confirms all inputs after Chinese composition has ended', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.enterText(quick('breakfast'), '8');
+    await tester.enterText(quick('lunch'), '28');
+    await tester.tap(find.byKey(const ValueKey('notes-toggle-lunch')));
+    await tester.pumpAndSettle();
+    final notes = find.byKey(const ValueKey('quick-notes-lunch'));
+    await tester.enterText(notes, '午餐');
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '午餐',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(store.state.records, isEmpty);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: '午餐',
+        selection: TextSelection.collapsed(offset: 2),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(store.state.records.length, 2);
+    expect(
+      store.state.records.values
+          .singleWhere((item) => item.categoryId == 'lunch')
+          .notes,
+      '午餐',
+    );
+  });
 }

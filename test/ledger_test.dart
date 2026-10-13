@@ -610,4 +610,56 @@ void main() {
       expect(migrated.categories['food']!.name, '自定义收入');
     },
   );
+  test(
+    'daily totals preserve calendar days and update with edit, delete, undo and redo',
+    () async {
+      await ledger.saveInputs([
+        expense(2800, date: DateTime(2026, 10, 11, 23, 59)),
+        expense(500, date: september),
+        MoneyInput(
+          kind: MoneyKind.income,
+          amountCents: 10000,
+          date: october,
+          categoryId: 'salary',
+        ),
+      ]);
+      final id = ledger.state.records.values.first.id;
+      await ledger.transfer(cashAccountId, investmentAccountId, 50000, october);
+      await ledger.calibrate(
+        providentAccountId,
+        190000,
+        DateTime.utc(2026, 10, 12),
+      );
+      expect(ledger.state.dailyTotals[october], (
+        expenseCents: 2800,
+        incomeCents: 10000,
+      ));
+      expect(ledger.state.dailyTotals[september], (
+        expenseCents: 500,
+        incomeCents: 0,
+      ));
+      expect(ledger.state.dailyTotals[DateTime.utc(2026, 10, 12)], (
+        expenseCents: 0,
+        incomeCents: 0,
+      ));
+      expect(() => ledger.state.dailyTotals.clear(), throwsUnsupportedError);
+      await ledger.saveInputs([expense(2900, date: september)], editId: id);
+      expect(ledger.state.dailyTotals[october]!.expenseCents, 0);
+      expect(ledger.state.dailyTotals[september]!.expenseCents, 3400);
+      final before = ledger.state.dailyTotals;
+      fail = true;
+      await expectLater(
+        ledger.deleteRecord(id),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(ledger.state.dailyTotals, before);
+      fail = false;
+      await ledger.deleteRecord(id);
+      expect(ledger.state.dailyTotals[september]!.expenseCents, 500);
+      await ledger.undo();
+      expect(ledger.state.dailyTotals[september]!.expenseCents, 3400);
+      await ledger.redo();
+      expect(ledger.state.dailyTotals[september]!.expenseCents, 500);
+    },
+  );
 }

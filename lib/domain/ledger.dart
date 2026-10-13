@@ -333,6 +333,23 @@ class LedgerState {
       .where((record) => record.kind == kind)
       .fold(0, (sum, record) => sum + record.amountCents);
 
+  /// Totals cover complete calendar days, including records outside the viewport.
+  Map<DateTime, ({int expenseCents, int incomeCents})> get dailyTotals {
+    final result = <DateTime, ({int expenseCents, int incomeCents})>{};
+    for (final record in records.values) {
+      final previous = result[record.date] ?? (expenseCents: 0, incomeCents: 0);
+      result[record.date] = (
+        expenseCents:
+            previous.expenseCents +
+            (record.kind == MoneyKind.expense ? record.amountCents : 0),
+        incomeCents:
+            previous.incomeCents +
+            (record.kind == MoneyKind.income ? record.amountCents : 0),
+      );
+    }
+    return Map.unmodifiable(result);
+  }
+
   List<MoneyRecord> periodRecords(DateTime anchor, LedgerPeriod period) =>
       records.values
           .where(

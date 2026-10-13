@@ -21,47 +21,52 @@ class MoneyDateField extends StatelessWidget {
     required this.controller,
     this.enabled = true,
     this.onChanged,
+    this.showLabel = true,
   });
   final TextEditingController controller;
   final bool enabled;
   final VoidCallback? onChanged;
+  final bool showLabel;
   @override
-  Widget build(BuildContext context) => TextField(
-    key: const ValueKey('money-date'),
-    controller: controller,
-    enabled: enabled,
-    decoration: InputDecoration(
-      labelText: '日期',
-      suffixIcon: IconButton(
-        tooltip: '选择日期',
-        onPressed: enabled
-            ? () async {
-                DateTime initial;
-                try {
-                  initial = parseDate(controller.text);
-                } catch (_) {
-                  initial = dayStart(DateTime.now());
+  Widget build(BuildContext context) => Semantics(
+    label: showLabel ? null : '记账日期',
+    child: TextField(
+      key: const ValueKey('money-date'),
+      controller: controller,
+      enabled: enabled,
+      decoration: InputDecoration(
+        labelText: showLabel ? '日期' : null,
+        suffixIcon: IconButton(
+          tooltip: '选择日期',
+          onPressed: enabled
+              ? () async {
+                  DateTime initial;
+                  try {
+                    initial = parseDate(controller.text);
+                  } catch (_) {
+                    initial = dayStart(DateTime.now());
+                  }
+                  final value = await showDatePicker(
+                    context: context,
+                    initialDate: DateTime(
+                      initial.year,
+                      initial.month,
+                      initial.day,
+                    ),
+                    firstDate: DateTime(1),
+                    lastDate: DateTime(9999, 12, 31),
+                  );
+                  if (value != null) {
+                    controller.text = dateText(value);
+                    onChanged?.call();
+                  }
                 }
-                final value = await showDatePicker(
-                  context: context,
-                  initialDate: DateTime(
-                    initial.year,
-                    initial.month,
-                    initial.day,
-                  ),
-                  firstDate: DateTime(1),
-                  lastDate: DateTime(9999, 12, 31),
-                );
-                if (value != null) {
-                  controller.text = dateText(value);
-                  onChanged?.call();
-                }
-              }
-            : null,
-        icon: const Icon(Icons.calendar_today, size: 18),
+              : null,
+          icon: const Icon(Icons.calendar_today, size: 18),
+        ),
       ),
+      onChanged: (_) => onChanged?.call(),
     ),
-    onChanged: (_) => onChanged?.call(),
   );
 }
 
