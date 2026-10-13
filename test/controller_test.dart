@@ -50,6 +50,23 @@ void main() {
   );
 
   test(
+    'range selection can follow displayed group order while timeline stays chronological',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 10),
+        'b': item('b', 11, 12),
+        'c': item('c', 13, 14),
+      });
+      controller.select('c');
+      controller.select('b', range: true, orderedIds: ['c', 'a', 'b']);
+      expect(controller.selected, {'c', 'a', 'b'});
+      controller.select('c');
+      controller.select('b', range: true);
+      expect(controller.selected, {'b', 'c'});
+    },
+  );
+
+  test(
     'multi-event paste keeps full overnight intervals and is one undoable write',
     () async {
       final night = Event(

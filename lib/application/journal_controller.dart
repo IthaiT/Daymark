@@ -136,14 +136,19 @@ class JournalController extends ChangeNotifier {
   });
   Future<void> shiftDay(int amount) => setDay(day.add(Duration(days: amount)));
 
-  void select(String? id, {bool toggle = false, bool range = false}) {
+  void select(
+    String? id, {
+    bool toggle = false,
+    bool range = false,
+    Iterable<String>? orderedIds,
+  }) {
     if (id == null) {
       clearSelection();
       return;
     }
     if (event(id) == null) return;
     if (range && _selectionAnchor != null) {
-      final ids = rows.map((row) => row.id).toList();
+      final ids = (orderedIds ?? rows.map((row) => row.id)).toList();
       final first = ids.indexOf(_selectionAnchor!);
       final last = ids.indexOf(id);
       if (first >= 0 && last >= 0) {
