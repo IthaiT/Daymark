@@ -351,12 +351,13 @@ class LedgerSidebarState extends State<LedgerSidebar> {
   @override
   Widget build(BuildContext context) {
     final categories = _categories();
-    final totals =
-        _state.dailyTotals[_day] ?? (expenseCents: 0, incomeCents: 0);
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainer,
+      key: const ValueKey('ledger-entry-panel'),
+      color: Theme.of(context).colorScheme.surfaceContainerLowest,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 20, 12, 16),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -370,7 +371,8 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                     Expanded(
                       child: Text(
                         '记${moneyKindText(_kind)}',
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
                       ),
                     ),
                     IconButton(
@@ -401,6 +403,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
             ),
             const SizedBox(height: 8),
             SegmentedButton<MoneyKind>(
+              showSelectedIcon: false,
               segments: const [
                 ButtonSegment(value: MoneyKind.expense, label: Text('支出标签')),
                 ButtonSegment(value: MoneyKind.income, label: Text('收入标签')),
@@ -435,24 +438,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 16,
-              runSpacing: 4,
-              children: [
-                Text(
-                  '当日支出  ¥ ${moneyText(totals.expenseCents)}',
-                  key: const ValueKey('entry-day-expense'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                Text(
-                  '当日收入  ¥ ${moneyText(totals.incomeCents)}',
-                  key: const ValueKey('entry-day-income'),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Expanded(
               child: FocusTraversalGroup(
                 policy: OrderedTraversalPolicy(),
@@ -543,26 +529,57 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                         : null,
                   ),
                   Expanded(
-                    child: Draggable<String>(
+                    child: LongPressDraggable<String>(
+                      delay: const Duration(milliseconds: 250),
                       data: category.id,
                       maxSimultaneousDrags: _busy ? 0 : 1,
                       feedback: Material(
-                        elevation: 4,
-                        borderRadius: BorderRadius.circular(8),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.surfaceContainerLowest,
+                        elevation: 2,
+                        borderRadius: BorderRadius.circular(10),
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Text(category.name),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              LedgerCategoryBadge(
+                                state: _state,
+                                id: category.id,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                category.name,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       child: Tooltip(
                         message: _state.categoryPath(category.id),
-                        child: label,
+                        waitDuration: const Duration(milliseconds: 700),
+                        child: InkWell(
+                          onTap: _busy
+                              ? null
+                              : () => unawaited(_focusAmount(category.id)),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: label,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 6),
                   SizedBox(
-                    width: 82,
+                    width: 76,
                     child: FocusTraversalOrder(
                       order: NumericFocusOrder(index * 2.0),
                       child: _entryShortcuts(
@@ -592,6 +609,12 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                   IconButton(
                     key: ValueKey('notes-toggle-${category.id}'),
                     tooltip: '填写备注',
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(28, 36),
+                      maximumSize: const Size(28, 36),
+                      padding: EdgeInsets.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     constraints: const BoxConstraints(
                       minWidth: 28,
                       minHeight: 36,
@@ -611,8 +634,11 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                     tooltip: '标签操作',
                     enabled: !_busy,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                    iconSize: 18,
+                    child: const SizedBox(
+                      width: 28,
+                      height: 36,
+                      child: Center(child: Icon(Icons.more_vert, size: 18)),
+                    ),
                     onSelected: (value) {
                       if (value == 'edit') {
                         unawaited(

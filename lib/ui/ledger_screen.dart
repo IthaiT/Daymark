@@ -12,6 +12,7 @@ import 'ledger_dialogs.dart';
 import 'ledger_category_style.dart';
 import 'ledger_sidebar.dart';
 import 'ledger_statistics.dart';
+import 'theme.dart';
 
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key, required this.ledger, this.focusNode});
@@ -130,7 +131,17 @@ class _LedgerScreenState extends State<LedgerScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
+  Widget build(BuildContext context) => Theme(
+    data: ledgerTheme(Theme.of(context)),
+    child: Builder(
+      builder: (context) => ColoredBox(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        child: _workspace(context),
+      ),
+    ),
+  );
+
+  Widget _workspace(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
     builder: (context, _) => Actions(
       actions: {
@@ -190,62 +201,31 @@ class _LedgerScreenState extends State<LedgerScreen> {
         child: Focus(
           focusNode: _focus,
           autofocus: true,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                width: 320,
-                child: LedgerSidebar(
-                  key: _sidebar,
-                  ledger: widget.ledger,
-                  onError: _showError,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 20, 20),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  width: 304,
+                  child: LedgerSidebar(
+                    key: _sidebar,
+                    ledger: widget.ledger,
+                    onError: _showError,
+                  ),
                 ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
+                const SizedBox(width: 20),
+                Expanded(
                   child: Column(
                     children: [
                       _balances(context),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton.icon(
-                            onPressed: _saving || widget.ledger.busy
-                                ? null
-                                : () => unawaited(
-                                    showMoneyMovement(
-                                      context,
-                                      widget.ledger,
-                                      MoneyKind.transfer,
-                                    ),
-                                  ),
-                            icon: const Icon(Icons.swap_horiz),
-                            label: const Text('转账'),
-                          ),
-                          TextButton.icon(
-                            onPressed: _saving || widget.ledger.busy
-                                ? null
-                                : () => unawaited(
-                                    showMoneyMovement(
-                                      context,
-                                      widget.ledger,
-                                      MoneyKind.adjustment,
-                                    ),
-                                  ),
-                            icon: const Icon(Icons.balance),
-                            label: const Text('余额校准'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
                       Expanded(child: _browse(context)),
                     ],
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -261,10 +241,10 @@ class _LedgerScreenState extends State<LedgerScreen> {
       double width = 180,
     }) => Container(
       width: width,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       decoration: BoxDecoration(
         color: scheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -286,9 +266,10 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   ? const ValueKey('balance-total')
                   : ValueKey('balance-$id'),
               maxLines: 1,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(color: scheme.onSurface),
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: scheme.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -305,8 +286,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 final count = _state.accounts.length + 1;
                 final width =
                     ((constraints.maxWidth - (count - 1) * 10) / count).clamp(
-                      130.0,
-                      180.0,
+                      136.0,
+                      240.0,
                     );
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -337,11 +318,29 @@ class _LedgerScreenState extends State<LedgerScreen> {
               },
             ),
           ),
-          IconButton(
-            tooltip: '管理账户',
-            onPressed: _saving
-                ? null
-                : () => unawaited(showLedgerAccounts(context, widget.ledger)),
+          const SizedBox(width: 8),
+          PopupMenuButton<String>(
+            key: const ValueKey('account-actions'),
+            tooltip: '账户操作',
+            enabled: !_saving && !widget.ledger.busy,
+            onSelected: (value) => unawaited(switch (value) {
+              'transfer' => showMoneyMovement(
+                context,
+                widget.ledger,
+                MoneyKind.transfer,
+              ),
+              'adjustment' => showMoneyMovement(
+                context,
+                widget.ledger,
+                MoneyKind.adjustment,
+              ),
+              _ => showLedgerAccounts(context, widget.ledger),
+            }),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'transfer', child: Text('转账')),
+              PopupMenuItem(value: 'adjustment', child: Text('余额校准')),
+              PopupMenuItem(value: 'manage', child: Text('管理账户')),
+            ],
             icon: const Icon(Icons.account_balance_wallet_outlined),
           ),
         ],
@@ -349,10 +348,14 @@ class _LedgerScreenState extends State<LedgerScreen> {
     );
   }
 
-  Widget _browse(BuildContext context) => Card.outlined(
+  Widget _browse(BuildContext context) => Card.filled(
+    key: const ValueKey('ledger-browse-panel'),
+    color: Theme.of(context).colorScheme.surfaceContainerLowest,
+    elevation: 0,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     margin: EdgeInsets.zero,
     child: Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -369,6 +372,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 child: TextField(
                   key: const ValueKey('money-month'),
                   controller: _monthText,
+                  textAlign: TextAlign.center,
                   decoration: InputDecoration(
                     hintText: _displayPeriod == LedgerPeriod.year
                         ? 'YYYY'
@@ -389,6 +393,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
               ),
               const Spacer(),
               SegmentedButton<bool>(
+                showSelectedIcon: false,
                 segments: const [
                   ButtonSegment(value: false, label: Text('流水')),
                   ButtonSegment(value: true, label: Text('分类统计')),
@@ -408,6 +413,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
               runSpacing: 8,
               children: [
                 SegmentedButton<LedgerPeriod>(
+                  showSelectedIcon: false,
                   key: const ValueKey('stats-period'),
                   segments: const [
                     ButtonSegment(value: LedgerPeriod.month, label: Text('按月')),
@@ -421,6 +427,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                   }),
                 ),
                 SegmentedButton<MoneyKind>(
+                  showSelectedIcon: false,
                   key: const ValueKey('stats-kind'),
                   segments: const [
                     ButtonSegment(value: MoneyKind.expense, label: Text('支出')),

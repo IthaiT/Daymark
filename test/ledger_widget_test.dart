@@ -478,6 +478,16 @@ void main() {
     }
 
     await screenshot('ledger');
+    await ledger.saveInputs([
+      expense(10000, 'housing'),
+      expense(4500, 'clothing'),
+      expense(3200, 'hobby'),
+      expense(2500, 'shopping'),
+      expense(1800, 'topup'),
+      expense(1000, 'health'),
+      expense(900, 'entertainment'),
+      expense(700, 'daily'),
+    ]);
     await tester.tap(find.text('分类统计'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('stats-food-false')));
@@ -507,6 +517,8 @@ void main() {
     'transfer and actual-balance calibration dialogs save and undo both accounts',
     (tester) async {
       await open(tester);
+      await tester.tap(find.byKey(const ValueKey('account-actions')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('转账'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<String>).at(1));
@@ -526,6 +538,8 @@ void main() {
         tester.widget<Text>(find.byKey(const ValueKey('month-expense'))).data,
         '支出  ¥ 0.00',
       );
+      await tester.tap(find.byKey(const ValueKey('account-actions')));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('余额校准'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -736,7 +750,11 @@ void main() {
       expect(store.state.categories['lunch']!.color, CategoryColor.pink);
       final source = tester.getCenter(find.text('午餐'));
       final target = tester.getCenter(find.text('住房'));
-      await tester.dragFrom(source, target - source);
+      final drag = await tester.startGesture(source);
+      await tester.pump(const Duration(milliseconds: 300));
+      await drag.moveTo(target);
+      await tester.pump();
+      await drag.up();
       await tester.pumpAndSettle();
       expect(store.state.categories['lunch']!.parentId, 'housing');
       expect(store.state.records.values.single.categoryId, 'lunch');
@@ -1017,7 +1035,7 @@ void main() {
     },
   );
   testWidgets(
-    'daily totals include unloaded records, exclude movements and follow the selected date',
+    'daily flow totals include unloaded records and entry panel omits duplicate summaries',
     (tester) async {
       await open(tester, size: const Size(1100, 740));
       await ledger.saveInputs([
@@ -1038,19 +1056,19 @@ void main() {
       expect(label('day-expense-2026-10-11'), '支出  ¥ 450.00');
       expect(label('day-income-2026-10-11'), '收入  ¥ 25.00');
       expect(label('day-expense-2026-10-12'), '支出  ¥ 23.00');
-      expect(label('entry-day-expense'), '当日支出  ¥ 450.00');
-      expect(label('entry-day-income'), '当日收入  ¥ 25.00');
+      expect(find.byKey(const ValueKey('entry-day-expense')), findsNothing);
+      expect(find.byKey(const ValueKey('entry-day-income')), findsNothing);
       final list = tester.widget<ListView>(
         find.byKey(const ValueKey('money-records')),
       );
       expect(list.childrenDelegate.estimatedChildCount, 40);
       await tester.tap(find.byKey(const ValueKey('money-next-day')));
       await tester.pumpAndSettle();
-      expect(label('entry-day-expense'), '当日支出  ¥ 23.00');
-      expect(label('entry-day-income'), '当日收入  ¥ 0.00');
+      expect(label('day-expense-2026-10-11'), '支出  ¥ 450.00');
       await tester.tap(find.byKey(const ValueKey('money-next-day')));
       await tester.pumpAndSettle();
-      expect(label('entry-day-expense'), '当日支出  ¥ 0.00');
+      expect(find.textContaining('当日支出'), findsNothing);
+      expect(find.textContaining('当日收入'), findsNothing);
       expect(tester.takeException(), isNull);
     },
   );
@@ -1077,7 +1095,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.state.records.values.single.kind, MoneyKind.income);
       expect(store.state.records.values.single.amountCents, 10000);
-      expect(find.text('当日收入  ¥ 100.00'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('day-income-2026-10-11')))
+            .data,
+        '收入  ¥ 100.00',
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -1119,4 +1142,54 @@ void main() {
       '午餐',
     );
   });
+
+  testWidgets(
+    'clicking a category focuses its amount without creating drag feedback',
+    (tester) async {
+      await open(tester);
+      final label = find.text('早餐');
+      final gesture = await tester.startGesture(
+        tester.getCenter(label),
+        kind: PointerDeviceKind.mouse,
+      );
+      await gesture.moveBy(const Offset(2, 1));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(label, findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(label, findsOneWidget);
+      expect(
+        tester.widget<TextField>(quick('breakfast')).focusNode!.hasFocus,
+        isTrue,
+      );
+      await tester.enterText(quick('breakfast'), '12');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(store.state.records.values.single.amountCents, 1200);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'account menu keeps management reachable without discarding entry drafts',
+    (tester) async {
+      await open(tester);
+      await tester.enterText(quick('breakfast'), '8');
+      await tester.tap(find.byKey(const ValueKey('account-actions')));
+      await tester.pumpAndSettle();
+      expect(find.text('转账'), findsOneWidget);
+      expect(find.text('余额校准'), findsOneWidget);
+      await tester.tap(find.text('管理账户'));
+      await tester.pumpAndSettle();
+      expect(find.text('资金账户'), findsOneWidget);
+      expect(find.text('新增账户'), findsOneWidget);
+      await tester.tap(find.text('完成'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(quick('breakfast')).controller!.text,
+        '8',
+      );
+      expect(store.state.records, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

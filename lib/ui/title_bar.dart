@@ -5,9 +5,15 @@ import 'package:window_manager/window_manager.dart';
 /// window and doubles on double-tap to maximize; flat caption buttons sit at
 /// the far right. The native title bar is hidden in main().
 class WindowTitleBar extends StatefulWidget {
-  const WindowTitleBar({super.key, this.leading, this.leadingWidth = 250});
+  const WindowTitleBar({
+    super.key,
+    this.leading,
+    this.leadingWidth = 250,
+    this.backgroundColor,
+  });
   final Widget? leading;
   final double leadingWidth;
+  final Color? backgroundColor;
   @override
   State<WindowTitleBar> createState() => _WindowTitleBarState();
 }
@@ -41,9 +47,11 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
           // Melt into the sidebar's surface so the bar reads as part of it.
           Container(
             width: widget.leadingWidth,
-            color: widget.leading == null
-                ? scheme.surfaceContainer
-                : scheme.surfaceContainerLow,
+            color:
+                widget.backgroundColor ??
+                (widget.leading == null
+                    ? scheme.surfaceContainer
+                    : scheme.surfaceContainerLow),
             child:
                 widget.leading ??
                 const DragToMoveArea(child: SizedBox.expand()),
@@ -51,7 +59,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
           Expanded(
             child: DragToMoveArea(
               child: ColoredBox(
-                color: scheme.surfaceContainerLow,
+                color: widget.backgroundColor ?? scheme.surfaceContainerLow,
                 child: const SizedBox.expand(),
               ),
             ),

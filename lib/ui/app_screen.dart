@@ -7,6 +7,7 @@ import '../application/ledger_controller.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
 import 'title_bar.dart';
+import 'theme.dart';
 
 class AppScreen extends StatefulWidget {
   const AppScreen({super.key, required this.journal, required this.ledger});
@@ -51,28 +52,45 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => Theme(
+    data: _page == 1 ? ledgerTheme(Theme.of(context)) : Theme.of(context),
+    child: Builder(builder: _shell),
+  );
+
+  Widget _shell(BuildContext context) => Scaffold(
     body: Column(
       children: [
-        const WindowTitleBar(leadingWidth: 64),
+        WindowTitleBar(
+          leadingWidth: 64,
+          backgroundColor: _page == 1
+              ? Theme.of(context).colorScheme.surfaceContainerLow
+              : null,
+        ),
         Expanded(
           child: Row(
             children: [
               Material(
-                color: Theme.of(context).colorScheme.surfaceContainer,
+                color: _page == 1
+                    ? Theme.of(context).colorScheme.surfaceContainerLow
+                    : Theme.of(context).colorScheme.surfaceContainer,
                 child: SizedBox(
                   width: 64,
                   child: Column(
                     children: [
                       const SizedBox(height: 16),
-                      _mode(0, '时间记录', Icons.schedule),
+                      _mode(context, 0, '时间记录', Icons.schedule),
                       const SizedBox(height: 8),
-                      _mode(1, '记账', Icons.account_balance_wallet_outlined),
+                      _mode(
+                        context,
+                        1,
+                        '记账',
+                        Icons.account_balance_wallet_outlined,
+                      ),
                     ],
                   ),
                 ),
               ),
-              const VerticalDivider(width: 1),
+              if (_page == 0) const VerticalDivider(width: 1),
               Expanded(
                 child: IndexedStack(
                   index: _page,
@@ -103,20 +121,24 @@ class _AppScreenState extends State<AppScreen> {
       ],
     ),
   );
-  Widget _mode(int index, String label, IconData icon) => IconButton(
-    key: ValueKey('mode-$index'),
-    onPressed: () => unawaited(_switch(index)),
-    tooltip: label,
-    isSelected: _page == index,
-    style: IconButton.styleFrom(
-      foregroundColor: _page == index
-          ? Theme.of(context).colorScheme.onSecondaryContainer
-          : Theme.of(context).colorScheme.onSurfaceVariant,
-      backgroundColor: _page == index
-          ? Theme.of(context).colorScheme.secondaryContainer
-          : null,
-      fixedSize: const Size(44, 44),
-    ),
-    icon: Icon(icon, size: 22),
-  );
+  Widget _mode(BuildContext context, int index, String label, IconData icon) =>
+      IconButton(
+        key: ValueKey('mode-$index'),
+        onPressed: () => unawaited(_switch(index)),
+        tooltip: label,
+        isSelected: _page == index,
+        style: IconButton.styleFrom(
+          foregroundColor: _page == index
+              ? Theme.of(context).colorScheme.onSecondaryContainer
+              : Theme.of(context).colorScheme.onSurfaceVariant,
+          backgroundColor: _page == index
+              ? Theme.of(context).colorScheme.secondaryContainer
+              : null,
+          fixedSize: const Size(44, 44),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        icon: Icon(icon, size: 22),
+      );
 }

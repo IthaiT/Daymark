@@ -36,6 +36,73 @@ ThemeData daymarkTheme() {
   );
 }
 
+/// Quiet neutral surfaces and a teal accent for the desktop ledger workspace.
+ThemeData ledgerTheme(ThemeData base) {
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: Colors.teal,
+        brightness: Brightness.light,
+      ).copyWith(
+        surface: Colors.white,
+        surfaceContainerLowest: Colors.white,
+        surfaceContainerLow: Colors.grey[50],
+        surfaceContainer: Colors.grey[100],
+        surfaceContainerHigh: Colors.grey[200],
+        surfaceContainerHighest: Colors.grey[300],
+        outlineVariant: Colors.grey[200],
+        onSurface: Colors.grey[900],
+        onSurfaceVariant: Colors.grey[700],
+      );
+  final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(10));
+  final border = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(10),
+    borderSide: BorderSide.none,
+  );
+  return base.copyWith(
+    colorScheme: scheme,
+    scaffoldBackgroundColor: scheme.surfaceContainerLow,
+    inputDecorationTheme: base.inputDecorationTheme.copyWith(
+      fillColor: scheme.surfaceContainerLow,
+      border: border,
+      enabledBorder: border,
+      focusedBorder: border.copyWith(
+        borderSide: BorderSide(color: scheme.primary, width: 1.5),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 40),
+        shape: shape,
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        shape: shape,
+        foregroundColor: scheme.onSurfaceVariant,
+      ),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        side: const WidgetStatePropertyAll(BorderSide.none),
+        shape: WidgetStatePropertyAll(shape),
+        padding: const WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
+        backgroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? scheme.secondaryContainer
+              : scheme.surfaceContainerLow,
+        ),
+        foregroundColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? scheme.onSecondaryContainer
+              : scheme.onSurfaceVariant,
+        ),
+      ),
+    ),
+  );
+}
+
 // Anchored family hues, far more than 30° apart on the color wheel: the hue
 // expresses the root family, the lightness expresses the member within it.
 const _families = [Colors.blue, Colors.deepPurple, Colors.teal, Colors.orange];
