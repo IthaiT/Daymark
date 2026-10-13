@@ -11,13 +11,14 @@
   "version": 2,
   "default_cash_account_id": "cash",
   "balance_enabled": true,
+  "category_presets_version": 1,
   "accounts": [
     {"id": "cash", "name": "现金", "kind": "cash", "opening_cents": 1000000, "balance_cents": 997200},
     {"id": "provident", "name": "公积金", "kind": "provident", "opening_cents": 0, "balance_cents": 0},
     {"id": "investment", "name": "投资", "kind": "investment", "opening_cents": 0, "balance_cents": 0}
   ],
   "categories": [
-    {"id": "food", "name": "餐饮", "kind": "expense", "parent_id": null},
+    {"id": "food", "name": "餐饮", "kind": "expense", "parent_id": null, "color": "green"},
     {"id": "lunch", "name": "午餐", "kind": "expense", "parent_id": "food"}
   ],
   "records": [
@@ -40,22 +41,38 @@
 
 ## 版本 1 兼容边界
 
-当前起始分支只有时间记录，未提供既有记账实现或实际旧版记账样本。为升级路径定义并测试以下兼容契约；不读取或推测个人数据。
+保留并测试以下旧格式兼容契约；不读取或推测个人数据。
 
 版本 1 使用上述 `accounts/categories/records/pinned` 列表，但账户只需 `id/name/kind/balance_cents`；收支只需 `id/kind/amount_cents/date/category_id`，备注可省略，没有余额影响信息。`default_cash_account_id` 可显式提供，缺省仅识别稳定 ID `cash`，不按名称或类型推断。
 
 加载版本 1 时：
 
-1. 每个账户现存余额作为暂存开账余额，所有历史收支保留并标记 `affects_balance: false`。原有账户关联保留，缺失关联补为显式默认现金 ID。
-2. 不立即重写文件。用户填写所有账户当前实际余额后，启用联动并一次原子写入版本 2；首次启用作为新基线，不进入可撤销的录入历史。
+1. 每个账户现存余额作为开账余额，所有历史收支保留并标记 `affects_balance: false`。原有账户关联保留，缺失关联补为显式默认现金 ID。
+2. 不立即重写文件。直接保留原余额；首笔新增、删除或资金操作自动启用后续余额联动并一次原子写入版本 2，不再要求初始化资金。旧版版本 2 中 balance_enabled 为 false 的账本采用相同行为。
 3. 修改、删除旧收支不改变余额；新补记流水明确关联现金并影响余额。
 
-该兼容契约针对没有自动余额联动的历史收支，不接受缺少明确账户关联的转账或校准；不支持猜测其他未提供的旧格式。版本 2 不会再次初始化或回放历史流水。
+该兼容契约针对没有自动余额联动的历史收支，不接受缺少明确账户关联的转账或校准；不支持猜测其他未提供的旧格式。现有版本 2 的余额和明确关联字段继续保留，不回放历史流水。
 
 ## 验收对应
 
 `test/ledger_test.dart` 验证整数金额、10,000 → 9,972 → 10,972 元、收支类型修改、删除、批量、串行写入、撤销/重做、转账守恒、校准差额、多层分类移动汇总、默认账户关联、升级不重扣、跨月补记、失败回滚和损坏文件保护。
 
-`test/ledger_widget_test.dart` 验证初始化失败保留输入、Enter 连续录入、Tab 金额框切换、Ctrl+Z/Y、批量写入、弹窗失败保留金额和备注、转账及校准、分类新增/移动/固定/顺序、月份与逐层占比、滚动自动扩展、模式切换及 1100×740 布局。截图使用合成记录和系统字体，输出到 `.test-artifacts/ledger.png`、`.test-artifacts/ledger-statistics.png`。
+`test/ledger_widget_test.dart` 验证零余额直接录入、日期箭头、备注失败保留输入、标签折叠／右键颜色／拖动、月年收入与支出统计、Enter 跨收支类型批量录入、上下键金额框导航、输入框原生撤销动作、Tab 金额框切换、Ctrl+Z/Y、批量写入、弹窗失败保留金额和备注、转账及校准、分类新增/移动/固定/顺序、月份与逐层占比、滚动自动扩展、模式切换及 1100×740 布局。截图使用合成记录和系统字体，输出到 `.test-artifacts/ledger.png`、`.test-artifacts/ledger-statistics.png`。
 
 `tools/smoke_windows.ps1` 在不可激活的私有 Windows 桌面验证 Release 启动、窗口边界、时间 CSV 的 BOM/跨午夜空档、已联动记账文件不被回放改写、第二实例拒绝和退出释放共享锁。所有数据位于 `.test-artifacts/`。
+
+## 彩色标签与统计
+
+标签可选 `color` 字段为 Material 色系名称：`green/teal/cyan/blue/indigo/purple/pink/red/orange/amber/lightGreen/blueGrey`。缺省或 null 继承最近显式设色的祖先，未设色的一级标签使用稳定的默认色系；子标签按树中顺序使用不同色阶，相同色系的一级标签也区分色阶；徽标前景按底色亮度选择黑／白，确保文字图形对比度。非法颜色拒绝读取，改色、移动、重命名不改变 ID。
+
+`category_presets_version: 1` 标识已补充本次默认分类。不含此字段的旧文件先完成原数据校验，再在内存补充缺失且无同级重名的预设，保留已有 ID、名称、层级、颜色与全部流水；仅在后续成功原子保存时记录标识。带该字段的文件不重新添加已删除分类。时间标签 JSON 版本 1 与事件 CSV 均不受影响。
+
+新账本账户开账余额为零，直接允许记账。备注字段 `notes` 沿用既有格式，支持多行文字和单独修改（含转账、校准）；单独改备注保留金额、账户、日期和余额联动标志。
+
+月统计按年和月匹配本地日历字段，年统计只按年份匹配。支出、收入分别汇总，转账和校准均排除；每层由父类直接账单、子类后代账单组成，显示金额、笔数和当前层总额占比，不重复计算。截图增加 `.test-artifacts/ledger-year-statistics.png` 和 `ledger-statistics-compact.png`，覆盖年度与 1100×740 布局。
+
+## 日合计与录入事务
+
+每日支出与收入仅按记录的本地日历日期和收支类型累计，覆盖所有已保存记录，不受流水分页或标签折叠影响。转账、校准不计入收支合计；旧版不联动余额的收支仍计入统计。修改日期、金额或类型，删除及撤销／重做后重新计算，持久化格式不增加汇总字段。
+
+Enter、数字键盘 Enter、Ctrl+Enter 和保存按钮使用同一批量事务，包含所有已填支出、收入与备注，先完整验证再一次原子写入；失败保留全部输入。隐藏的无效字段会自动展开并获得焦点。中文输入法组词时保留 Enter 交互，左右键编辑光标，上下键在可见金额框间导航并自动滚动。输入框的原生撤销／重做动作连接到账单快照历史，未保存文字不随账单撤销被覆盖。
