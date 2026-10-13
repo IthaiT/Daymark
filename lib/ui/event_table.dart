@@ -10,7 +10,7 @@ import '../domain/event_summary.dart';
 import '../domain/model.dart';
 import 'theme.dart';
 
-enum _TableMode { summary, chronological }
+enum EventTableMode { summary, chronological }
 
 typedef _TableEntry = ({Event? event, EventGroup? group, bool nested});
 
@@ -23,11 +23,13 @@ class EventTable extends StatefulWidget {
     required this.onAdd,
     required this.onContext,
     required this.beforeScroll,
+    required this.mode,
     this.editorId,
     this.editorColumn,
     this.editor,
   });
   final JournalController journal;
+  final EventTableMode mode;
   final void Function(String, EventColumn?) onCell;
   final VoidCallback onBlank;
   final VoidCallback onAdd;
@@ -44,7 +46,7 @@ class EventTableState extends State<EventTable> {
   final vertical = ScrollController();
   final horizontal = ScrollController();
   final _expanded = <EventGroupKey>{};
-  var _mode = _TableMode.summary;
+  EventTableMode get _mode => widget.mode;
   Map<String, Event?> _lastSelection = {};
   late DateTime _day = widget.journal.day;
   static const _rowHeight = 40.0;
@@ -62,7 +64,7 @@ class EventTableState extends State<EventTable> {
     draftIds: widget.journal.drafts.keys.toSet(),
   );
   List<_TableEntry> get _entries {
-    if (_mode == _TableMode.chronological) {
+    if (_mode == EventTableMode.chronological) {
       return [
         for (final event in widget.journal.rows)
           (event: event, group: null, nested: false),
@@ -87,6 +89,7 @@ class EventTableState extends State<EventTable> {
   @override
   void didUpdateWidget(EventTable oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final modeChanged = oldWidget.mode != widget.mode;
     if (_day != widget.journal.day) {
       _day = widget.journal.day;
       _expanded.clear();
@@ -100,15 +103,25 @@ class EventTableState extends State<EventTable> {
     for (final group in _groups) {
       if (group.events.any(
         (event) =>
-            newlySelected.contains(event.id) || event.id == widget.editorId,
+            newlySelected.contains(event.id) ||
+            event.id == widget.editorId ||
+            modeChanged && selected.contains(event.id),
       )) {
         _expanded.add(group.key);
       }
     }
-    if (newlySelected.isNotEmpty) {
-      final id = newlySelected.first;
+    final revealId =
+        newlySelected.firstOrNull ??
+        (modeChanged ? selected.firstOrNull : null);
+    if (modeChanged || revealId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) reveal(id);
+        if (!mounted) return;
+        if (modeChanged && vertical.hasClients) {
+          vertical.jumpTo(0);
+        }
+        if (revealId != null) {
+          reveal(revealId);
+        }
       });
     }
   }
@@ -144,7 +157,7 @@ class EventTableState extends State<EventTable> {
   }
 
   void reveal(String id) {
-    if (_mode == _TableMode.summary) {
+    if (_mode == EventTableMode.summary) {
       final group = _groups
           .where((group) => group.events.any((event) => event.id == id))
           .firstOrNull;
@@ -176,26 +189,6 @@ class EventTableState extends State<EventTable> {
     if (!await widget.beforeScroll() || !mounted) return;
     setState(() {
       if (!_expanded.add(group.key)) _expanded.remove(group.key);
-    });
-  }
-
-  Future<void> _setMode(_TableMode mode) async {
-    if (_mode == mode || !await widget.beforeScroll() || !mounted) return;
-    setState(() {
-      _mode = mode;
-      for (final group in _groups) {
-        if (group.events.any(
-          (event) => widget.journal.selected.contains(event.id),
-        )) {
-          _expanded.add(group.key);
-        }
-      }
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !vertical.hasClients) return;
-      vertical.jumpTo(0);
-      final selected = widget.journal.selected.firstOrNull;
-      if (selected != null) reveal(selected);
     });
   }
 
@@ -420,64 +413,6 @@ class EventTableState extends State<EventTable> {
                 height: constraints.maxHeight,
                 child: Column(
                   children: [
-                    SizedBox(
-                      height: 48,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Row(
-                          children: [
-                            const Text(
-                              '事件明细',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const Spacer(),
-                            SegmentedButton<_TableMode>(
-                              segments: const [
-                                ButtonSegment(
-                                  value: _TableMode.summary,
-                                  label: Text('汇总'),
-                                  icon: Icon(Icons.view_agenda_outlined),
-                                ),
-                                ButtonSegment(
-                                  value: _TableMode.chronological,
-                                  label: Text('时间顺序'),
-                                  icon: Icon(Icons.schedule),
-                                ),
-                              ],
-                              selected: {_mode},
-                              showSelectedIcon: false,
-                              onSelectionChanged: (values) =>
-                                  unawaited(_setMode(values.single)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const Divider(height: 1),
-                    SizedBox(
-                      height: 40,
-                      child: Row(
-                        children: [
-                          for (final (index, label) in [
-                            '事件',
-                            '开始',
-                            '结束',
-                            '标签',
-                            '本日用时',
-                          ].indexed)
-                            SizedBox(
-                              width: widths[index],
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                ),
-                                child: Text(label),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const Divider(height: 1),
                     Expanded(
                       child: Scrollbar(
                         controller: vertical,
@@ -496,7 +431,6 @@ class EventTableState extends State<EventTable> {
                                   height: math.max(
                                     _rowHeight,
                                     constraints.maxHeight -
-                                        90 -
                                         entries.length * _rowHeight,
                                   ),
                                 ),

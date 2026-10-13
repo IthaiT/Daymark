@@ -35,6 +35,7 @@ class JournalScreenState extends State<JournalScreen> {
   EditSession? _edit;
   Future<bool>? _committing;
   bool _calendarOpen = false;
+  EventTableMode _tableMode = EventTableMode.summary;
   @override
   void dispose() {
     _edit?.dispose();
@@ -327,6 +328,11 @@ class JournalScreenState extends State<JournalScreen> {
     );
   }
 
+  Future<void> _setTableMode(EventTableMode mode) async {
+    if (_tableMode == mode || !await commit() || !mounted) return;
+    setState(() => _tableMode = mode);
+  }
+
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
@@ -517,6 +523,27 @@ class JournalScreenState extends State<JournalScreen> {
                                 const SizedBox(height: 24),
                                 Row(
                                   children: [
+                                    SegmentedButton<EventTableMode>(
+                                      segments: const [
+                                        ButtonSegment(
+                                          value: EventTableMode.summary,
+                                          label: Text('汇总'),
+                                          icon: Icon(
+                                            Icons.view_agenda_outlined,
+                                          ),
+                                        ),
+                                        ButtonSegment(
+                                          value: EventTableMode.chronological,
+                                          label: Text('时间顺序'),
+                                          icon: Icon(Icons.schedule),
+                                        ),
+                                      ],
+                                      selected: {_tableMode},
+                                      showSelectedIcon: false,
+                                      onSelectionChanged: (values) => unawaited(
+                                        _setTableMode(values.single),
+                                      ),
+                                    ),
                                     const Spacer(),
                                     FilledButton.icon(
                                       key: const ValueKey('add-event'),
@@ -537,6 +564,7 @@ class JournalScreenState extends State<JournalScreen> {
                                     child: EventTable(
                                       key: _table,
                                       journal: widget.journal,
+                                      mode: _tableMode,
                                       onCell: (id, column) =>
                                           unawaited(_cell(id, column)),
                                       onBlank: () => unawaited(_clear()),

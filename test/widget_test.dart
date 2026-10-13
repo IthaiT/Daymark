@@ -510,10 +510,28 @@ void main() {
     'layout retains all panels, columns, Chinese controls and no tag filtering',
     (tester) async {
       await open(tester);
-      for (final title in ['Daymark', '事件', '开始', '结束', '标签', '本日用时', '新增事件']) {
+      for (final title in ['Daymark', '新增事件', '汇总', '时间顺序']) {
         expect(find.text(title), findsWidgets);
       }
       expect(find.byType(Timeline), findsOneWidget);
+      final table = find.byType(EventTable);
+      for (final title in ['事件明细', '事件', '开始', '结束', '标签', '本日用时']) {
+        expect(
+          find.descendant(of: table, matching: find.text(title)),
+          findsNothing,
+        );
+      }
+      expect(
+        tester.getCenter(find.byType(SegmentedButton<EventTableMode>)).dy,
+        closeTo(
+          tester.getCenter(find.byKey(const ValueKey('add-event'))).dy,
+          .1,
+        ),
+      );
+      expect(
+        tester.getTopLeft(cell('a', 'title')).dy,
+        closeTo(tester.getTopLeft(table).dy, .1),
+      );
       await tester.tap(find.byKey(const ValueKey('tag-work')));
       await tester.pumpAndSettle();
       expect(cell('a', 'title'), findsOneWidget);
