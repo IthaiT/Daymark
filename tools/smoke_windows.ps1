@@ -58,6 +58,54 @@ public static class DaymarkPrivateDesktop {
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
 
+    static int Read16(byte[] bytes, int offset) => (bytes[offset] << 8) | bytes[offset + 1];
+    static uint Read32(byte[] bytes, int offset) =>
+        ((uint)Read16(bytes, offset) << 16) | (uint)Read16(bytes, offset + 2);
+    static bool HasGlyph(byte[] bytes, int cmap, int codepoint) {
+        for (int table = 0; table < Read16(bytes, cmap + 2); table++) {
+            int record = cmap + 4 + table * 8;
+            int platform = Read16(bytes, record), encoding = Read16(bytes, record + 2);
+            if (platform != 0 && !(platform == 3 && (encoding == 1 || encoding == 10))) continue;
+            int subtable = cmap + checked((int)Read32(bytes, record + 4));
+            int format = Read16(bytes, subtable);
+            if (format == 4) {
+                int count = Read16(bytes, subtable + 6) / 2;
+                for (int segment = 0; segment < count; segment++) {
+                    int end = Read16(bytes, subtable + 14 + segment * 2);
+                    int start = Read16(bytes, subtable + 16 + count * 2 + segment * 2);
+                    if (codepoint < start || codepoint > end) continue;
+                    int delta = Read16(bytes, subtable + 16 + count * 4 + segment * 2);
+                    int rangePosition = subtable + 16 + count * 6 + segment * 2;
+                    int range = Read16(bytes, rangePosition);
+                    int glyph = range == 0 ? codepoint : Read16(bytes, rangePosition + range + (codepoint - start) * 2);
+                    if ((range == 0 || glyph != 0) && ((glyph + delta) & 0xffff) != 0) return true;
+                }
+            } else if (format == 12) {
+                for (uint group = 0; group < Read32(bytes, subtable + 12); group++) {
+                    int position = subtable + 16 + checked((int)group * 12);
+                    uint start = Read32(bytes, position), end = Read32(bytes, position + 4);
+                    if (codepoint >= start && codepoint <= end && Read32(bytes, position + 8) + codepoint - start != 0) return true;
+                }
+            }
+        }
+        return false;
+    }
+    static void CheckIconFont(string executable) {
+        var bytes = File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(executable), "data", "flutter_assets", "fonts", "MaterialIcons-Regular.otf"));
+        int cmap = -1;
+        for (int table = 0; table < Read16(bytes, 4); table++) {
+            int record = 12 + table * 16;
+            if (Encoding.ASCII.GetString(bytes, record, 4) == "cmap") cmap = checked((int)Read32(bytes, record + 8));
+        }
+        // Incremental Windows builds can retain an icon subset from older Dart code.
+        // These codepoints correspond to the journal view switch's actual Material icons.
+        foreach (int codepoint in new[] {0xe556, 0xf48f}) {
+            if (cmap < 0 || !HasGlyph(bytes, cmap, codepoint)) {
+                throw new Exception($"Release icon font is missing U+{codepoint:X4}. Regenerate Flutter assets by invalidating release_bundle_windows-x64_assets.stamp before rebuilding.");
+            }
+        }
+    }
+
     static Process Launch(string executable, string directory, string desktop) {
         using var log = new FileStream(Path.Combine(directory, "native-" + Guid.NewGuid().ToString("N") + ".log"),
             FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
@@ -117,6 +165,7 @@ public static class DaymarkPrivateDesktop {
         }
     }
     public static void Run(string executable, string directory, string gapStart, string gapEnd) {
+        CheckIconFont(executable);
         // No DESKTOP_SWITCHDESKTOP access; never activate or fall back to the input desktop.
         string name = "DaymarkSmoke-" + Guid.NewGuid().ToString("N");
         IntPtr desktop = CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x87, IntPtr.Zero);
@@ -168,4 +217,4 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: journal view icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"

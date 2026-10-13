@@ -132,11 +132,19 @@ flutter test
 git diff --check
 ```
 
-验证 Windows Release 的真实启动、CSV BOM / 空档同步、第二实例拒绝和退出释放锁（合成数据、不可激活的私有桌面）：
+验证 Windows Release 的图标字体、真实启动、CSV BOM / 空档同步、第二实例拒绝和退出释放锁（合成数据、不可激活的私有桌面）：
 
 ```powershell
 flutter build windows --release
 ./tools/smoke_windows.ps1
+```
+
+检查会确认发布字体包含「时间顺序」和「汇总」图标。当前 Flutter SDK 的 Windows 增量构建可能保留旧的图标子集；若提示缺少图形，删除 `.dart_tool/flutter_build/*/release_bundle_windows-x64_assets.stamp` 文件后重新构建，再运行检查。
+
+界面截图也可以使用发布包的实际字体验证：
+
+```powershell
+flutter test test/widget_test.dart --plain-name 'renders a deterministic synthetic screenshot' --dart-define=DAYMARK_ICON_FONT=build/windows/x64/runner/Release/data/flutter_assets/fonts/MaterialIcons-Regular.otf
 ```
 
 原生检查需要 Windows 桌面会话，私有桌面创建失败时直接停止；不会切换桌面或回退到当前桌面。所有测试工件位于 `.test-artifacts/`，不读取个人数据。CI 在 Windows 上执行格式化、静态检查、测试和 Release 构建。

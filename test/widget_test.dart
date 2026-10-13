@@ -1345,6 +1345,9 @@ void main() {
         ),
       ];
       for (final entry in fonts) {
+        if (entry.$1 == 'MaterialIcons') {
+          expect(File(entry.$2).existsSync(), isTrue, reason: entry.$2);
+        }
         if (File(entry.$2).existsSync()) {
           final data = await tester.runAsync(
             () => File(entry.$2).readAsBytes(),
