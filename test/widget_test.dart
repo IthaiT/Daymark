@@ -82,8 +82,8 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(DaymarkApp(journal: journal));
     await tester.pumpAndSettle();
-    if (!grouped) {
-      await tester.tap(find.text('时间顺序'));
+    if (grouped) {
+      await tester.tap(find.text('汇总'));
       await tester.pumpAndSettle();
     }
   }
@@ -515,6 +515,38 @@ void main() {
       }
       expect(find.byType(Timeline), findsOneWidget);
       final table = find.byType(EventTable);
+      final viewSwitch = find.byType(SegmentedButton<EventTableMode>);
+      expect(
+        tester.widget<EventTable>(table).mode,
+        EventTableMode.chronological,
+      );
+      expect(
+        tester
+            .widget<SegmentedButton<EventTableMode>>(viewSwitch)
+            .segments
+            .map((segment) => segment.value),
+        [EventTableMode.chronological, EventTableMode.summary],
+      );
+      expect(
+        tester.getCenter(find.text('时间顺序')).dx,
+        lessThan(tester.getCenter(find.text('汇总')).dx),
+      );
+      for (final mode in [
+        EventTableMode.summary,
+        EventTableMode.chronological,
+      ]) {
+        for (final icon in [Icons.schedule, Icons.view_agenda_outlined]) {
+          expect(
+            find.descendant(of: viewSwitch, matching: find.byIcon(icon)),
+            findsOneWidget,
+          );
+        }
+        await tester.tap(
+          find.text(mode == EventTableMode.summary ? '汇总' : '时间顺序'),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.widget<EventTable>(table).mode, mode);
+      }
       for (final title in ['事件明细', '事件', '开始', '结束', '标签', '本日用时']) {
         expect(
           find.descendant(of: table, matching: find.text(title)),
@@ -1305,7 +1337,11 @@ void main() {
         ('Microsoft YaHei UI', 'C:/Windows/Fonts/msyh.ttc'),
         (
           'MaterialIcons',
-          '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+          const String.fromEnvironment(
+            'DAYMARK_ICON_FONT',
+            defaultValue:
+                '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+          ),
         ),
       ];
       for (final entry in fonts) {
@@ -1362,6 +1398,8 @@ void main() {
       await key(tester, LogicalKeyboardKey.escape);
       final summaryTag = await seedSummary();
       await journal.initialize();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('汇总'));
       await tester.pumpAndSettle();
       for (final expanded in [false, true]) {
         if (expanded) {

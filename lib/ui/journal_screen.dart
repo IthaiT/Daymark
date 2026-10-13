@@ -35,7 +35,7 @@ class JournalScreenState extends State<JournalScreen> {
   EditSession? _edit;
   Future<bool>? _committing;
   bool _calendarOpen = false;
-  EventTableMode _tableMode = EventTableMode.summary;
+  EventTableMode _tableMode = EventTableMode.chronological;
   @override
   void dispose() {
     _edit?.dispose();
@@ -526,16 +526,16 @@ class JournalScreenState extends State<JournalScreen> {
                                     SegmentedButton<EventTableMode>(
                                       segments: const [
                                         ButtonSegment(
+                                          value: EventTableMode.chronological,
+                                          label: Text('时间顺序'),
+                                          icon: Icon(Icons.schedule),
+                                        ),
+                                        ButtonSegment(
                                           value: EventTableMode.summary,
                                           label: Text('汇总'),
                                           icon: Icon(
                                             Icons.view_agenda_outlined,
                                           ),
-                                        ),
-                                        ButtonSegment(
-                                          value: EventTableMode.chronological,
-                                          label: Text('时间顺序'),
-                                          icon: Icon(Icons.schedule),
                                         ),
                                       ],
                                       selected: {_tableMode},
