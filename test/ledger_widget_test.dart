@@ -138,7 +138,7 @@ void main() {
   });
 
   testWidgets(
-    'Enter allows independent continuous entries, Tab reaches next amount, batch is atomic',
+    'Enter saves every filled row atomically and Tab reaches the next amount',
     (tester) async {
       await open(tester);
       expect(find.byIcon(Icons.undo), findsNothing);
@@ -153,8 +153,15 @@ void main() {
         isTrue,
       );
       await tester.enterText(quick('lunch'), '28');
+      final firstWrites = writes;
       await enter(tester);
-      expect(store.state.accounts[cashAccountId]!.balanceCents, 997200);
+      expect(writes, firstWrites + 1);
+      expect(store.state.records.length, 2);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 996400);
+      expect(
+        tester.widget<TextField>(quick('breakfast')).controller!.text,
+        isEmpty,
+      );
       expect(
         tester.widget<TextField>(quick('lunch')).controller!.text,
         isEmpty,
@@ -165,8 +172,8 @@ void main() {
       );
       await tester.enterText(quick('lunch'), '12');
       await enter(tester);
-      expect(store.state.records.length, 2);
-      expect(store.state.accounts[cashAccountId]!.balanceCents, 996000);
+      expect(store.state.records.length, 3);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 995200);
       await tester.enterText(quick('dinner'), '20');
       final previousWrites = writes;
       await tester.tap(find.byKey(const ValueKey('save-all-money')));
@@ -179,15 +186,15 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
-      expect(store.state.accounts[cashAccountId]!.balanceCents, 996000);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 995200);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyY);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
       expect(store.state.accounts[cashAccountId]!.balanceCents, 993200);
       await shortcut(tester, LogicalKeyboardKey.keyZ);
-      expect(store.state.records.length, 2);
-      expect(store.state.accounts[cashAccountId]!.balanceCents, 996000);
+      expect(store.state.records.length, 3);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 995200);
       await shortcut(tester, LogicalKeyboardKey.keyZ, shift: true);
       expect(store.state.accounts[cashAccountId]!.balanceCents, 993200);
     },
@@ -820,6 +827,147 @@ void main() {
       expect(store.state.records[id]!.notes, '转账备注\n第二行');
       expect(store.state.accounts[cashAccountId]!.balanceCents, 999000);
       expect(store.state.accounts[investmentAccountId]!.balanceCents, 301000);
+    },
+  );
+  testWidgets(
+    'physical Enter and numpad Enter save all kinds including collapsed drafts',
+    (tester) async {
+      await open(tester);
+      await tester.enterText(quick('breakfast'), '8');
+      await tester.enterText(quick('lunch'), '28');
+      await tester.tap(find.byKey(const ValueKey('ledger-fold-food')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('收入标签'));
+      await tester.pumpAndSettle();
+      await tester.enterText(quick('salary'), '100');
+      final beforeWrites = writes;
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(writes, beforeWrites + 1);
+      expect(store.state.records.length, 3);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1006400);
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.records, isEmpty);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
+      await shortcut(tester, LogicalKeyboardKey.keyY);
+      expect(store.state.records.length, 3);
+      await tester.enterText(quick('salary'), '20');
+      await tester.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 4);
+      expect(
+        tester.widget<TextField>(quick('salary')).controller!.text,
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets(
+    'up and down move between visible amount fields and scroll while horizontal keys edit',
+    (tester) async {
+      await open(tester, size: const Size(1100, 740));
+      await tester.enterText(quick('breakfast'), '8');
+      await tester.enterText(quick('lunch'), '28');
+      final breakfast = tester.widget<TextField>(quick('breakfast'));
+      final lunch = tester.widget<TextField>(quick('lunch'));
+      breakfast.focusNode!.requestFocus();
+      breakfast.controller!.selection = const TextSelection.collapsed(
+        offset: 0,
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(lunch.focusNode!.hasFocus, isTrue);
+      expect(lunch.controller!.selection.extentOffset, 0);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(lunch.controller!.selection.extentOffset, 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(breakfast.focusNode!.hasFocus, isTrue);
+      expect(breakfast.controller!.selection.extentOffset, 1);
+      for (var i = 0; i < 25; i++) {
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+      }
+      expect(
+        tester.widget<TextField>(quick('other-expense')).focusNode!.hasFocus,
+        isTrue,
+      );
+      expect(
+        tester.getRect(quick('other-expense')).bottom,
+        lessThanOrEqualTo(
+          tester.getRect(find.byKey(const ValueKey('ledger-tags'))).bottom,
+        ),
+      );
+      expect(store.state.records, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'native editing undo actions restore ledger transactions and retain unsaved text after failures',
+    (tester) async {
+      await open(tester);
+      await tester.enterText(quick('breakfast'), '8');
+      await tester.enterText(quick('lunch'), '28');
+      await enter(tester);
+      await tester.enterText(quick('lunch'), '83');
+      await tester.pump(const Duration(milliseconds: 600));
+      fail = true;
+      Actions.invoke(
+        FocusManager.instance.primaryFocus!.context!,
+        const UndoTextIntent(SelectionChangedCause.keyboard),
+      );
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 2);
+      expect(tester.widget<TextField>(quick('lunch')).controller!.text, '83');
+      expect(ledger.history.canUndo, isTrue);
+      fail = false;
+      Actions.invoke(
+        FocusManager.instance.primaryFocus!.context!,
+        const UndoTextIntent(SelectionChangedCause.keyboard),
+      );
+      await tester.pumpAndSettle();
+      expect(store.state.records, isEmpty);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
+      expect(tester.widget<TextField>(quick('lunch')).controller!.text, '83');
+      Actions.invoke(
+        FocusManager.instance.primaryFocus!.context!,
+        const RedoTextIntent(SelectionChangedCause.keyboard),
+      );
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 2);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 996400);
+      expect(tester.widget<TextField>(quick('lunch')).controller!.text, '83');
+    },
+  );
+
+  testWidgets(
+    'Enter validates hidden income drafts before writing any rows and reveals the bad field',
+    (tester) async {
+      await open(tester);
+      await tester.tap(find.text('收入标签'));
+      await tester.pumpAndSettle();
+      await tester.enterText(quick('salary'), 'bad');
+      await tester.tap(find.text('支出标签'));
+      await tester.pumpAndSettle();
+      await tester.enterText(quick('lunch'), '28');
+      final beforeWrites = writes;
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(writes, beforeWrites);
+      expect(store.state.records, isEmpty);
+      expect(
+        tester.widget<TextField>(quick('salary')).focusNode!.hasFocus,
+        isTrue,
+      );
+      expect(tester.widget<TextField>(quick('salary')).controller!.text, 'bad');
+      await tester.enterText(quick('salary'), '100');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 2);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1007200);
     },
   );
 }

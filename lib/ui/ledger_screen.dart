@@ -132,105 +132,130 @@ class _LedgerScreenState extends State<LedgerScreen> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
-    builder: (context, _) => CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+    builder: (context, _) => Actions(
+      actions: {
+        // Text fields expose overridable undo actions; these must use ledger history.
+        UndoTextIntent: CallbackAction<UndoTextIntent>(
+          onInvoke: (_) {
             unawaited(
               _action(() async {
                 await widget.ledger.undo();
               }),
-            ),
-        const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
+            );
+            return null;
+          },
+        ),
+        RedoTextIntent: CallbackAction<RedoTextIntent>(
+          onInvoke: (_) {
             unawaited(
               _action(() async {
                 await widget.ledger.redo();
               }),
-            ),
-        const SingleActivator(
-          LogicalKeyboardKey.keyZ,
-          control: true,
-          shift: true,
-        ): () => unawaited(
-          _action(() async {
-            await widget.ledger.redo();
-          }),
+            );
+            return null;
+          },
         ),
-        const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
-            unawaited(_sidebar.currentState?.saveAll() ?? Future.value()),
       },
-      child: Focus(
-        focusNode: _focus,
-        autofocus: true,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              width: 320,
-              child: LedgerSidebar(
-                key: _sidebar,
-                ledger: widget.ledger,
-                onError: _showError,
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): () =>
+              unawaited(
+                _action(() async {
+                  await widget.ledger.undo();
+                }),
               ),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  children: [
-                    _balances(context),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton.icon(
-                          key: const ValueKey('add-income'),
-                          onPressed: _saving || widget.ledger.busy
-                              ? null
-                              : () => unawaited(
-                                  showMoneyEditor(
-                                    context,
-                                    widget.ledger,
-                                    kind: MoneyKind.income,
-                                  ),
-                                ),
-                          icon: const Icon(Icons.add),
-                          label: const Text('记收入'),
-                        ),
-                        TextButton.icon(
-                          onPressed: _saving || widget.ledger.busy
-                              ? null
-                              : () => unawaited(
-                                  showMoneyMovement(
-                                    context,
-                                    widget.ledger,
-                                    MoneyKind.transfer,
-                                  ),
-                                ),
-                          icon: const Icon(Icons.swap_horiz),
-                          label: const Text('转账'),
-                        ),
-                        TextButton.icon(
-                          onPressed: _saving || widget.ledger.busy
-                              ? null
-                              : () => unawaited(
-                                  showMoneyMovement(
-                                    context,
-                                    widget.ledger,
-                                    MoneyKind.adjustment,
-                                  ),
-                                ),
-                          icon: const Icon(Icons.balance),
-                          label: const Text('余额校准'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(child: _browse(context)),
-                  ],
+          const SingleActivator(LogicalKeyboardKey.keyY, control: true): () =>
+              unawaited(
+                _action(() async {
+                  await widget.ledger.redo();
+                }),
+              ),
+          const SingleActivator(
+            LogicalKeyboardKey.keyZ,
+            control: true,
+            shift: true,
+          ): () => unawaited(
+            _action(() async {
+              await widget.ledger.redo();
+            }),
+          ),
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () =>
+              unawaited(_sidebar.currentState?.saveAll() ?? Future.value()),
+        },
+        child: Focus(
+          focusNode: _focus,
+          autofocus: true,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: 320,
+                child: LedgerSidebar(
+                  key: _sidebar,
+                  ledger: widget.ledger,
+                  onError: _showError,
                 ),
               ),
-            ),
-          ],
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      _balances(context),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton.icon(
+                            key: const ValueKey('add-income'),
+                            onPressed: _saving || widget.ledger.busy
+                                ? null
+                                : () => unawaited(
+                                    showMoneyEditor(
+                                      context,
+                                      widget.ledger,
+                                      kind: MoneyKind.income,
+                                    ),
+                                  ),
+                            icon: const Icon(Icons.add),
+                            label: const Text('记收入'),
+                          ),
+                          TextButton.icon(
+                            onPressed: _saving || widget.ledger.busy
+                                ? null
+                                : () => unawaited(
+                                    showMoneyMovement(
+                                      context,
+                                      widget.ledger,
+                                      MoneyKind.transfer,
+                                    ),
+                                  ),
+                            icon: const Icon(Icons.swap_horiz),
+                            label: const Text('转账'),
+                          ),
+                          TextButton.icon(
+                            onPressed: _saving || widget.ledger.busy
+                                ? null
+                                : () => unawaited(
+                                    showMoneyMovement(
+                                      context,
+                                      widget.ledger,
+                                      MoneyKind.adjustment,
+                                    ),
+                                  ),
+                            icon: const Icon(Icons.balance),
+                            label: const Text('余额校准'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(child: _browse(context)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     ),

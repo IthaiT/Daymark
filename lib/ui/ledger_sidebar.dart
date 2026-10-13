@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../application/ledger_controller.dart';
 import '../domain/ledger.dart';
@@ -36,6 +37,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
   late final _date = TextEditingController(text: dateText(_day));
   MoneyKind _kind = MoneyKind.expense;
   bool _saving = false;
+  bool _movingFocus = false;
   LedgerState get _state => widget.ledger.state;
   bool get _busy => _saving || widget.ledger.busy;
   @override
@@ -77,7 +79,101 @@ class LedgerSidebarState extends State<LedgerSidebar> {
     }
   }
 
-  Future<void> saveAll() => _save(_entries.keys.toList());
+  Future<void> saveAll({String? focusId}) =>
+      _save(_entries.keys.toList(), focusId: focusId);
+
+  Future<void> _focusAmount(String id, {int direction = 1, int? caret}) async {
+    final entry = _entries[id];
+    if (entry == null) return;
+    var fieldContext = entry.focus.context;
+    while (mounted && fieldContext == null && _scroll.hasClients) {
+      final position = _scroll.position;
+      final next =
+          (position.pixels + direction * position.viewportDimension * .7).clamp(
+            position.minScrollExtent,
+            position.maxScrollExtent,
+          );
+      if (next == position.pixels) break;
+      await _scroll.animateTo(
+        next,
+        duration: const Duration(milliseconds: 100),
+        curve: Curves.easeOut,
+      );
+      if (!mounted) return;
+      fieldContext = entry.focus.context;
+    }
+    if (!mounted || fieldContext == null || !fieldContext.mounted) return;
+    entry.focus.requestFocus();
+    if (caret != null) {
+      entry.amount.selection = TextSelection.collapsed(
+        offset: caret.clamp(0, entry.amount.text.length),
+      );
+    }
+    await Scrollable.ensureVisible(
+      fieldContext,
+      duration: const Duration(milliseconds: 100),
+      alignmentPolicy: direction > 0
+          ? ScrollPositionAlignmentPolicy.keepVisibleAtEnd
+          : ScrollPositionAlignmentPolicy.keepVisibleAtStart,
+    );
+  }
+
+  Future<void> _moveAmount(String id, int direction) async {
+    if (_busy || _movingFocus) return;
+    final categories = _categories();
+    final index = categories.indexWhere((item) => item.id == id);
+    final next = index + direction;
+    if (index < 0 || next < 0 || next >= categories.length) return;
+    _movingFocus = true;
+    try {
+      await _focusAmount(
+        categories[next].id,
+        direction: direction,
+        caret: _entries[id]!.amount.selection.extentOffset,
+      );
+    } finally {
+      _movingFocus = false;
+    }
+  }
+
+  Future<void> _revealInvalid(String id) async {
+    setState(() {
+      _kind = _state.categories[id]!.kind;
+      for (final parent in _state.ancestors(id)) {
+        _collapsed.remove(parent.id);
+      }
+    });
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    await WidgetsBinding.instance.endOfFrame;
+    if (mounted) await _focusAmount(id);
+  }
+
+  Widget _entryShortcuts(
+    String id,
+    TextEditingController controller,
+    Widget child, {
+    bool arrows = false,
+  }) => ValueListenableBuilder<TextEditingValue>(
+    valueListenable: controller,
+    child: child,
+    builder: (context, value, child) => CallbackShortcuts(
+      bindings: {
+        if (!value.composing.isValid || value.composing.isCollapsed) ...{
+          const SingleActivator(LogicalKeyboardKey.enter): () =>
+              unawaited(saveAll(focusId: id)),
+          const SingleActivator(LogicalKeyboardKey.numpadEnter): () =>
+              unawaited(saveAll(focusId: id)),
+          if (arrows) ...{
+            const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
+                unawaited(_moveAmount(id, -1)),
+            const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
+                unawaited(_moveAmount(id, 1)),
+          },
+        },
+      },
+      child: child!,
+    ),
+  );
 
   Future<void> _save(List<String> ids, {String? focusId}) async {
     if (_busy) return;
@@ -87,8 +183,9 @@ class LedgerSidebarState extends State<LedgerSidebar> {
       final selected = ids
           .where(
             (id) =>
-                _state.categories[id]?.kind == _kind &&
-                _entries[id]?.amount.text.trim().isNotEmpty == true,
+                _state.categories.containsKey(id) &&
+                (_entries[id]!.amount.text.trim().isNotEmpty ||
+                    _entries[id]!.notes.text.trim().isNotEmpty),
           )
           .toList();
       if (selected.isEmpty) throw const FormatException('请填写金额。');
@@ -100,14 +197,14 @@ class LedgerSidebarState extends State<LedgerSidebar> {
           cents = parseMoney(entry.amount.text);
           if (cents <= 0) throw const FormatException('金额必须大于零。');
         } on FormatException catch (error) {
-          entry.focus.requestFocus();
+          await _revealInvalid(id);
           throw FormatException(
             '${_state.categories[id]!.name}：${error.message}',
           );
         }
         inputs.add(
           MoneyInput(
-            kind: _kind,
+            kind: _state.categories[id]!.kind,
             amountCents: cents,
             date: date,
             categoryId: id,
@@ -448,23 +545,27 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                     width: 82,
                     child: FocusTraversalOrder(
                       order: NumericFocusOrder(index * 2.0),
-                      child: TextField(
-                        key: ValueKey('quick-${category.id}'),
-                        controller: entry.amount,
-                        focusNode: entry.focus,
-                        readOnly: _busy,
-                        decoration: const InputDecoration(
-                          prefixText: '¥ ',
-                          hintText: '金额',
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 10,
+                      child: _entryShortcuts(
+                        category.id,
+                        entry.amount,
+                        TextField(
+                          key: ValueKey('quick-${category.id}'),
+                          controller: entry.amount,
+                          focusNode: entry.focus,
+                          readOnly: _busy,
+                          decoration: const InputDecoration(
+                            prefixText: '¥ ',
+                            hintText: '金额',
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 10,
+                            ),
                           ),
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) =>
+                              unawaited(saveAll(focusId: category.id)),
                         ),
-                        textInputAction: TextInputAction.done,
-                        onSubmitted: (_) => unawaited(
-                          _save([category.id], focusId: category.id),
-                        ),
+                        arrows: true,
                       ),
                     ),
                   ),
@@ -547,14 +648,18 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                   padding: const EdgeInsets.only(top: 8, left: 24),
                   child: FocusTraversalOrder(
                     order: NumericFocusOrder(index * 2.0 + 1),
-                    child: TextField(
-                      key: ValueKey('quick-notes-${category.id}'),
-                      controller: entry.notes,
-                      readOnly: _busy,
-                      decoration: const InputDecoration(hintText: '备注（可选）'),
-                      maxLines: 2,
-                      onSubmitted: (_) =>
-                          unawaited(_save([category.id], focusId: category.id)),
+                    child: _entryShortcuts(
+                      category.id,
+                      entry.notes,
+                      TextField(
+                        key: ValueKey('quick-notes-${category.id}'),
+                        controller: entry.notes,
+                        readOnly: _busy,
+                        decoration: const InputDecoration(hintText: '备注（可选）'),
+                        maxLines: 2,
+                        onSubmitted: (_) =>
+                            unawaited(saveAll(focusId: category.id)),
+                      ),
                     ),
                   ),
                 ),
