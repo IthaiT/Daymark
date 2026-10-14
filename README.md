@@ -2,7 +2,7 @@
 
 一个本地运行的 Flutter / Dart 桌面时间记录与记账工具。
 
-Windows 界面采用标准 Material 3 和 Material 内置色板。标签写入 JSON，事件写入 CSV，兼容原版数据；不需要 Web 服务。
+Windows 界面采用共享的 Material 3 主题、面板和标签组件，内置 Noto Sans SC 中英文字体与 Material 色板。时间记录和记账的背景、字号、间距、圆角与控件一致，具体结构见 [共享 UI 规范](docs/ui-system.md)。标签写入 JSON，事件写入 CSV，兼容原版数据；不需要 Web 服务。
 
 ## 开发环境
 
@@ -52,9 +52,9 @@ flutter run -d windows
 
 ## 记账
 
-左侧窄图标栏切换「时间记录」和「记账」，悬停显示名称。记账左侧为独立的彩色标签树，点击标签聚焦金额框，按住 250 毫秒后拖到另一标签或标题空白处改变父级；也支持展开／折叠及右键新增／修改／删除，管理入口可调整常用顺序。移动和改名保留标签 ID 与历史账单关联，收支标签与时间标签独立。
+左侧窄图标栏切换「时间记录」和「记账」，悬停显示名称。记账左侧为独立的彩色标签树，点击标签聚焦金额框，按住 250 毫秒后拖动：行上方／下方的插入线调整同级顺序，中间高亮区域改变父级，标题空白处移至一级。主标签和子标签均支持排序，层级与顺序一次保存并可撤销；没有固定状态或三点菜单。展开／折叠及右键新增／修改／删除保持可用，管理窗口支持点击或右键编辑。移动和改名保留标签 ID 与历史账单关联，收支标签与时间标签独立。
 
-记账工作区使用统一的浅灰背景、白色圆角面板与青绿色操作强调，标题栏与侧栏背景连贯；标签徽标使用柔和底色和深色图标，统计图与明细进度条使用一致的 Material 色系。布局参考 [Material 3 的界面层级规范](https://m3.material.io/styles/color/the-color-system) 和 [Actual Budget 的桌面报表](https://actualbudget.org/docs/reports/)。
+两个工作区使用统一的浅灰背景、白色圆角面板与青绿色操作强调，标题栏与侧栏背景连贯；标签徽标使用柔和底色和深色图标，统计图与明细进度条使用一致的 Material 色系。布局参考 [Material 3 的界面层级规范](https://m3.material.io/styles/color/the-color-system)、[Actual Budget 的桌面报表](https://actualbudget.org/docs/reports/) 和 [Linear 的界面层级整理](https://linear.app/now/how-we-redesigned-the-linear-ui)。
 
 新账本直接从零开始，无需填写初始化资金。已有账本保留原余额与全部历史账单；历史收支不会再次扣款。日常收支关联现金，现金可包含纸币、银行卡、微信与支付宝余额的合计；需要设置实际资金时使用「余额校准」。
 
@@ -80,7 +80,7 @@ flutter run -d windows
 | --- | --- |
 | `tags.json` | 标签 ID、名称、父标签 ID，带版本号 |
 | `events.csv` | 事件名称、标签 ID、开始/结束时间、备注 |
-| `ledger.json` | 记账标签、颜色、常用顺序、资金账户、余额及带备注的流水，独立版本 2 |
+| `ledger.json` | 记账标签、颜色、拖动顺序、资金账户、余额及带备注的流水，独立版本 2 |
 | `.daymark.lock` | 防止两个窗口同时写入同一个数据目录的锁 |
 
 标签示例：
@@ -148,8 +148,8 @@ git diff --check
 界面截图也可以使用发布包的实际字体验证：
 
 ```powershell
-flutter test test/widget_test.dart --plain-name 'renders a deterministic synthetic screenshot' --dart-define=DAYMARK_ICON_FONT=build/windows/x64/runner/Release/data/flutter_assets/fonts/MaterialIcons-Regular.otf
-flutter test test/ledger_widget_test.dart --plain-name 'synthetic screenshots' --dart-define=DAYMARK_ICON_FONT=build/windows/x64/runner/Release/data/flutter_assets/fonts/MaterialIcons-Regular.otf
+flutter test test/widget_test.dart --plain-name 'renders a deterministic synthetic screenshot' --dart-define=DAYMARK_ICON_FONT=build/windows/x64/runner/Release/data/flutter_assets/fonts/MaterialIcons-Regular.otf --dart-define=DAYMARK_TEXT_FONT=build/windows/x64/runner/Release/data/flutter_assets/assets/fonts/NotoSansSC.ttf
+flutter test test/ledger_widget_test.dart --plain-name 'synthetic screenshots' --dart-define=DAYMARK_ICON_FONT=build/windows/x64/runner/Release/data/flutter_assets/fonts/MaterialIcons-Regular.otf --dart-define=DAYMARK_TEXT_FONT=build/windows/x64/runner/Release/data/flutter_assets/assets/fonts/NotoSansSC.ttf
 ```
 
 原生检查需要 Windows 桌面会话，私有桌面创建失败时直接停止；不会切换桌面或回退到当前桌面。所有测试工件位于 `.test-artifacts/`，不读取个人数据。CI 在 Windows 上执行格式化、静态检查、测试和 Release 构建。
