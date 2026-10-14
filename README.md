@@ -2,7 +2,7 @@
 
 一个本地运行的 Flutter / Dart 桌面时间记录与记账工具。
 
-Windows 界面采用共享的 Material 3 主题、面板和标签组件，内置 Noto Sans SC 中英文字体与 Material 色板。时间记录和记账的背景、字号、间距、圆角与控件一致，具体结构见 [共享 UI 规范](docs/ui-system.md)。标签写入 JSON，事件写入 CSV，兼容原版数据；不需要 Web 服务。
+Windows 界面采用共享的 Material 3 主题、面板和标签组件，内置 Noto Sans SC 中英文字体与 Material 色板。时间记录和记账的背景、字号、间距、圆角与控件一致。标签写入 JSON，事件写入 CSV，兼容原版数据；不需要 Web 服务。
 
 ## 开发环境
 
@@ -101,7 +101,7 @@ CSV 列固定为 `id,title,tag_id,start,end,notes`。时间格式为 `2026-10-07
 
 记账数据首次成功保存时才创建。`ledger.json` 中所有金额均为整数分，日期为无时区的 `YYYY-MM-DD`。`default_cash_account_id` 明确指定默认现金账户，流水保存 `account_id` 和 `affects_balance`，转账另存 `to_account_id`，校准金额为有符号差额；不依据账户名称或流水日期猜测余额关联。账户开账余额加上所有关联流水影响必须等于当前余额，读取时校验不一致会停止启动并保留原文件。记账账户与流水一次原子替换，不改动版本 1 的时间标签 JSON 和六列事件 CSV。
 
-兼容记账版本 1 的 `accounts/categories/records/pinned` 结构（账户 `balance_cents`、流水 `amount_cents`，其余字段见 [格式说明](docs/ledger-format.md)）：保留余额、分类 ID 和全部收支，历史流水标记为不影响余额。无需初始化，首次成功保存升级为版本 2，不回放旧收支。不存在记账文件的原版时间记录目录可以直接使用。该兼容结构以合成样本测试验证。
+兼容记账版本 1 的 `accounts/categories/records/pinned` 结构（账户 `balance_cents`、流水 `amount_cents`）：保留余额、分类 ID 和全部收支，历史流水标记为不影响余额。无需初始化，首次成功保存升级为版本 2，不回放旧收支。不存在记账文件的原版时间记录目录可以直接使用。该兼容结构以合成样本测试验证。
 
 旧版数据可以直接读取，启动时同步派生空档。已有秒数在只修改名称或分类时会保留。旧记录缺少结束时间时，列表显示「待补全」；补齐时间后才会显示在时间轴上。
 
