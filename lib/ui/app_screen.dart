@@ -152,6 +152,9 @@ class _AppScreenState extends State<AppScreen> {
                     FocusScope(
                       node: _journalScope,
                       canRequestFocus: _page == 0,
+                      // Re-enable descendants explicitly on this retained node.
+                      descendantsAreFocusable: _page == 0,
+                      descendantsAreTraversable: _page == 0,
                       child: JournalScreen(
                         key: _journal,
                         journal: widget.journal,
@@ -160,6 +163,8 @@ class _AppScreenState extends State<AppScreen> {
                     ),
                     FocusScope(
                       canRequestFocus: _page == 1,
+                      descendantsAreFocusable: _page == 1,
+                      descendantsAreTraversable: _page == 1,
                       child: _visitedLedger
                           ? LedgerScreen(
                               ledger: widget.ledger,

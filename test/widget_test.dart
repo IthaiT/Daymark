@@ -4,7 +4,9 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:daymark/application/journal_controller.dart';
+import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
+import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/event_summary.dart';
@@ -1228,6 +1230,68 @@ void main() {
         isFalse,
       );
     },
+  );
+
+  testWidgets(
+    'full workspace double clicks focus title inputs without forced test focus',
+    (tester) async {
+      await open(tester);
+      final ledgerStore = (await tester.runAsync(
+        () => LedgerStore.open(directory, writer: (_, _) async {}),
+      ))!;
+      final ledger = LedgerController(ledgerStore);
+      addTearDown(ledger.dispose);
+      await tester.pumpWidget(DaymarkApp(journal: journal, ledger: ledger));
+      await tester.pumpAndSettle();
+
+      Future<void> typeTitle(String title) async {
+        final field = tester.widget<TextField>(input('a', 'title'));
+        expect(
+          field.focusNode!.hasPrimaryFocus,
+          isTrue,
+          reason:
+              '$title: ${FocusManager.instance.primaryFocus}; '
+              'canRequestFocus=${field.focusNode!.canRequestFocus}',
+        );
+        expect(tester.testTextInput.hasAnyClients, isTrue);
+        tester.testTextInput.enterText(title);
+        await tester.pump();
+        await key(tester, LogicalKeyboardKey.enter);
+        expect(journal.store.events['a']!.title, title);
+      }
+
+      for (var mode = 0; mode < 3; mode++) {
+        if (mode == 1) {
+          await tester.tap(find.byKey(const ValueKey('mode-1')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('mode-0')));
+          await tester.pumpAndSettle();
+        } else if (mode == 2) {
+          await tester.tap(find.byKey(const ValueKey('palette-pine')));
+          await tester.pumpAndSettle();
+        }
+        journal.clearSelection();
+        await tester.pumpAndSettle();
+        await tester.tap(cell('a', 'title'), kind: PointerDeviceKind.mouse);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(cell('a', 'title'), kind: PointerDeviceKind.mouse);
+        await tester.pumpAndSettle();
+        await typeTitle('表格名称$mode');
+
+        final rect = tester.getRect(find.byType(Timeline));
+        final body = Offset(
+          rect.left + 24 + (rect.width - 50) * 14.5 / 24,
+          rect.top + 120,
+        );
+        await tester.tapAt(body, kind: PointerDeviceKind.mouse);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tapAt(body, kind: PointerDeviceKind.mouse);
+        await tester.pumpAndSettle();
+        await typeTitle('时间轴名称$mode');
+      }
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
   );
 
   testWidgets(
