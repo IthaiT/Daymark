@@ -96,11 +96,16 @@ class TimelineState extends State<Timeline> {
         vertical.hasClients ? vertical.offset : 0,
       );
   Event? _hit(Offset content) {
-    for (final entry in _pieces.entries.toList().reversed) {
-      if (entry.value.any((rect) => rect.inflate(2).contains(content))) {
-        return _displayEvents
-            .where((event) => event.id == entry.key)
-            .firstOrNull;
+    // Narrow gaps must win exact hits before a neighbor's edge tolerance.
+    for (final tolerance in [0.0, 2.0]) {
+      for (final entry in _pieces.entries.toList().reversed) {
+        if (entry.value.any(
+          (rect) => rect.inflate(tolerance).contains(content),
+        )) {
+          return _displayEvents
+              .where((event) => event.id == entry.key)
+              .firstOrNull;
+        }
       }
     }
     return null;
