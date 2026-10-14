@@ -126,7 +126,7 @@ class _TagSidebarState extends State<TagSidebar> {
             Expanded(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onSecondaryTapDown: (details) =>
+                onSecondaryTapUp: (details) =>
                     _menu(details.globalPosition, null),
                 child: Scrollbar(
                   controller: _scroll,
@@ -148,7 +148,7 @@ class _TagSidebarState extends State<TagSidebar> {
                               ),
                             ),
                             child: GestureDetector(
-                              onSecondaryTapDown: (details) =>
+                              onSecondaryTapUp: (details) =>
                                   _menu(details.globalPosition, tag),
                               child: TagTreeTile(
                                 key: ValueKey('tag-${tag.id}'),

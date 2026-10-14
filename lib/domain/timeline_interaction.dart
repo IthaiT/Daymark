@@ -19,7 +19,6 @@ DragPreview previewDrag({
   required DateTime day,
   required DragEdge edge,
   required double deltaMinutes,
-  required double zoom,
   required double dayWidth,
   required Iterable<Event> events,
   bool alt = false,
@@ -47,13 +46,10 @@ DragPreview previewDrag({
         : [moment];
     double? minimum;
     for (final value in moments) {
-      final minutes =
-          value.difference(origin).inMicroseconds /
-          Duration.microsecondsPerMinute;
-      final step = snapInterval(zoom);
-      final grid = (minutes / step).round() * step;
+      // Minute rounding above provides precision independently of ruler ticks.
+      // Neighbor alignment is deliberately limited to a single minute so a
+      // zoomed-out day cannot pull the event through a large time range.
       final targets = [
-        origin.add(Duration(minutes: grid.clamp(0, 1440))),
         for (final event in events)
           if (event.id != original.id &&
               !event.isUndefined &&
@@ -67,6 +63,7 @@ DragPreview previewDrag({
             target.difference(value).inMicroseconds /
             Duration.microsecondsPerMinute;
         if ((minimum == null || difference.abs() < minimum) &&
+            difference.abs() <= 1 &&
             difference.abs() * dayWidth / 1440 <= 6) {
           minimum = difference.abs();
           correction = difference.round();

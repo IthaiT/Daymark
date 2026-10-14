@@ -21,7 +21,6 @@ void main() {
     day: day,
     edge: edge,
     deltaMinutes: minutes,
-    zoom: 1,
     dayWidth: 1440,
     events: events ?? [event],
     alt: alt,
@@ -41,11 +40,11 @@ void main() {
     expect(drag(DragEdge.move, 10000).event.end, dayEnd(day));
   });
   test(
-    'grid and neighbor snap use six pixel tolerance and Alt disables snap',
+    'minute precision keeps neighbor alignment within one minute and six pixels',
     () {
       expect(
         drag(DragEdge.end, 13).event.end,
-        day.add(const Duration(hours: 10, minutes: 15)),
+        day.add(const Duration(hours: 10, minutes: 13)),
       );
       expect(
         drag(DragEdge.end, 13, alt: true).event.end,
@@ -61,6 +60,14 @@ void main() {
       expect(
         drag(DragEdge.end, 19, events: [event, neighbor]).event.end,
         neighbor.start,
+      );
+      expect(
+        drag(DragEdge.end, 18, events: [event, neighbor]).event.end,
+        day.add(const Duration(hours: 10, minutes: 18)),
+      );
+      expect(
+        drag(DragEdge.end, 19, events: [event, neighbor], alt: true).event.end,
+        day.add(const Duration(hours: 10, minutes: 19)),
       );
     },
   );
@@ -79,7 +86,6 @@ void main() {
         day: day,
         edge: DragEdge.move,
         deltaMinutes: 60,
-        zoom: 1,
         dayWidth: 1440,
         events: [overnight],
       ).event;
@@ -89,13 +95,59 @@ void main() {
         day: day,
         edge: DragEdge.end,
         deltaMinutes: 60,
-        zoom: 1,
         dayWidth: 1440,
         events: [overnight],
       ).event;
       expect(resized.start, overnight.start);
       expect(resized.end, day.add(const Duration(hours: 3)));
       expect([snapInterval(1), snapInterval(2), snapInterval(4)], [15, 5, 1]);
+    },
+  );
+
+  test(
+    'moving and resizing retain minute precision at every visible scale',
+    () {
+      for (final width in [650.0, 1440.0, 5760.0]) {
+        for (var minute = 1; minute < 15; minute++) {
+          for (final edge in DragEdge.values) {
+            final result = previewDrag(
+              original: event,
+              day: day,
+              edge: edge,
+              deltaMinutes: minute.toDouble(),
+              dayWidth: width,
+              events: [event],
+            );
+            expect(result.snap, isNull);
+            expect(
+              result.event.start,
+              edge == DragEdge.end
+                  ? event.start
+                  : event.start.add(Duration(minutes: minute)),
+            );
+            expect(
+              result.event.end,
+              edge == DragEdge.start
+                  ? event.end
+                  : event.end!.add(Duration(minutes: minute)),
+            );
+          }
+        }
+      }
+      final legacy = event.copyWith(
+        start: event.start.add(const Duration(seconds: 37)),
+        end: event.end!.add(const Duration(seconds: 42)),
+      );
+      final moved = previewDrag(
+        original: legacy,
+        day: day,
+        edge: DragEdge.move,
+        deltaMinutes: 7,
+        dayWidth: 650,
+        events: [legacy],
+      ).event;
+      expect(moved.start, legacy.start.add(const Duration(minutes: 7)));
+      expect(moved.end, legacy.end!.add(const Duration(minutes: 7)));
     },
   );
 }

@@ -1366,6 +1366,87 @@ void main() {
     },
   );
 
+  testWidgets('timeline body and edges drag by minutes without Alt', (
+    tester,
+  ) async {
+    await open(tester);
+    final rectangle = tester.getRect(find.byType(Timeline));
+    final width = rectangle.width - 50;
+    final body = Offset(
+      rectangle.left + 24 + width * 14.5 / 24,
+      rectangle.top + 120,
+    );
+    final moving = await tester.startGesture(
+      body,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await moving.moveBy(Offset(width * 7 / 1440, 0));
+    await tester.pump();
+    await moving.moveBy(Offset(width / 1440, 0));
+    await tester.pump();
+    await moving.up();
+    await tester.pumpAndSettle();
+    expect(
+      journal.store.events['a']!.start,
+      day.add(const Duration(hours: 13, minutes: 8)),
+    );
+    expect(
+      journal.store.events['a']!.end,
+      day.add(const Duration(hours: 15, minutes: 8)),
+    );
+    await key(tester, LogicalKeyboardKey.keyZ, control: true);
+    final edge = Offset(rectangle.left + 24 + width * 15 / 24, body.dy);
+    final resizing = await tester.startGesture(
+      edge,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    await resizing.moveBy(Offset(width * 8 / 1440, 0));
+    await tester.pump();
+    await resizing.up();
+    await tester.pumpAndSettle();
+    expect(
+      journal.store.events['a']!.start,
+      day.add(const Duration(hours: 13)),
+    );
+    expect(
+      journal.store.events['a']!.end,
+      day.add(const Duration(hours: 15, minutes: 8)),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tag and blank-area secondary clicks open exactly one menu', (
+    tester,
+  ) async {
+    await open(tester);
+    final mouse = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('tag-linux'))),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
+    await mouse.up();
+    await tester.pumpAndSettle();
+    expect(find.text('新增子标签'), findsOneWidget);
+    expect(find.text('新增一级标签'), findsNothing);
+    expect(find.text('移至一级标签'), findsOneWidget);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
+    final sidebar = tester.getRect(find.byType(TagSidebar));
+    await tester.tapAt(
+      Offset(sidebar.left + 30, sidebar.bottom - 40),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('新增一级标签'), findsOneWidget);
+    expect(find.text('新增子标签'), findsNothing);
+    await key(tester, LogicalKeyboardKey.escape);
+    expect(find.byType(PopupMenuItem<String>), findsNothing);
+  });
+
   testWidgets(
     'tag context adds and edits, branch drag preserves IDs and descendant drop is rejected',
     (tester) async {

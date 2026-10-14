@@ -204,7 +204,6 @@ class TimelineState extends State<Timeline> {
       edge: _edge!,
       deltaMinutes:
           (_content(pointer.localPosition).dx - _anchorX) / _dayWidth * 1440,
-      zoom: zoom,
       dayWidth: _dayWidth,
       events: _events,
       alt: HardwareKeyboard.instance.isAltPressed,
