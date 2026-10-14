@@ -22,6 +22,7 @@ class AppearanceStore {
   }) async {
     final store = AppearanceStore._(directory.absolute, writer);
     try {
+      await store.directory.create(recursive: true);
       if (await store.file.exists()) {
         store._state = AppAppearance.fromJson(
           jsonDecode(
@@ -43,7 +44,6 @@ class AppearanceStore {
   }
 
   Future<void> replace(AppAppearance desired) async {
-    await directory.create(recursive: true);
     await _writer(
       file,
       utf8.encode(

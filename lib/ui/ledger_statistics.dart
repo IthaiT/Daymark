@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../domain/ledger.dart';
 import 'ledger_category_style.dart';
 import 'ledger_dialogs.dart';
+import 'theme_tokens.dart';
 
 class LedgerStatistics extends StatelessWidget {
   const LedgerStatistics({
@@ -122,7 +123,11 @@ class LedgerStatistics extends StatelessWidget {
                 painter: _DonutPainter(
                   amounts: rows.map((row) => row.amountCents).toList(),
                   colors: rows
-                      .map((row) => ledgerCategoryColor(state, row.categoryId))
+                      .map(
+                        (row) => DaymarkColors.of(context).categoryAccent(
+                          ledgerCategoryColor(state, row.categoryId),
+                        ),
+                      )
                       .toList(),
                   background: Theme.of(
                     context,
@@ -216,7 +221,9 @@ class LedgerStatistics extends StatelessWidget {
                 value: percentage,
                 minHeight: 5,
                 borderRadius: BorderRadius.circular(4),
-                color: ledgerCategoryColor(state, row.categoryId),
+                color: DaymarkColors.of(
+                  context,
+                ).categoryAccent(ledgerCategoryColor(state, row.categoryId)),
                 backgroundColor: swatch[50],
               ),
             ],

@@ -10,10 +10,14 @@ class WindowTitleBar extends StatefulWidget {
     this.leading,
     this.leadingWidth = 250,
     this.backgroundColor,
+    this.actions,
+    this.height = 36,
   });
   final Widget? leading;
   final double leadingWidth;
   final Color? backgroundColor;
+  final Widget? actions;
+  final double height;
   @override
   State<WindowTitleBar> createState() => _WindowTitleBarState();
 }
@@ -41,7 +45,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return SizedBox(
-      height: 36,
+      height: widget.height,
       child: Row(
         children: [
           // Melt into the sidebar's surface so the bar reads as part of it.
@@ -53,19 +57,25 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
                 const DragToMoveArea(child: SizedBox.expand()),
           ),
           Expanded(
-            child: DragToMoveArea(
-              child: ColoredBox(
-                color: widget.backgroundColor ?? scheme.surfaceContainerLow,
-                child: const SizedBox.expand(),
+            child: ColoredBox(
+              color: widget.backgroundColor ?? scheme.surfaceContainerLow,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  const DragToMoveArea(child: SizedBox.expand()),
+                  if (widget.actions != null) widget.actions!,
+                ],
               ),
             ),
           ),
           _CaptionButton(
+            height: widget.height,
             icon: Icons.remove,
             tooltip: '最小化',
             onPressed: windowManager.minimize,
           ),
           _CaptionButton(
+            height: widget.height,
             icon: _maximized ? Icons.filter_none : Icons.crop_square,
             tooltip: _maximized ? '向下还原' : '最大化',
             onPressed: () async {
@@ -77,6 +87,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
             },
           ),
           _CaptionButton(
+            height: widget.height,
             icon: Icons.close,
             tooltip: '关闭',
             close: true,
@@ -96,11 +107,13 @@ class _CaptionButton extends StatefulWidget {
     required this.tooltip,
     required this.onPressed,
     this.close = false,
+    this.height = 36,
   });
   final IconData icon;
   final String tooltip;
   final Future<void> Function() onPressed;
   final bool close;
+  final double height;
   @override
   State<_CaptionButton> createState() => _CaptionButtonState();
 }
@@ -119,7 +132,7 @@ class _CaptionButtonState extends State<_CaptionButton> {
           onTap: widget.onPressed,
           child: Container(
             width: 46,
-            height: 36,
+            height: widget.height,
             alignment: Alignment.center,
             color: _hover
                 ? (widget.close

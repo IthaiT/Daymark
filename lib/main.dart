@@ -7,6 +7,9 @@ import 'package:window_manager/window_manager.dart';
 
 import 'application/journal_controller.dart';
 import 'application/ledger_controller.dart';
+import 'application/appearance_controller.dart';
+import 'data/appearance_store.dart';
+import 'domain/appearance.dart';
 import 'data/instance_lock.dart';
 import 'data/ledger_store.dart';
 import 'data/store.dart';
@@ -78,11 +81,13 @@ Future<void> main(List<String> arguments) async {
     final store = await Store.open(directory);
     final journal = JournalController(store);
     await journal.initialize();
+    final appearanceStore = await AppearanceStore.open(directory);
     runApp(
       DaymarkApp(
         journal: journal,
         ledger: LedgerController(ledgerStore),
         instanceLock: lock,
+        appearance: AppearanceController(appearanceStore),
       ),
     );
     // The OS releases the byte lock on exit, including abnormal termination.
@@ -116,33 +121,85 @@ class DaymarkApp extends StatefulWidget {
     required this.journal,
     this.ledger,
     this.instanceLock,
+    this.appearance,
   });
   final JournalController journal;
   final LedgerController? ledger;
   // Keep the native handle reachable for the entire application's lifetime.
   final InstanceLock? instanceLock;
+  final AppearanceController? appearance;
 
   @override
   State<DaymarkApp> createState() => _DaymarkAppState();
 }
 
 class _DaymarkAppState extends State<DaymarkApp> {
+  late AppearanceController _appearance;
+  late bool _ownsAppearance;
+  final _messenger = GlobalKey<ScaffoldMessengerState>();
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsAppearance = widget.appearance == null;
+    _appearance = widget.appearance ?? AppearanceController();
+    if (_appearance.store?.readError != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _messenger.currentState?.showSnackBar(
+          const SnackBar(content: Text('配色设置无法读取，已使用默认配色。')),
+        );
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant DaymarkApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.appearance != oldWidget.appearance) {
+      if (_ownsAppearance) _appearance.dispose();
+      _ownsAppearance = widget.appearance == null;
+      _appearance = widget.appearance ?? AppearanceController();
+    }
+  }
+
+  Future<void> _setPalette(AppPalette palette) async {
+    try {
+      await _appearance.setPalette(palette);
+    } catch (error) {
+      if (!mounted) return;
+      _messenger.currentState?.showSnackBar(
+        SnackBar(content: Text('无法保存配色设置：$error')),
+      );
+    }
+  }
+
   @override
   void dispose() {
+    if (_ownsAppearance) _appearance.dispose();
     widget.instanceLock?.close();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Daymark',
-    debugShowCheckedModeBanner: false,
-    theme: daymarkTheme(),
-    locale: const Locale('zh', 'CN'),
-    localizationsDelegates: GlobalMaterialLocalizations.delegates,
-    supportedLocales: const [Locale('zh', 'CN')],
-    home: widget.ledger == null
-        ? JournalScreen(journal: widget.journal)
-        : AppScreen(journal: widget.journal, ledger: widget.ledger!),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _appearance,
+    builder: (context, _) => MaterialApp(
+      title: 'Daymark',
+      debugShowCheckedModeBanner: false,
+      theme: daymarkTheme(palette: _appearance.state.palette),
+      scaffoldMessengerKey: _messenger,
+      locale: const Locale('zh', 'CN'),
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
+      supportedLocales: const [Locale('zh', 'CN')],
+      home: widget.ledger == null
+          ? JournalScreen(journal: widget.journal)
+          : AppScreen(
+              journal: widget.journal,
+              ledger: widget.ledger!,
+              palette: _appearance.state.palette,
+              onPaletteChanged: _appearance.busy ? null : _setPalette,
+            ),
+    ),
   );
 }

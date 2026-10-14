@@ -1,26 +1,34 @@
 import 'package:flutter/material.dart';
 import '../data/store.dart';
+import '../domain/appearance.dart';
 import '../domain/model.dart';
 import 'tag_visual.dart';
+import 'theme_tokens.dart';
 import 'workspace_style.dart';
 
+String paletteText(AppPalette palette) => switch (palette) {
+  AppPalette.pine => '松石',
+  AppPalette.indigo => '靛蓝',
+  AppPalette.sand => '暖沙',
+  AppPalette.rose => '玫瑰',
+  AppPalette.slate => '石板',
+};
+
+MaterialColor paletteSwatch(AppPalette palette) => switch (palette) {
+  AppPalette.pine => Colors.teal,
+  AppPalette.indigo => Colors.indigo,
+  AppPalette.sand => Colors.brown,
+  AppPalette.rose => Colors.pink,
+  AppPalette.slate => Colors.blueGrey,
+};
+
 /// Shared Material 3 theme for time recording, the ledger and all dialogs.
-ThemeData daymarkTheme() {
-  final scheme =
-      ColorScheme.fromSeed(
-        seedColor: Colors.teal,
-        brightness: Brightness.light,
-      ).copyWith(
-        surface: Colors.white,
-        surfaceContainerLowest: Colors.white,
-        surfaceContainerLow: Colors.grey[50],
-        surfaceContainer: Colors.grey[100],
-        surfaceContainerHigh: Colors.grey[200],
-        surfaceContainerHighest: Colors.grey[300],
-        outlineVariant: Colors.grey[200],
-        onSurface: Colors.grey[900],
-        onSurfaceVariant: Colors.grey[700],
-      );
+ThemeData daymarkTheme({AppPalette palette = AppPalette.slate}) {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: paletteSwatch(palette),
+    dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
+    brightness: Brightness.light,
+  ).copyWith(surface: Colors.white, surfaceContainerLowest: Colors.white);
   final shape = RoundedRectangleBorder(
     borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
   );
@@ -38,6 +46,7 @@ ThemeData daymarkTheme() {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    extensions: [DaymarkColors.fromScheme(scheme)],
     brightness: Brightness.light,
     fontFamily: 'Noto Sans SC',
     fontFamilyFallback: const ['Segoe UI', 'Microsoft YaHei UI'],
@@ -108,6 +117,10 @@ ThemeData daymarkTheme() {
     ),
     scrollbarTheme: const ScrollbarThemeData(
       thickness: WidgetStatePropertyAll(7),
+    ),
+    dividerTheme: DividerThemeData(
+      color: scheme.outlineVariant.withValues(alpha: .4),
+      thickness: 1,
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: scheme.surfaceContainerLowest,
