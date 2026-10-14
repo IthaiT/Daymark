@@ -1366,56 +1366,60 @@ void main() {
     },
   );
 
-  testWidgets('timeline body and edges drag by minutes without Alt', (
-    tester,
-  ) async {
-    await open(tester);
-    final rectangle = tester.getRect(find.byType(Timeline));
-    final width = rectangle.width - 50;
-    final body = Offset(
-      rectangle.left + 24 + width * 14.5 / 24,
-      rectangle.top + 120,
-    );
-    final moving = await tester.startGesture(
-      body,
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pump();
-    await moving.moveBy(Offset(width * 7 / 1440, 0));
-    await tester.pump();
-    await moving.moveBy(Offset(width / 1440, 0));
-    await tester.pump();
-    await moving.up();
-    await tester.pumpAndSettle();
-    expect(
-      journal.store.events['a']!.start,
-      day.add(const Duration(hours: 13, minutes: 8)),
-    );
-    expect(
-      journal.store.events['a']!.end,
-      day.add(const Duration(hours: 15, minutes: 8)),
-    );
-    await key(tester, LogicalKeyboardKey.keyZ, control: true);
-    final edge = Offset(rectangle.left + 24 + width * 15 / 24, body.dy);
-    final resizing = await tester.startGesture(
-      edge,
-      kind: PointerDeviceKind.mouse,
-    );
-    await tester.pump();
-    await resizing.moveBy(Offset(width * 8 / 1440, 0));
-    await tester.pump();
-    await resizing.up();
-    await tester.pumpAndSettle();
-    expect(
-      journal.store.events['a']!.start,
-      day.add(const Duration(hours: 13)),
-    );
-    expect(
-      journal.store.events['a']!.end,
-      day.add(const Duration(hours: 15, minutes: 8)),
-    );
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'full workspace timeline body and both edges drag by minutes at default zoom',
+    (tester) async {
+      await open(tester);
+      final ledgerStore = (await tester.runAsync(
+        () => LedgerStore.open(directory, writer: (_, _) async {}),
+      ))!;
+      final ledger = LedgerController(ledgerStore);
+      addTearDown(ledger.dispose);
+      await tester.pumpWidget(DaymarkApp(journal: journal, ledger: ledger));
+      await tester.pumpAndSettle();
+      final timeline = find.byType(Timeline);
+      expect(tester.state<TimelineState>(timeline).zoom, 1);
+      final rectangle = tester.getRect(timeline);
+      final width = rectangle.width - 50;
+      final y = rectangle.top + 120;
+
+      for (final edge in ['body', 'start', 'end']) {
+        for (final minutes in [12, 13, 14]) {
+          final hour = edge == 'body'
+              ? 14.5
+              : edge == 'start'
+              ? 13.0
+              : 15.0;
+          final gesture = await tester.startGesture(
+            Offset(rectangle.left + 24 + width * hour / 24, y),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.pump();
+          await gesture.moveBy(Offset(width * (minutes - 1) / 1440, 0));
+          await tester.pump();
+          await gesture.moveBy(Offset(width / 1440, 0));
+          await tester.pump();
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(
+            journal.store.events['a']!.start,
+            day.add(Duration(hours: 13, minutes: edge == 'end' ? 0 : minutes)),
+            reason: '$edge drag by $minutes minutes',
+          );
+          expect(
+            journal.store.events['a']!.end,
+            day.add(
+              Duration(hours: 15, minutes: edge == 'start' ? 0 : minutes),
+            ),
+            reason: '$edge drag by $minutes minutes',
+          );
+          await key(tester, LogicalKeyboardKey.keyZ, control: true);
+        }
+      }
+      expect(tester.takeException(), isNull);
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.windows),
+  );
 
   testWidgets('tag and blank-area secondary clicks open exactly one menu', (
     tester,
