@@ -167,6 +167,12 @@ class LedgerStore {
     if (pins.any((item) => item is! String)) {
       throw const FormatException('常用分类 ID 格式不正确。');
     }
+    final order = payload.containsKey('category_order')
+        ? list(payload, 'category_order')
+        : const <Object?>[];
+    if (order.any((item) => item is! String)) {
+      throw const FormatException('分类顺序 ID 格式不正确。');
+    }
     final state = LedgerState(
       accounts: accounts,
       categories: categories,
@@ -174,6 +180,7 @@ class LedgerStore {
       defaultCashId: defaultCash,
       balanceEnabled: legacy ? false : boolean(payload, 'balance_enabled'),
       pinned: pins.cast<String>(),
+      categoryOrder: order.cast<String>(),
     );
     state.validate();
     final presets = payload['category_presets_version'];

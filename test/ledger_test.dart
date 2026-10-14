@@ -662,4 +662,102 @@ void main() {
       expect(ledger.state.dailyTotals[september]!.expenseCents, 500);
     },
   );
+  test(
+    'category ordering moves whole root branches and siblings, persists and supports undo',
+    () async {
+      await ledger.saveInputs([expense(2800)]);
+      await ledger.placeCategory('transport', null, beforeId: 'food');
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, null).first.id,
+        'transport',
+      );
+      await ledger.placeCategory('lunch', 'food', beforeId: 'breakfast');
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'lunch',
+      );
+      expect(store.state.records.values.single.categoryId, 'lunch');
+      final reopened = await LedgerStore.open(directory);
+      expect(reopened.state.categoryOrder, store.state.categoryOrder);
+      await ledger.undo();
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'breakfast',
+      );
+      await ledger.redo();
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'lunch',
+      );
+      await ledger.placeCategory('food', null, afterId: 'housing');
+      expect(store.state.categories['lunch']!.parentId, 'food');
+      expect(
+        store.state
+            .categoryChildren(MoneyKind.expense, null)
+            .map((item) => item.id)
+            .toList()
+            .indexOf('food'),
+        greaterThan(
+          store.state
+              .categoryChildren(MoneyKind.expense, null)
+              .map((item) => item.id)
+              .toList()
+              .indexOf('housing'),
+        ),
+      );
+    },
+  );
+
+  test(
+    'ordering rejects cycles and foreign kinds and rolls back failed writes',
+    () async {
+      final before = store.state.toJson();
+      for (final action in [
+        () => ledger.placeCategory('food', 'lunch'),
+        () => ledger.placeCategory('salary', 'food'),
+        () => ledger.placeCategory('lunch', 'food', beforeId: 'housing'),
+        () => ledger.placeCategory('food', null, beforeId: 'food'),
+      ]) {
+        await expectLater(action(), throwsFormatException);
+        expect(store.state.toJson(), before);
+      }
+      fail = true;
+      await expectLater(
+        ledger.placeCategory('transport', null, beforeId: 'food'),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(store.state.toJson(), before);
+      fail = false;
+      await ledger.placeCategory('transport', null, beforeId: 'food');
+      expect(store.state.categoryOrder.first, 'transport');
+      await expectLater(
+        () => store.state.categoryOrder.clear(),
+        throwsUnsupportedError,
+      );
+    },
+  );
+  test(
+    'optional category order reads legacy files and rejects corrupt IDs without overwriting',
+    () async {
+      final payload = store.state.toJson()..remove('category_order');
+      await store.file.writeAsString(jsonEncode(payload));
+      final legacy = await LedgerStore.open(directory);
+      expect(legacy.state.categoryOrder, isEmpty);
+      expect(legacy.state.pinned, store.state.pinned);
+      for (final order in [
+        ['food', 'food'],
+        ['missing'],
+        [42],
+      ]) {
+        payload['category_order'] = order;
+        final content = jsonEncode(payload);
+        await store.file.writeAsString(content);
+        await expectLater(
+          LedgerStore.open(directory),
+          throwsA(isA<DataError>()),
+        );
+        expect(await store.file.readAsString(), content);
+      }
+    },
+  );
 }

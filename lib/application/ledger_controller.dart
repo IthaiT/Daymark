@@ -214,12 +214,70 @@ class LedgerController extends ChangeNotifier {
       state.copyWith(
         categories: {...state.categories}..remove(id),
         pinned: state.pinned.where((item) => item != id).toList(),
+        categoryOrder: state.categoryOrder.where((item) => item != id).toList(),
       ),
     );
   });
 
   Future<void> setPinned(List<String> ids) =>
       _run(() => _apply(state.copyWith(pinned: ids)));
+
+  /// Moves a branch and its sibling position in one undoable atomic write.
+  Future<void> placeCategory(
+    String id,
+    String? parentId, {
+    String? beforeId,
+    String? afterId,
+  }) => _run(() async {
+    final source = state.categories[id];
+    if (source == null || (beforeId != null && afterId != null)) {
+      throw const FormatException('分类或目标位置不正确。');
+    }
+    if (parentId != null &&
+        (state.categories[parentId]?.kind != source.kind ||
+            state.descendants(id).contains(parentId))) {
+      throw const FormatException('不能移到自己、子分类或其他收支类型中。');
+    }
+    final relativeId = beforeId ?? afterId;
+    if (relativeId != null) {
+      final relative = state.categories[relativeId];
+      if (relative == null ||
+          relative.id == id ||
+          relative.kind != source.kind ||
+          relative.parentId != parentId) {
+        throw const FormatException('目标必须是同级分类。');
+      }
+    }
+    final order = [
+      ...state.orderedCategories(MoneyKind.expense).map((item) => item.id),
+      ...state.orderedCategories(MoneyKind.income).map((item) => item.id),
+    ]..remove(id);
+    final siblings = state
+        .categoryChildren(source.kind, parentId)
+        .where((item) => item.id != id)
+        .toList();
+    final index = relativeId != null
+        ? order.indexOf(relativeId) + (afterId != null ? 1 : 0)
+        : siblings.isNotEmpty
+        ? order.indexOf(siblings.last.id) + 1
+        : parentId != null
+        ? order.indexOf(parentId) + 1
+        : order.length;
+    order.insert(index, id);
+    final moved = MoneyCategory(
+      source.id,
+      source.name,
+      source.kind,
+      parentId,
+      source.color,
+    );
+    await _apply(
+      state.copyWith(
+        categories: {...state.categories, id: moved},
+        categoryOrder: order,
+      ),
+    );
+  });
 
   Future<void> saveAccount(String name, {String? id}) => _run(() async {
     final previous = id == null ? null : state.accounts[id];

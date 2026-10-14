@@ -217,16 +217,19 @@ class LedgerState {
     required this.defaultCashId,
     required this.balanceEnabled,
     required List<String> pinned,
+    List<String> categoryOrder = const [],
   }) : accounts = Map.unmodifiable(accounts),
        categories = Map.unmodifiable(categories),
        records = Map.unmodifiable(records),
-       pinned = List.unmodifiable(pinned);
+       pinned = List.unmodifiable(pinned),
+       categoryOrder = List.unmodifiable(categoryOrder);
   final Map<String, MoneyAccount> accounts;
   final Map<String, MoneyCategory> categories;
   final Map<String, MoneyRecord> records;
   final String defaultCashId;
   final bool balanceEnabled;
   final List<String> pinned;
+  final List<String> categoryOrder;
 
   factory LedgerState.empty() {
     return LedgerState(
@@ -262,12 +265,14 @@ class LedgerState {
     Map<String, MoneyCategory>? categories,
     Map<String, MoneyRecord>? records,
     List<String>? pinned,
+    List<String>? categoryOrder,
     bool? balanceEnabled,
   }) => LedgerState(
     accounts: accounts ?? this.accounts,
     categories: categories ?? this.categories,
     records: records ?? this.records,
     pinned: pinned ?? this.pinned,
+    categoryOrder: categoryOrder ?? this.categoryOrder,
     defaultCashId: defaultCashId,
     balanceEnabled: balanceEnabled ?? this.balanceEnabled,
   );
@@ -306,13 +311,7 @@ class LedgerState {
   List<MoneyCategory> orderedCategories(MoneyKind kind) {
     final result = <MoneyCategory>[];
     void visit(String? parent) {
-      final children =
-          categories.values
-              .where((item) => item.kind == kind && item.parentId == parent)
-              .toList()
-            ..sort(
-              (a, b) => compareUnicode(caseFold(a.name), caseFold(b.name)),
-            );
+      final children = categoryChildren(kind, parent);
       for (final child in children) {
         result.add(child);
         visit(child.id);
@@ -321,6 +320,33 @@ class LedgerState {
 
     visit(null);
     return result;
+  }
+
+  /// Persisted sibling order supersedes legacy pins; hierarchy stays independent.
+  List<MoneyCategory> categoryChildren(MoneyKind kind, String? parentId) {
+    final presets = {
+      for (final (index, item) in defaultMoneyCategories.indexed)
+        item.id: index,
+    };
+    int rank(MoneyCategory category) {
+      final position = categoryOrder.indexOf(category.id);
+      if (position >= 0) return position;
+      if (categoryOrder.isEmpty && parentId != null) {
+        final legacyPin = pinned.indexOf(category.id);
+        if (legacyPin >= 0) return legacyPin;
+      }
+      return categoryOrder.length + 100 + (presets[category.id] ?? 1000);
+    }
+
+    return categories.values
+        .where((item) => item.kind == kind && item.parentId == parentId)
+        .toList()
+      ..sort((a, b) {
+        final priority = rank(a).compareTo(rank(b));
+        return priority != 0
+            ? priority
+            : compareUnicode(caseFold(a.name), caseFold(b.name));
+      });
   }
 
   List<MoneyRecord> monthRecords(DateTime month) => records.values
@@ -484,6 +510,10 @@ class LedgerState {
         pinned.any((id) => categories[id]?.kind != MoneyKind.expense)) {
       throw const FormatException('常用分类数据不正确。');
     }
+    if (categoryOrder.toSet().length != categoryOrder.length ||
+        categoryOrder.any((id) => !categories.containsKey(id))) {
+      throw const FormatException('分类顺序数据不正确。');
+    }
     final expected = {
       for (final account in accounts.values) account.id: account.openingCents,
     };
@@ -550,5 +580,6 @@ class LedgerState {
     'categories': categories.values.map((item) => item.toJson()).toList(),
     'records': records.values.map((item) => item.toJson()).toList(),
     'pinned': pinned,
+    'category_order': categoryOrder,
   };
 }
