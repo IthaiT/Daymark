@@ -30,16 +30,22 @@ class AppScreen extends StatefulWidget {
 class _AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
   final _ledgerFocus = FocusNode();
+  final _journalScope = FocusScopeNode(debugLabel: 'journal-workspace');
   int _page = 0;
   bool _visitedLedger = false;
   @override
   void dispose() {
     _ledgerFocus.dispose();
+    _journalScope.dispose();
     super.dispose();
   }
 
   void _focusPage() {
-    if (_page == 1) _ledgerFocus.requestFocus();
+    if (_page == 1) {
+      _ledgerFocus.requestFocus();
+    } else {
+      _journalScope.requestFocus();
+    }
   }
 
   Future<void> _switch(int page) async {
@@ -106,7 +112,14 @@ class _AppScreenState extends State<AppScreen> {
             padding: const EdgeInsets.only(right: 12),
             child: PalettePicker(
               selected: widget.palette,
-              onChanged: widget.onPaletteChanged,
+              onChanged: widget.onPaletteChanged == null
+                  ? null
+                  : (palette) {
+                      widget.onPaletteChanged!(palette);
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _focusPage();
+                      });
+                    },
             ),
           ),
         ),
@@ -137,6 +150,7 @@ class _AppScreenState extends State<AppScreen> {
                   index: _page,
                   children: [
                     FocusScope(
+                      node: _journalScope,
                       canRequestFocus: _page == 0,
                       child: JournalScreen(
                         key: _journal,

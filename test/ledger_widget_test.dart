@@ -414,6 +414,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('mode-1')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('palette-pine')));
+      await tester.pumpAndSettle();
       await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.records, isEmpty);
       await tester.tap(find.byKey(const ValueKey('mode-1')));
