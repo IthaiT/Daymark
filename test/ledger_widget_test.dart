@@ -1,3 +1,4 @@
+import 'support/screenshot_fonts.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -6,8 +7,10 @@ import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/ledger.dart';
+import 'package:daymark/domain/model.dart' show Event;
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/ledger_screen.dart';
+import 'package:daymark/ui/ledger_sidebar.dart';
 import 'package:daymark/ui/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -375,8 +378,15 @@ void main() {
       addTearDown(journal.dispose);
       await tester.pumpWidget(DaymarkApp(journal: journal, ledger: ledger));
       await tester.pumpAndSettle();
+      final journalTheme = Theme.of(
+        tester.element(find.byKey(const ValueKey('day-input'))),
+      );
       await tester.tap(find.byKey(const ValueKey('mode-1')));
       await tester.pumpAndSettle();
+      final ledgerTheme = Theme.of(tester.element(quick('lunch')));
+      expect(ledgerTheme.colorScheme, journalTheme.colorScheme);
+      expect(ledgerTheme.textTheme, journalTheme.textTheme);
+      expect(ledgerTheme.textTheme.bodyMedium!.fontFamily, 'Noto Sans SC');
       await tester.enterText(quick('lunch'), '28');
       await tester.tap(find.byKey(const ValueKey('mode-0')));
       await tester.pumpAndSettle();
@@ -403,37 +413,28 @@ void main() {
   testWidgets('synthetic screenshots cover ledger and nested statistics', (
     tester,
   ) async {
-    const releaseIconFont = String.fromEnvironment('DAYMARK_ICON_FONT');
-    if (releaseIconFont.isNotEmpty) {
-      expect(
-        File(releaseIconFont).existsSync(),
-        isTrue,
-        reason: '必须使用存在的 Release 图标字体',
-      );
-    }
-    for (final entry in [
-      ('Microsoft YaHei UI', 'C:/Windows/Fonts/msyh.ttc'),
-      (
-        'MaterialIcons',
-        const String.fromEnvironment(
-          'DAYMARK_ICON_FONT',
-          defaultValue:
-              '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-        ),
-      ),
-    ]) {
-      if (File(entry.$2).existsSync()) {
-        final bytes = (await tester.runAsync(
-          () => File(entry.$2).readAsBytes(),
-        ))!;
-        final loader = FontLoader(entry.$1)
-          ..addFont(Future.value(ByteData.sublistView(bytes)));
-        await tester.runAsync(loader.load);
-      }
-    }
+    await loadScreenshotFonts(tester);
     final boundaryKey = GlobalKey();
     await open(tester);
     final journalStore = (await tester.runAsync(() => Store.open(directory)))!;
+    await tester.runAsync(
+      () => journalStore.replaceEvents({
+        'ui-work': Event(
+          'ui-work',
+          '项目开发',
+          'work',
+          day.add(const Duration(hours: 9)),
+          day.add(const Duration(hours: 10, minutes: 30)),
+        ),
+        'ui-rest': Event(
+          'ui-rest',
+          '休息',
+          'life',
+          day.add(const Duration(hours: 10, minutes: 30)),
+          day.add(const Duration(hours: 11)),
+        ),
+      }),
+    );
     final journal = JournalController(journalStore, day: day);
     addTearDown(journal.dispose);
     await tester.pumpWidget(
@@ -478,6 +479,11 @@ void main() {
     }
 
     await screenshot('ledger');
+    await tester.tap(find.byKey(const ValueKey('mode-0')));
+    await tester.pumpAndSettle();
+    await screenshot('workspace-journal');
+    await tester.tap(find.byKey(const ValueKey('mode-1')));
+    await tester.pumpAndSettle();
     await ledger.saveInputs([
       expense(10000, 'housing'),
       expense(4500, 'clothing'),
@@ -572,28 +578,19 @@ void main() {
   );
 
   testWidgets(
-    'category manager adds, moves, renames, pins and reorders without losing records',
+    'category manager edits and adds without duplicate pin or row menus',
     (tester) async {
       await open(tester);
       await ledger.saveInputs([expense(2800, 'lunch')]);
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('管理分类'));
       await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.star), findsNothing);
+      expect(find.byTooltip('固定为常用'), findsNothing);
+      expect(find.byTooltip('取消固定'), findsNothing);
       final lunch = find.byKey(const ValueKey('category-manage-lunch'));
-      final managerScroll = find.descendant(
-        of: find.byKey(const ValueKey('category-manager-list')),
-        matching: find.byType(Scrollable),
-      );
-      await tester.scrollUntilVisible(lunch, 180, scrollable: managerScroll);
       await tester.ensureVisible(lunch);
-      await tester.tap(
-        find.descendant(
-          of: lunch,
-          matching: find.byType(PopupMenuButton<String>),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('重命名或移动'));
+      await tester.tap(lunch);
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('ledger-name')), '工作餐');
       await tester.tap(find.byType(DropdownButtonFormField<String>));
@@ -604,20 +601,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(store.state.categories['lunch']!.parentId, isNull);
       expect(store.state.records.values.single.categoryId, 'lunch');
-      tester.state<ScrollableState>(managerScroll).position.jumpTo(0);
-      await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(lunch, 100, scrollable: managerScroll);
-      await tester.ensureVisible(lunch);
-      await tester.tap(
-        find.descendant(of: lunch, matching: find.byTooltip('取消固定')),
-      );
-      await tester.pumpAndSettle();
-      expect(store.state.pinned, isNot(contains('lunch')));
-      await tester.tap(
-        find.descendant(of: lunch, matching: find.byTooltip('固定为常用')),
-      );
-      await tester.pumpAndSettle();
-      expect(store.state.pinned.last, 'lunch');
       await tester.tap(find.text('新增分类'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('ledger-name')), '甜点');
@@ -635,20 +618,10 @@ void main() {
       );
       await tester.tap(find.text('完成'));
       await tester.pumpAndSettle();
-      final menu = find
-          .ancestor(of: quick('lunch'), matching: find.byType(Row))
-          .first;
-      await tester.tap(
-        find.descendant(
-          of: menu,
-          matching: find.byType(PopupMenuButton<String>),
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('向上移'));
-      await tester.pumpAndSettle();
-      expect(store.state.pinned[store.state.pinned.length - 2], 'lunch');
-      expect(store.state.categories['lunch']!.name, '工作餐');
+      expect(find.byTooltip('标签操作'), findsNothing);
+      expect(find.text('向上移'), findsNothing);
+      expect(find.text('向下移'), findsNothing);
+      expect(tester.takeException(), isNull);
     },
   );
 
@@ -1189,6 +1162,68 @@ void main() {
         '8',
       );
       expect(store.state.records, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+  testWidgets(
+    'dragging row edges reorders root and child tags and retains drafts on failure',
+    (tester) async {
+      await open(tester);
+      await ledger.saveInputs([expense(2800, 'lunch')]);
+      await tester.pumpAndSettle();
+      await tester.enterText(quick('breakfast'), '8');
+      Future<void> dragBefore(String source, String target) async {
+        final pointer = await tester.startGesture(
+          tester.getCenter(find.text(source)),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        final targetRect = tester.getRect(
+          find.byKey(ValueKey('ledger-tag-$target')),
+        );
+        await pointer.moveTo(targetRect.topLeft + const Offset(70, 2));
+        await tester.pump();
+        await pointer.up();
+        await tester.pumpAndSettle();
+      }
+
+      fail = true;
+      await dragBefore('交通', 'food');
+      expect(store.state.categoryOrder, isEmpty);
+      expect(
+        tester.widget<TextField>(quick('breakfast')).controller!.text,
+        '8',
+      );
+      fail = false;
+      await dragBefore('交通', 'food');
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, null).first.id,
+        'transport',
+      );
+      await dragBefore('午餐', 'breakfast');
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'lunch',
+      );
+      expect(store.state.categories['lunch']!.parentId, 'food');
+      expect(store.state.records.values.single.categoryId, 'lunch');
+      expect(
+        find.descendant(
+          of: find.byType(LedgerSidebar),
+          matching: find.byType(PopupMenuButton<String>),
+        ),
+        findsNothing,
+      );
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'breakfast',
+      );
+      await shortcut(tester, LogicalKeyboardKey.keyY);
+      expect(
+        store.state.categoryChildren(MoneyKind.expense, 'food').first.id,
+        'lunch',
+      );
       expect(tester.takeException(), isNull);
     },
   );

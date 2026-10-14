@@ -7,7 +7,6 @@ import '../application/ledger_controller.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
 import 'title_bar.dart';
-import 'theme.dart';
 
 class AppScreen extends StatefulWidget {
   const AppScreen({super.key, required this.journal, required this.ledger});
@@ -52,27 +51,18 @@ class _AppScreenState extends State<AppScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Theme(
-    data: _page == 1 ? ledgerTheme(Theme.of(context)) : Theme.of(context),
-    child: Builder(builder: _shell),
-  );
-
-  Widget _shell(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) => Scaffold(
     body: Column(
       children: [
         WindowTitleBar(
           leadingWidth: 64,
-          backgroundColor: _page == 1
-              ? Theme.of(context).colorScheme.surfaceContainerLow
-              : null,
+          backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
         ),
         Expanded(
           child: Row(
             children: [
               Material(
-                color: _page == 1
-                    ? Theme.of(context).colorScheme.surfaceContainerLow
-                    : Theme.of(context).colorScheme.surfaceContainer,
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
                 child: SizedBox(
                   width: 64,
                   child: Column(
@@ -90,7 +80,6 @@ class _AppScreenState extends State<AppScreen> {
                   ),
                 ),
               ),
-              if (_page == 0) const VerticalDivider(width: 1),
               Expanded(
                 child: IndexedStack(
                   index: _page,

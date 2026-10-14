@@ -1,3 +1,6 @@
+import 'support/screenshot_fonts.dart';
+import 'package:daymark/ui/tag_visual.dart';
+import 'package:daymark/ui/workspace_style.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -510,12 +513,12 @@ void main() {
     'layout retains all panels, columns, Chinese controls and no tag filtering',
     (tester) async {
       await open(tester);
-      for (final title in ['Daymark', '新增事件', '汇总', '时间顺序']) {
+      for (final title in ['时间记录', '新增事件', '汇总', '时间顺序']) {
         expect(find.text(title), findsWidgets);
       }
       expect(find.byType(Timeline), findsOneWidget);
       final table = find.byType(EventTable);
-      final viewSwitch = find.byType(SegmentedButton<EventTableMode>);
+      final viewSwitch = find.byType(AppSegmentedButton<EventTableMode>);
       expect(
         tester.widget<EventTable>(table).mode,
         EventTableMode.chronological,
@@ -554,7 +557,7 @@ void main() {
         );
       }
       expect(
-        tester.getCenter(find.byType(SegmentedButton<EventTableMode>)).dy,
+        tester.getCenter(find.byType(AppSegmentedButton<EventTableMode>)).dy,
         closeTo(
           tester.getCenter(find.byKey(const ValueKey('add-event'))).dy,
           .1,
@@ -768,9 +771,11 @@ void main() {
           )
           .height,
     );
-    final leftDot = sidebar.leading! as Container;
-    final pickerDot = picker.leading! as Container;
-    expect(pickerDot.decoration, leftDot.decoration);
+    final leftDot = sidebar.leading! as AppTagBadge;
+    final pickerDot = picker.leading! as AppTagBadge;
+    expect(pickerDot.family, leftDot.family);
+    expect(pickerDot.accent, leftDot.accent);
+    expect(pickerDot.size, leftDot.size);
     expect(
       tile('tag-choice-linux').contentPadding,
       tile('tag-linux').contentPadding,
@@ -1061,7 +1066,7 @@ void main() {
       await tester.enterText(input('b', 'title'), '空白保存');
       // The sidebar logo is always visible; its primary tap falls through to
       // the screen's blank-area handler, which commits and clears selection.
-      await tester.tap(find.text('Daymark'));
+      await tester.tap(find.text('时间记录'));
       await tester.pumpAndSettle();
       expect(journal.store.events['b']!.title, '空白保存');
       expect(journal.selected, isEmpty);
@@ -1333,30 +1338,7 @@ void main() {
       final previousShadows = debugDisableShadows;
       debugDisableShadows = false;
       addTearDown(() => debugDisableShadows = previousShadows);
-      final fonts = [
-        ('Microsoft YaHei UI', 'C:/Windows/Fonts/msyh.ttc'),
-        (
-          'MaterialIcons',
-          const String.fromEnvironment(
-            'DAYMARK_ICON_FONT',
-            defaultValue:
-                '.tools/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
-          ),
-        ),
-      ];
-      for (final entry in fonts) {
-        if (entry.$1 == 'MaterialIcons') {
-          expect(File(entry.$2).existsSync(), isTrue, reason: entry.$2);
-        }
-        if (File(entry.$2).existsSync()) {
-          final data = await tester.runAsync(
-            () => File(entry.$2).readAsBytes(),
-          );
-          final loader = FontLoader(entry.$1)
-            ..addFont(Future.value(ByteData.sublistView(data!)));
-          await tester.runAsync(loader.load);
-        }
-      }
+      await loadScreenshotFonts(tester);
       await open(tester);
       final boundaryKey = GlobalKey();
       await tester.pumpWidget(

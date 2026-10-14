@@ -47,11 +47,7 @@ class _WindowTitleBarState extends State<WindowTitleBar> with WindowListener {
           // Melt into the sidebar's surface so the bar reads as part of it.
           Container(
             width: widget.leadingWidth,
-            color:
-                widget.backgroundColor ??
-                (widget.leading == null
-                    ? scheme.surfaceContainer
-                    : scheme.surfaceContainerLow),
+            color: widget.backgroundColor ?? scheme.surfaceContainerLow,
             child:
                 widget.leading ??
                 const DragToMoveArea(child: SizedBox.expand()),

@@ -12,7 +12,7 @@ import 'ledger_dialogs.dart';
 import 'ledger_category_style.dart';
 import 'ledger_sidebar.dart';
 import 'ledger_statistics.dart';
-import 'theme.dart';
+import 'workspace_style.dart';
 
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key, required this.ledger, this.focusNode});
@@ -131,17 +131,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
   );
 
   @override
-  Widget build(BuildContext context) => Theme(
-    data: ledgerTheme(Theme.of(context)),
-    child: Builder(
-      builder: (context) => ColoredBox(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        child: _workspace(context),
-      ),
-    ),
-  );
-
-  Widget _workspace(BuildContext context) => AnimatedBuilder(
+  Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
     builder: (context, _) => Actions(
       actions: {
@@ -201,29 +191,17 @@ class _LedgerScreenState extends State<LedgerScreen> {
         child: Focus(
           focusNode: _focus,
           autofocus: true,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 20, 20),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: WorkspaceLayout(
+            sidebar: LedgerSidebar(
+              key: _sidebar,
+              ledger: widget.ledger,
+              onError: _showError,
+            ),
+            content: Column(
               children: [
-                SizedBox(
-                  width: 304,
-                  child: LedgerSidebar(
-                    key: _sidebar,
-                    ledger: widget.ledger,
-                    onError: _showError,
-                  ),
-                ),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Column(
-                    children: [
-                      _balances(context),
-                      const SizedBox(height: 16),
-                      Expanded(child: _browse(context)),
-                    ],
-                  ),
-                ),
+                _balances(context),
+                const SizedBox(height: 16),
+                Expanded(child: _browse(context)),
               ],
             ),
           ),
@@ -348,12 +326,8 @@ class _LedgerScreenState extends State<LedgerScreen> {
     );
   }
 
-  Widget _browse(BuildContext context) => Card.filled(
+  Widget _browse(BuildContext context) => WorkspacePanel(
     key: const ValueKey('ledger-browse-panel'),
-    color: Theme.of(context).colorScheme.surfaceContainerLowest,
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-    margin: EdgeInsets.zero,
     child: Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -392,8 +366,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                 child: Text(_displayPeriod == LedgerPeriod.year ? '本年' : '本月'),
               ),
               const Spacer(),
-              SegmentedButton<bool>(
-                showSelectedIcon: false,
+              AppSegmentedButton<bool>(
                 segments: const [
                   ButtonSegment(value: false, label: Text('流水')),
                   ButtonSegment(value: true, label: Text('分类统计')),
@@ -412,8 +385,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
               spacing: 12,
               runSpacing: 8,
               children: [
-                SegmentedButton<LedgerPeriod>(
-                  showSelectedIcon: false,
+                AppSegmentedButton<LedgerPeriod>(
                   key: const ValueKey('stats-period'),
                   segments: const [
                     ButtonSegment(value: LedgerPeriod.month, label: Text('按月')),
@@ -426,8 +398,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     _updatePeriodText();
                   }),
                 ),
-                SegmentedButton<MoneyKind>(
-                  showSelectedIcon: false,
+                AppSegmentedButton<MoneyKind>(
                   key: const ValueKey('stats-kind'),
                   segments: const [
                     ButtonSegment(value: MoneyKind.expense, label: Text('支出')),

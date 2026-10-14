@@ -5,6 +5,7 @@ import '../data/store.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'tag_tree_tile.dart';
+import 'workspace_style.dart';
 
 class TagSidebar extends StatefulWidget {
   const TagSidebar({
@@ -114,88 +115,77 @@ class _TagSidebarState extends State<TagSidebar> {
               .any((parent) => _collapsed.contains(parent.id)),
         )
         .toList();
-    return SizedBox(
-      width: 250,
-      // Material keeps ListTile ink and tile colors visible above the tint.
-      child: Material(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 24, 16, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Daymark',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 28),
-              Expanded(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onSecondaryTapDown: (details) =>
-                      _menu(details.globalPosition, null),
-                  child: Scrollbar(
+    return WorkspacePanel(
+      child: Padding(
+        padding: WorkspaceStyle.panelPadding,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const WorkspaceSectionHeader(title: '时间记录'),
+            const SizedBox(height: 12),
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onSecondaryTapDown: (details) =>
+                    _menu(details.globalPosition, null),
+                child: Scrollbar(
+                  controller: _scroll,
+                  child: ListView(
                     controller: _scroll,
-                    child: ListView(
-                      controller: _scroll,
-                      children: [
-                        for (final tag in tags)
-                          _target(
-                            tag,
-                            Draggable<String>(
-                              data: tag.id,
-                              dragAnchorStrategy: pointerDragAnchorStrategy,
-                              feedback: Material(
-                                elevation: 6,
-                                borderRadius: BorderRadius.circular(8),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Text(tag.name),
-                                ),
+                    children: [
+                      for (final tag in tags)
+                        _target(
+                          tag,
+                          Draggable<String>(
+                            data: tag.id,
+                            dragAnchorStrategy: pointerDragAnchorStrategy,
+                            feedback: Material(
+                              elevation: 6,
+                              borderRadius: BorderRadius.circular(8),
+                              child: Padding(
+                                padding: const EdgeInsets.all(12),
+                                child: Text(tag.name),
                               ),
-                              child: GestureDetector(
-                                onSecondaryTapDown: (details) =>
-                                    _menu(details.globalPosition, tag),
-                                child: TagTreeTile(
-                                  key: ValueKey('tag-${tag.id}'),
-                                  store: store,
-                                  tagId: tag.id,
-                                  label: tag.name,
-                                  depth: store.ancestors(tag.id).length - 1,
-                                  selected: _selected == tag.id,
-                                  collapsed: _collapsed.contains(tag.id),
-                                  onToggle: _hasChildren(store, tag)
-                                      ? () => setState(() => _toggle(tag.id))
-                                      : null,
-                                  // Tapping a parent row folds or unfolds its
-                                  // subtree; leaf rows keep the selection.
-                                  onTap: () async {
-                                    if (_hasChildren(store, tag)) {
-                                      setState(() => _toggle(tag.id));
-                                      return;
-                                    }
-                                    if (await widget.beforeAction() &&
-                                        mounted) {
-                                      setState(() => _selected = tag.id);
-                                    }
-                                  },
-                                ),
+                            ),
+                            child: GestureDetector(
+                              onSecondaryTapDown: (details) =>
+                                  _menu(details.globalPosition, tag),
+                              child: TagTreeTile(
+                                key: ValueKey('tag-${tag.id}'),
+                                store: store,
+                                tagId: tag.id,
+                                label: tag.name,
+                                depth: store.ancestors(tag.id).length - 1,
+                                selected: _selected == tag.id,
+                                collapsed: _collapsed.contains(tag.id),
+                                onToggle: _hasChildren(store, tag)
+                                    ? () => setState(() => _toggle(tag.id))
+                                    : null,
+                                // Tapping a parent row folds or unfolds its
+                                // subtree; leaf rows keep the selection.
+                                onTap: () async {
+                                  if (_hasChildren(store, tag)) {
+                                    setState(() => _toggle(tag.id));
+                                    return;
+                                  }
+                                  if (await widget.beforeAction() && mounted) {
+                                    setState(() => _selected = tag.id);
+                                  }
+                                },
                               ),
                             ),
                           ),
-                        _target(
-                          null,
-                          const SizedBox(height: 180, width: double.infinity),
                         ),
-                      ],
-                    ),
+                      _target(
+                        null,
+                        const SizedBox(height: 180, width: double.infinity),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

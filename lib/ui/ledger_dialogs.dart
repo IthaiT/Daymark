@@ -7,6 +7,7 @@ import '../domain/ledger.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'ledger_category_style.dart';
+import 'workspace_style.dart';
 
 String moneyKindText(MoneyKind kind) => switch (kind) {
   MoneyKind.expense => '支出',
@@ -147,7 +148,7 @@ class _MoneyEditorState extends State<_MoneyEditor> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SegmentedButton<MoneyKind>(
+            AppSegmentedButton<MoneyKind>(
               segments: const [
                 ButtonSegment(value: MoneyKind.expense, label: Text('支出')),
                 ButtonSegment(value: MoneyKind.income, label: Text('收入')),
@@ -523,6 +524,36 @@ class _CategoryManagerState extends State<_CategoryManager> {
     }
   }
 
+  Future<void> _menu(Offset position, MoneyCategory category) async {
+    if (widget.ledger.busy) return;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'edit', child: Text('修改标签')),
+        PopupMenuItem(value: 'child', child: Text('新增子标签')),
+        PopupMenuItem(value: 'delete', child: Text('删除标签')),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'delete') {
+      await _run(() => widget.ledger.deleteCategory(category.id));
+    } else {
+      await showLedgerCategoryEditor(
+        context,
+        widget.ledger,
+        _kind,
+        category: choice == 'edit' ? category : null,
+        parentId: choice == 'child' ? category.id : null,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.ledger,
@@ -535,7 +566,7 @@ class _CategoryManagerState extends State<_CategoryManager> {
           children: [
             Row(
               children: [
-                SegmentedButton<MoneyKind>(
+                AppSegmentedButton<MoneyKind>(
                   segments: const [
                     ButtonSegment(value: MoneyKind.expense, label: Text('支出')),
                     ButtonSegment(value: MoneyKind.income, label: Text('收入')),
@@ -568,87 +599,41 @@ class _CategoryManagerState extends State<_CategoryManager> {
                   for (final category in widget.ledger.state.orderedCategories(
                     _kind,
                   ))
-                    ListTile(
-                      key: ValueKey('category-manage-${category.id}'),
-                      contentPadding: EdgeInsets.only(
-                        left:
-                            12 +
-                            (widget.ledger.state.ancestors(category.id).length -
-                                    1) *
-                                22.0,
-                      ),
-                      title: Row(
-                        children: [
-                          LedgerCategoryBadge(
-                            state: widget.ledger.state,
-                            id: category.id,
-                            size: 28,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(category.name)),
-                        ],
-                      ),
-                      leading: _kind == MoneyKind.expense
-                          ? IconButton(
-                              tooltip:
-                                  widget.ledger.state.pinned.contains(
-                                    category.id,
-                                  )
-                                  ? '取消固定'
-                                  : '固定为常用',
-                              onPressed: widget.ledger.busy
-                                  ? null
-                                  : () => unawaited(
-                                      _run(
-                                        () => widget.ledger.setPinned(
-                                          widget.ledger.state.pinned.contains(
-                                                category.id,
-                                              )
-                                              ? widget.ledger.state.pinned
-                                                    .where(
-                                                      (id) => id != category.id,
-                                                    )
-                                                    .toList()
-                                              : [
-                                                  ...widget.ledger.state.pinned,
-                                                  category.id,
-                                                ],
-                                        ),
-                                      ),
-                                    ),
-                              icon: Icon(
-                                widget.ledger.state.pinned.contains(category.id)
-                                    ? Icons.star
-                                    : Icons.star_border,
+                    GestureDetector(
+                      onSecondaryTapUp: (details) =>
+                          unawaited(_menu(details.globalPosition, category)),
+                      child: ListTile(
+                        key: ValueKey('category-manage-${category.id}'),
+                        contentPadding: EdgeInsets.only(
+                          left:
+                              12 +
+                              (widget.ledger.state
+                                          .ancestors(category.id)
+                                          .length -
+                                      1) *
+                                  WorkspaceStyle.tagIndent,
+                        ),
+                        title: Row(
+                          children: [
+                            LedgerCategoryBadge(
+                              state: widget.ledger.state,
+                              id: category.id,
+                              size: 28,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(category.name)),
+                          ],
+                        ),
+                        onTap: widget.ledger.busy
+                            ? null
+                            : () => unawaited(
+                                showLedgerCategoryEditor(
+                                  context,
+                                  widget.ledger,
+                                  _kind,
+                                  category: category,
+                                ),
                               ),
-                            )
-                          : null,
-                      trailing: PopupMenuButton<String>(
-                        enabled: !widget.ledger.busy,
-                        onSelected: (value) {
-                          if (value == 'delete') {
-                            unawaited(
-                              _run(
-                                () => widget.ledger.deleteCategory(category.id),
-                              ),
-                            );
-                          } else {
-                            unawaited(
-                              showLedgerCategoryEditor(
-                                context,
-                                widget.ledger,
-                                _kind,
-                                category: value == 'edit' ? category : null,
-                                parentId: value == 'child' ? category.id : null,
-                              ),
-                            );
-                          }
-                        },
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'edit', child: Text('重命名或移动')),
-                          PopupMenuItem(value: 'child', child: Text('新增子分类')),
-                          PopupMenuItem(value: 'delete', child: Text('删除')),
-                        ],
                       ),
                     ),
                 ],

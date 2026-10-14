@@ -8,6 +8,8 @@ import '../domain/ledger.dart';
 import '../domain/model.dart';
 import 'ledger_category_style.dart';
 import 'ledger_dialogs.dart';
+import 'tag_drop_target.dart';
+import 'workspace_style.dart';
 
 class _Entry {
   final amount = TextEditingController();
@@ -236,33 +238,15 @@ class LedgerSidebarState extends State<LedgerSidebar> {
   }
 
   List<MoneyCategory> _categories() {
-    final ordered = _state.orderedCategories(_kind);
-    final presetOrder = {
-      for (final (index, item) in defaultMoneyCategories.indexed)
-        item.id: index,
-    };
-    final result = <MoneyCategory>[];
-    void visit(String? parent) {
-      final children = ordered
-          .where((item) => item.parentId == parent)
-          .toList();
-      children.sort((a, b) {
-        int rank(MoneyCategory item) {
-          final pin = _state.pinned.indexOf(item.id);
-          if (parent != null && pin >= 0) return pin;
-          return 100 + (presetOrder[item.id] ?? 1000 + ordered.indexOf(item));
-        }
-
-        return rank(a).compareTo(rank(b));
-      });
-      for (final child in children) {
-        result.add(child);
-        if (!_collapsed.contains(child.id)) visit(child.id);
-      }
-    }
-
-    visit(null);
-    return result;
+    return _state
+        .orderedCategories(_kind)
+        .where(
+          (item) => !_state
+              .ancestors(item.id)
+              .take(_state.ancestors(item.id).length - 1)
+              .any((parent) => _collapsed.contains(parent.id)),
+        )
+        .toList();
   }
 
   bool _validDrop(String source, String? target) =>
@@ -275,16 +259,8 @@ class LedgerSidebarState extends State<LedgerSidebar> {
     onWillAcceptWithDetails: (details) =>
         _validDrop(details.data, category?.id),
     onAcceptWithDetails: (details) {
-      final source = _state.categories[details.data]!;
       unawaited(
-        _run(
-          () => widget.ledger.saveCategory(
-            source.name,
-            source.kind,
-            category?.id,
-            id: source.id,
-          ),
-        ),
+        _run(() => widget.ledger.placeCategory(details.data, category?.id)),
       );
     },
     builder: (context, candidates, _) => ColoredBox(
@@ -351,13 +327,10 @@ class LedgerSidebarState extends State<LedgerSidebar> {
   @override
   Widget build(BuildContext context) {
     final categories = _categories();
-    return Material(
+    return WorkspacePanel(
       key: const ValueKey('ledger-entry-panel'),
-      color: Theme.of(context).colorScheme.surfaceContainerLowest,
-      borderRadius: BorderRadius.circular(16),
-      clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: WorkspaceStyle.panelPadding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -366,15 +339,9 @@ class LedgerSidebarState extends State<LedgerSidebar> {
               GestureDetector(
                 onSecondaryTapDown: (details) =>
                     unawaited(_menu(details.globalPosition, null)),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '记${moneyKindText(_kind)}',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ),
+                child: WorkspaceSectionHeader(
+                  title: '记${moneyKindText(_kind)}',
+                  actions: [
                     IconButton(
                       tooltip: '新增标签',
                       onPressed: _busy
@@ -402,8 +369,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
               ),
             ),
             const SizedBox(height: 8),
-            SegmentedButton<MoneyKind>(
-              showSelectedIcon: false,
+            AppSegmentedButton<MoneyKind>(
               segments: const [
                 ButtonSegment(value: MoneyKind.expense, label: Text('支出标签')),
                 ButtonSegment(value: MoneyKind.income, label: Text('收入标签')),
@@ -474,7 +440,6 @@ class LedgerSidebarState extends State<LedgerSidebar> {
       (item) => item.parentId == category.id,
     );
     final depth = _state.ancestors(category.id).length - 1;
-    final pinned = _state.pinned.contains(category.id);
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -489,9 +454,29 @@ class LedgerSidebarState extends State<LedgerSidebar> {
         ),
       ],
     );
-    return _target(
-      category,
-      GestureDetector(
+    return TagDropTarget(
+      key: ValueKey('ledger-drop-${category.id}'),
+      canAccept: (source, position) =>
+          source != category.id &&
+          _validDrop(
+            source,
+            position == TagDropPosition.inside
+                ? category.id
+                : category.parentId,
+          ),
+      onDrop: (source, position) => unawaited(
+        _run(
+          () => widget.ledger.placeCategory(
+            source,
+            position == TagDropPosition.inside
+                ? category.id
+                : category.parentId,
+            beforeId: position == TagDropPosition.before ? category.id : null,
+            afterId: position == TagDropPosition.after ? category.id : null,
+          ),
+        ),
+      ),
+      child: GestureDetector(
         key: ValueKey('ledger-tag-${category.id}'),
         onSecondaryTapDown: (details) =>
             unawaited(_menu(details.globalPosition, category)),
@@ -531,6 +516,8 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                   Expanded(
                     child: LongPressDraggable<String>(
                       delay: const Duration(milliseconds: 250),
+                      dragAnchorStrategy: pointerDragAnchorStrategy,
+                      onDragEnd: (_) => Focus.of(context).requestFocus(),
                       data: category.id,
                       maxSimultaneousDrags: _busy ? 0 : 1,
                       feedback: Material(
@@ -629,63 +616,6 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                       entry.notesOpen ? Icons.notes : Icons.notes_outlined,
                       size: 18,
                     ),
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: '标签操作',
-                    enabled: !_busy,
-                    padding: EdgeInsets.zero,
-                    child: const SizedBox(
-                      width: 28,
-                      height: 36,
-                      child: Center(child: Icon(Icons.more_vert, size: 18)),
-                    ),
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        unawaited(
-                          showLedgerCategoryEditor(
-                            context,
-                            widget.ledger,
-                            _kind,
-                            category: category,
-                          ),
-                        );
-                        return;
-                      }
-                      final ids = [..._state.pinned];
-                      final position = ids.indexOf(category.id);
-                      if (value == 'unpin') ids.remove(category.id);
-                      if (value == 'pin') ids.add(category.id);
-                      if (value == 'up') {
-                        ids.removeAt(position);
-                        ids.insert(position - 1, category.id);
-                      }
-                      if (value == 'down') {
-                        ids.removeAt(position);
-                        ids.insert(position + 1, category.id);
-                      }
-                      unawaited(_run(() => widget.ledger.setPinned(ids)));
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(value: 'edit', child: Text('修改标签')),
-                      if (_kind == MoneyKind.expense) ...[
-                        PopupMenuItem(
-                          value: pinned ? 'unpin' : 'pin',
-                          child: Text(pinned ? '取消固定' : '固定为常用'),
-                        ),
-                        if (pinned) ...[
-                          PopupMenuItem(
-                            value: 'up',
-                            enabled: _state.pinned.first != category.id,
-                            child: const Text('向上移'),
-                          ),
-                          PopupMenuItem(
-                            value: 'down',
-                            enabled: _state.pinned.last != category.id,
-                            child: const Text('向下移'),
-                          ),
-                        ],
-                      ],
-                    ],
                   ),
                 ],
               ),

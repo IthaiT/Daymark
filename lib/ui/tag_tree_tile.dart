@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../data/store.dart';
 import 'theme.dart';
+import 'tag_visual.dart';
+import 'workspace_style.dart';
 
 /// Shared tag row for the sidebar and event tag pickers.
 class TagTreeTile extends StatelessWidget {
@@ -29,19 +31,25 @@ class TagTreeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ListTile(
     dense: true,
+    minLeadingWidth: WorkspaceStyle.tagSize,
+    horizontalTitleGap: 8,
     selected: selected,
     selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    contentPadding: EdgeInsets.only(left: 4 + depth * 20.0, right: 4),
-    leading: Container(
-      width: 10,
-      height: 10,
-      decoration: BoxDecoration(
-        color: tagDot(store, tagId),
-        borderRadius: BorderRadius.circular(5),
-      ),
+    contentPadding: EdgeInsets.only(
+      left: 4 + depth * WorkspaceStyle.tagIndent,
+      right: 4,
     ),
-    title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    leading: AppTagBadge(
+      family: tagFamily(store, tagId),
+      accent: tagDot(store, tagId),
+    ),
+    title: Text(
+      label,
+      style: Theme.of(context).textTheme.bodyMedium,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
     trailing: onToggle == null
         ? null
         : Tooltip(

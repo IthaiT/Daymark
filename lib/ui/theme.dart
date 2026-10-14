@@ -1,43 +1,11 @@
 import 'package:flutter/material.dart';
-
 import '../data/store.dart';
 import '../domain/model.dart';
+import 'tag_visual.dart';
+import 'workspace_style.dart';
 
-/// Indigo-seeded Material 3 light theme: the accent, surfaces, menus and
-/// dialogs all derive from one seed color.
+/// Shared Material 3 theme for time recording, the ledger and all dialogs.
 ThemeData daymarkTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: Colors.indigo,
-    brightness: Brightness.light,
-  );
-  OutlineInputBorder inputBorder(Color color) => OutlineInputBorder(
-    borderRadius: BorderRadius.circular(10),
-    borderSide: BorderSide(color: color),
-  );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: scheme,
-    brightness: Brightness.light,
-    fontFamily: 'Microsoft YaHei UI',
-    visualDensity: VisualDensity.compact,
-    scaffoldBackgroundColor: scheme.surfaceContainerLow,
-    inputDecorationTheme: InputDecorationTheme(
-      filled: true,
-      fillColor: scheme.surfaceContainerLowest,
-      isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      border: inputBorder(scheme.outlineVariant),
-      enabledBorder: inputBorder(scheme.outlineVariant),
-      focusedBorder: inputBorder(scheme.primary),
-    ),
-    scrollbarTheme: const ScrollbarThemeData(
-      thickness: WidgetStatePropertyAll(7),
-    ),
-  );
-}
-
-/// Quiet neutral surfaces and a teal accent for the desktop ledger workspace.
-ThemeData ledgerTheme(ThemeData base) {
   final scheme =
       ColorScheme.fromSeed(
         seedColor: Colors.teal,
@@ -53,20 +21,58 @@ ThemeData ledgerTheme(ThemeData base) {
         onSurface: Colors.grey[900],
         onSurfaceVariant: Colors.grey[700],
       );
-  final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(10));
+  final shape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
+  );
   final border = OutlineInputBorder(
-    borderRadius: BorderRadius.circular(10),
+    borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
     borderSide: BorderSide.none,
   );
-  return base.copyWith(
+  TextStyle text(double size, {FontWeight weight = FontWeight.w400}) =>
+      TextStyle(
+        fontSize: size,
+        fontWeight: weight,
+        height: 1.45,
+        letterSpacing: 0,
+      );
+  return ThemeData(
+    useMaterial3: true,
     colorScheme: scheme,
+    brightness: Brightness.light,
+    fontFamily: 'Noto Sans SC',
+    fontFamilyFallback: const ['Segoe UI', 'Microsoft YaHei UI'],
+    visualDensity: VisualDensity.compact,
     scaffoldBackgroundColor: scheme.surfaceContainerLow,
-    inputDecorationTheme: base.inputDecorationTheme.copyWith(
+    textTheme: TextTheme(
+      bodyLarge: text(16),
+      bodyMedium: text(14),
+      bodySmall: text(12),
+      titleLarge: text(20, weight: FontWeight.w600),
+      titleMedium: text(16, weight: FontWeight.w600),
+      titleSmall: text(14, weight: FontWeight.w500),
+      labelLarge: text(14, weight: FontWeight.w500),
+      labelMedium: text(12, weight: FontWeight.w500),
+      labelSmall: text(12),
+      headlineSmall: text(24, weight: FontWeight.w600),
+      headlineMedium: text(28, weight: FontWeight.w600),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
       fillColor: scheme.surfaceContainerLow,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: border,
       enabledBorder: border,
       focusedBorder: border.copyWith(
         borderSide: BorderSide(color: scheme.primary, width: 1.5),
+      ),
+    ),
+    cardTheme: CardThemeData(
+      color: scheme.surfaceContainerLowest,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(WorkspaceStyle.panelRadius),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -100,6 +106,14 @@ ThemeData ledgerTheme(ThemeData base) {
         ),
       ),
     ),
+    scrollbarTheme: const ScrollbarThemeData(
+      thickness: WidgetStatePropertyAll(7),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: scheme.surfaceContainerLowest,
+      shape: shape,
+      textStyle: text(14),
+    ),
   );
 }
 
@@ -111,18 +125,7 @@ const _familyDefaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 3};
 // Lightness steps handed out to family members in sidebar (tree) order so
 // adjacent siblings always differ; the root itself keeps the middle 500 step.
 const _steps = [400, 600, 300, 700, 500, 800];
-// Pastel fill and strong ink per step; large timeline areas stay muted while
-// the ink carries enough contrast for chips, dots and text.
-const _inkPairs = {
-  300: (100, 600),
-  400: (100, 700),
-  500: (100, 800),
-  600: (200, 800),
-  700: (300, 900),
-  800: (300, 900),
-};
-
-MaterialColor _familyFor(Store store, String? tagId) {
+MaterialColor tagFamily(Store store, String? tagId) {
   if (tagId == null) return Colors.blueGrey;
   final root = store.ancestors(tagId).first.id;
   final index =
@@ -150,14 +153,14 @@ int _stepFor(Store store, String? tagId) {
   if (event.tagId == null) {
     return (Colors.blueGrey[selected ? 200 : 100]!, Colors.blueGrey[800]!);
   }
-  final family = _familyFor(store, event.tagId);
-  final (fill, ink) = _inkPairs[_stepFor(store, event.tagId)]!;
-  return (
-    family[selected ? (fill >= 300 ? 300 : fill + 100) : fill]!,
-    family[ink]!,
+  final family = tagFamily(store, event.tagId);
+  return tagSurfaceColors(
+    family,
+    tagDot(store, event.tagId),
+    opacity: selected ? .34 : .20,
   );
 }
 
 /// Accent color for the dot marking a tag in the sidebar.
 Color tagDot(Store store, String? tagId) =>
-    _familyFor(store, tagId)[_stepFor(store, tagId)]!;
+    tagFamily(store, tagId)[_stepFor(store, tagId)]!;

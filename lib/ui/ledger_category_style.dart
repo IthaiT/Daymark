@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/ledger.dart';
+import 'tag_visual.dart';
 
 MaterialColor categorySwatch(CategoryColor color) => switch (color) {
   CategoryColor.green => Colors.green,
@@ -104,12 +105,10 @@ Color ledgerCategoryColor(LedgerState state, String? id) {
 
 /// Soft category badges use a dark hue, while charts keep the full accent.
 (Color, Color) ledgerCategoryBadgeColors(LedgerState state, String? id) {
-  final accent = ledgerCategoryColor(state, id);
-  final fill = Color.alphaBlend(accent.withValues(alpha: .24), Colors.white);
-  final ink = ledgerCategorySwatch(state, id)[900]!;
-  final contrast =
-      (fill.computeLuminance() + .05) / (ink.computeLuminance() + .05);
-  return (fill, contrast >= 4.5 ? ink : Colors.grey[800]!);
+  return tagSurfaceColors(
+    ledgerCategorySwatch(state, id),
+    ledgerCategoryColor(state, id),
+  );
 }
 
 IconData ledgerCategoryIcon(LedgerState state, String? id) {
@@ -146,15 +145,11 @@ class LedgerCategoryBadge extends StatelessWidget {
   final double size;
   @override
   Widget build(BuildContext context) {
-    final (fill, ink) = ledgerCategoryBadgeColors(state, id);
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: fill,
-        borderRadius: BorderRadius.circular(size * .3),
-      ),
-      child: Icon(ledgerCategoryIcon(state, id), size: size * .58, color: ink),
+    return AppTagBadge(
+      family: ledgerCategorySwatch(state, id),
+      accent: ledgerCategoryColor(state, id),
+      icon: ledgerCategoryIcon(state, id),
+      size: size,
     );
   }
 }
