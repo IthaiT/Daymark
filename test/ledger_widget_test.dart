@@ -3,10 +3,13 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:daymark/application/journal_controller.dart';
+import 'package:daymark/application/appearance_controller.dart';
 import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/data/ledger_store.dart';
+import 'package:daymark/data/appearance_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/ledger.dart';
+import 'package:daymark/domain/appearance.dart';
 import 'package:daymark/domain/model.dart' show Event;
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/ledger_screen.dart';
@@ -388,8 +391,19 @@ void main() {
       expect(ledgerTheme.textTheme, journalTheme.textTheme);
       expect(ledgerTheme.textTheme.bodyMedium!.fontFamily, 'Noto Sans SC');
       await tester.enterText(quick('lunch'), '28');
+      await tester.tap(find.byKey(const ValueKey('palette-rose')));
+      await tester.pumpAndSettle();
+      final changedTheme = Theme.of(tester.element(quick('lunch')));
+      expect(changedTheme.colorScheme, isNot(journalTheme.colorScheme));
+      expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
       await tester.tap(find.byKey(const ValueKey('mode-0')));
       await tester.pumpAndSettle();
+      expect(
+        Theme.of(
+          tester.element(find.byKey(const ValueKey('day-input'))),
+        ).colorScheme,
+        changedTheme.colorScheme,
+      );
       await tester.tap(find.byKey(const ValueKey('mode-1')));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
@@ -406,6 +420,89 @@ void main() {
       await tester.pumpAndSettle();
       await shortcut(tester, LogicalKeyboardKey.keyY);
       expect(store.state.records.length, 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('failed theme persistence retains the palette and money drafts', (
+    tester,
+  ) async {
+    await open(tester);
+    final journalStore = (await tester.runAsync(() => Store.open(directory)))!;
+    final journal = JournalController(journalStore, day: day);
+    addTearDown(journal.dispose);
+    final preferences = (await tester.runAsync(
+      () => AppearanceStore.open(
+        directory,
+        writer: (file, bytes) async {
+          throw const FileSystemException('模拟配色保存失败');
+        },
+      ),
+    ))!;
+    final appearance = AppearanceController(preferences);
+    addTearDown(appearance.dispose);
+    await tester.pumpWidget(
+      DaymarkApp(journal: journal, ledger: ledger, appearance: appearance),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('mode-1')));
+    await tester.pumpAndSettle();
+    await tester.enterText(quick('lunch'), '31');
+    await tester.tap(find.byKey(const ValueKey('palette-pine')));
+    await tester.pumpAndSettle();
+    expect(appearance.state.palette, AppPalette.slate);
+    expect(find.textContaining('无法保存配色设置'), findsOneWidget);
+    expect(tester.widget<TextField>(quick('lunch')).controller!.text, '31');
+    expect(
+      Theme.of(tester.element(quick('lunch'))).colorScheme,
+      daymarkTheme().colorScheme,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'record context menu edits notes, deletes and supports keyboard undo',
+    (tester) async {
+      await open(tester);
+      await ledger.saveInputs([expense(2800, 'lunch', notes: '原备注')]);
+      await tester.pumpAndSettle();
+      final id = store.state.records.keys.single;
+      final row = find.byKey(ValueKey('money-record-$id'));
+      expect(
+        find.descendant(
+          of: row,
+          matching: find.byType(PopupMenuButton<String>),
+        ),
+        findsNothing,
+      );
+      await tester.tap(row, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改备注'));
+      await tester.pumpAndSettle();
+      final notesField = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(notesField, '更新后的备注');
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[id]!.notes, '更新后的备注');
+      final focus = Focus.of(
+        tester.element(
+          find.descendant(of: row, matching: find.text('餐饮 / 午餐')),
+        ),
+      );
+      focus.requestFocus();
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.f10);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除账单'));
+      await tester.pumpAndSettle();
+      expect(store.state.records, isEmpty);
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.records[id]!.notes, '更新后的备注');
       expect(tester.takeException(), isNull);
     },
   );

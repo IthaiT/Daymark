@@ -13,6 +13,7 @@ import 'ledger_category_style.dart';
 import 'ledger_sidebar.dart';
 import 'ledger_statistics.dart';
 import 'workspace_style.dart';
+import 'theme_tokens.dart';
 
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({super.key, required this.ledger, this.focusNode});
@@ -232,7 +233,9 @@ class _LedgerScreenState extends State<LedgerScreen> {
             title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
           FittedBox(
@@ -333,49 +336,69 @@ class _LedgerScreenState extends State<LedgerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 16,
+            runSpacing: 12,
             children: [
-              IconButton(
-                key: const ValueKey('money-previous-month'),
-                tooltip: _displayPeriod == LedgerPeriod.year ? '上一年' : '上个月',
-                onPressed: () => _stepPeriod(-1),
-                icon: const Icon(Icons.chevron_left),
+              Text(
+                _displayPeriod == LedgerPeriod.year ? '年度统计' : '本月账单',
+                style: Theme.of(context).textTheme.titleLarge,
               ),
-              SizedBox(
-                width: 108,
-                child: TextField(
-                  key: const ValueKey('money-month'),
-                  controller: _monthText,
-                  textAlign: TextAlign.center,
-                  decoration: InputDecoration(
-                    hintText: _displayPeriod == LedgerPeriod.year
-                        ? 'YYYY'
-                        : 'YYYY-MM',
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 4,
+                runSpacing: 8,
+                children: [
+                  IconButton(
+                    key: const ValueKey('money-previous-month'),
+                    tooltip: _displayPeriod == LedgerPeriod.year
+                        ? '上一年'
+                        : '上个月',
+                    onPressed: () => _stepPeriod(-1),
+                    icon: const Icon(Icons.chevron_left),
                   ),
-                  onSubmitted: (_) => _parseMonth(),
-                ),
-              ),
-              IconButton(
-                key: const ValueKey('money-next-month'),
-                tooltip: _displayPeriod == LedgerPeriod.year ? '下一年' : '下个月',
-                onPressed: () => _stepPeriod(1),
-                icon: const Icon(Icons.chevron_right),
-              ),
-              TextButton(
-                onPressed: () => _setMonth(widget.ledger.clock()),
-                child: Text(_displayPeriod == LedgerPeriod.year ? '本年' : '本月'),
-              ),
-              const Spacer(),
-              AppSegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('流水')),
-                  ButtonSegment(value: true, label: Text('分类统计')),
+                  SizedBox(
+                    width: 108,
+                    child: TextField(
+                      key: const ValueKey('money-month'),
+                      controller: _monthText,
+                      textAlign: TextAlign.center,
+                      decoration: InputDecoration(
+                        hintText: _displayPeriod == LedgerPeriod.year
+                            ? 'YYYY'
+                            : 'YYYY-MM',
+                      ),
+                      onSubmitted: (_) => _parseMonth(),
+                    ),
+                  ),
+                  IconButton(
+                    key: const ValueKey('money-next-month'),
+                    tooltip: _displayPeriod == LedgerPeriod.year
+                        ? '下一年'
+                        : '下个月',
+                    onPressed: () => _stepPeriod(1),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                  TextButton(
+                    onPressed: () => _setMonth(widget.ledger.clock()),
+                    child: Text(
+                      _displayPeriod == LedgerPeriod.year ? '本年' : '本月',
+                    ),
+                  ),
+                  AppSegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('流水')),
+                      ButtonSegment(value: true, label: Text('分类统计')),
+                    ],
+                    selected: {_statistics},
+                    onSelectionChanged: (values) => setState(() {
+                      _statistics = values.single;
+                      _updatePeriodText();
+                    }),
+                  ),
                 ],
-                selected: {_statistics},
-                onSelectionChanged: (values) => setState(() {
-                  _statistics = values.single;
-                  _updatePeriodText();
-                }),
               ),
             ],
           ),
@@ -419,7 +442,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
               Text(
                 '支出  ¥ ${moneyText(_state.periodTotal(_month, _displayPeriod, MoneyKind.expense))}',
                 key: const ValueKey('month-expense'),
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(width: 28),
               Text(
@@ -503,89 +526,127 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     ],
                   ),
                 ),
-              ListTile(
-                key: ValueKey('money-record-${record.id}'),
-                title: Text(title),
-                subtitle: record.notes.isEmpty ? null : Text(record.notes),
-                leading: record.categoryId != null
-                    ? LedgerCategoryBadge(state: _state, id: record.categoryId)
-                    : Icon(
-                        switch (record.kind) {
-                          MoneyKind.expense => Icons.remove_circle_outline,
-                          MoneyKind.income => Icons.add_circle_outline,
-                          MoneyKind.transfer => Icons.swap_horiz,
-                          MoneyKind.adjustment => Icons.balance,
-                        },
-                        color: record.kind == MoneyKind.income
-                            ? Colors.green[700]
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
+              Builder(
+                builder: (rowContext) {
+                  void menu(Offset position) =>
+                      unawaited(_recordMenu(record, position));
+                  void keyboardMenu() {
+                    final box = rowContext.findRenderObject()! as RenderBox;
+                    menu(
+                      box.localToGlobal(
+                        Offset(box.size.width - 20, box.size.height / 2),
                       ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '$sign¥ ${moneyText(record.amountCents.abs())}',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    PopupMenuButton<String>(
-                      enabled: !_saving,
-                      tooltip: '流水操作',
-                      onSelected: (value) {
-                        if (value == 'delete') {
-                          unawaited(
-                            _action(
-                              () => widget.ledger.deleteRecord(record.id),
-                            ),
-                          );
-                        } else if (value == 'notes') {
-                          unawaited(
-                            showMoneyNotes(context, widget.ledger, record),
-                          );
-                        } else {
-                          unawaited(
-                            showMoneyEditor(
-                              context,
-                              widget.ledger,
-                              record: record,
-                            ),
-                          );
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(
-                          value: 'notes',
-                          child: Text('修改备注'),
-                        ),
-                        if ([
-                          MoneyKind.expense,
-                          MoneyKind.income,
-                        ].contains(record.kind))
-                          const PopupMenuItem(value: 'edit', child: Text('修改')),
-                        const PopupMenuItem(value: 'delete', child: Text('删除')),
-                      ],
-                    ),
-                  ],
-                ),
-                onTap: _saving || widget.ledger.busy
-                    ? null
-                    : () => unawaited(
-                        [
-                              MoneyKind.expense,
-                              MoneyKind.income,
-                            ].contains(record.kind)
-                            ? showMoneyEditor(
-                                context,
-                                widget.ledger,
-                                record: record,
+                    );
+                  }
+
+                  return CallbackShortcuts(
+                    bindings: {
+                      const SingleActivator(
+                        LogicalKeyboardKey.f10,
+                        shift: true,
+                      ): keyboardMenu,
+                      const SingleActivator(LogicalKeyboardKey.contextMenu):
+                          keyboardMenu,
+                    },
+                    child: GestureDetector(
+                      onSecondaryTapUp: (details) =>
+                          menu(details.globalPosition),
+                      child: ListTile(
+                        key: ValueKey('money-record-${record.id}'),
+                        title: Text(title),
+                        subtitle: record.notes.isEmpty
+                            ? null
+                            : Text(record.notes),
+                        leading: record.categoryId != null
+                            ? LedgerCategoryBadge(
+                                state: _state,
+                                id: record.categoryId,
                               )
-                            : showMoneyNotes(context, widget.ledger, record),
+                            : Icon(
+                                switch (record.kind) {
+                                  MoneyKind.expense =>
+                                    Icons.remove_circle_outline,
+                                  MoneyKind.income => Icons.add_circle_outline,
+                                  MoneyKind.transfer => Icons.swap_horiz,
+                                  MoneyKind.adjustment => Icons.balance,
+                                },
+                                color: record.kind == MoneyKind.income
+                                    ? DaymarkColors.of(context).income
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                              ),
+                        trailing: Text(
+                          '$sign¥ ${moneyText(record.amountCents.abs())}',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: record.kind == MoneyKind.expense
+                                    ? DaymarkColors.of(context).expense
+                                    : record.kind == MoneyKind.income
+                                    ? DaymarkColors.of(context).income
+                                    : null,
+                              ),
+                        ),
+                        onTap: _saving || widget.ledger.busy
+                            ? null
+                            : () => unawaited(
+                                [
+                                      MoneyKind.expense,
+                                      MoneyKind.income,
+                                    ].contains(record.kind)
+                                    ? showMoneyEditor(
+                                        context,
+                                        widget.ledger,
+                                        record: record,
+                                      )
+                                    : showMoneyNotes(
+                                        context,
+                                        widget.ledger,
+                                        record,
+                                      ),
+                              ),
                       ),
+                    ),
+                  );
+                },
               ),
             ],
           );
         },
       ),
     );
+  }
+
+  Future<void> _recordMenu(MoneyRecord record, Offset position) async {
+    if (_saving || widget.ledger.busy) return;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final editable = [
+      MoneyKind.expense,
+      MoneyKind.income,
+    ].contains(record.kind);
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        overlay.globalToLocal(position) & Size.zero,
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        if (editable) const PopupMenuItem(value: 'edit', child: Text('修改账单')),
+        const PopupMenuItem(value: 'notes', child: Text('修改备注')),
+        const PopupMenuItem(value: 'delete', child: Text('删除账单')),
+      ],
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'edit':
+        await showMoneyEditor(context, widget.ledger, record: record);
+      case 'notes':
+        await showMoneyNotes(context, widget.ledger, record);
+      case 'delete':
+        await _action(() => widget.ledger.deleteRecord(record.id));
+    }
+    if (mounted) _focus.requestFocus();
   }
 
   Widget _stats(BuildContext context) => LedgerStatistics(
