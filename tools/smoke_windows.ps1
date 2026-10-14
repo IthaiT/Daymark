@@ -90,23 +90,32 @@ public static class DaymarkPrivateDesktop {
         }
         return false;
     }
-    static void CheckIconFont(string executable) {
-        var bytes = File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(executable), "data", "flutter_assets", "fonts", "MaterialIcons-Regular.otf"));
+    static void CheckGlyphs(string fontPath, int[] codepoints) {
+        var bytes = File.ReadAllBytes(fontPath);
         int cmap = -1;
         for (int table = 0; table < Read16(bytes, 4); table++) {
             int record = 12 + table * 16;
             if (Encoding.ASCII.GetString(bytes, record, 4) == "cmap") cmap = checked((int)Read32(bytes, record + 8));
         }
-        // Incremental Windows builds can retain an icon subset from older Dart code.
-        // Cover journal controls, every ledger category badge and the notes control.
-        foreach (int codepoint in new[] {
+        foreach (int codepoint in codepoints) {
+            if (cmap < 0 || !HasGlyph(bytes, cmap, codepoint)) {
+                throw new Exception($"Release font {Path.GetFileName(fontPath)} is missing U+{codepoint:X4}.");
+            }
+        }
+    }
+    static void CheckFonts(string executable) {
+        string assets = Path.Combine(Path.GetDirectoryName(executable), "data", "flutter_assets");
+        // Incremental Windows builds can retain an older Material icon subset.
+        CheckGlyphs(Path.Combine(assets, "fonts", "MaterialIcons-Regular.otf"), new[] {
             0xe556, 0xf48f, 0xf316, 0xf107, 0xef56, 0xefc4, 0xef4c,
             0xe25c, 0xf1be, 0xee33, 0xf266, 0xf37d, 0xf3ca, 0xf2ef,
             0xf336, 0xe364, 0xe44c, 0xf231
-        }) {
-            if (cmap < 0 || !HasGlyph(bytes, cmap, codepoint)) {
-                throw new Exception($"Release icon font is missing U+{codepoint:X4}. Regenerate Flutter assets by invalidating release_bundle_windows-x64_assets.stamp before rebuilding.");
-            }
+        });
+        CheckGlyphs(Path.Combine(assets, "assets", "fonts", "NotoSansSC.ttf"), new[] {
+            0x0030, 0x0041, 0x0061, 0x00a5, 0x4e2d, 0x6587, 0x65f6, 0x95f4, 0x9910, 0x996e
+        });
+        if (!File.Exists(Path.Combine(assets, "assets", "fonts", "OFL.txt"))) {
+            throw new Exception("The bundled font license is missing.");
         }
     }
 
@@ -170,7 +179,7 @@ public static class DaymarkPrivateDesktop {
         }
     }
     public static void Run(string executable, string directory, string gapStart, string gapEnd) {
-        CheckIconFont(executable);
+        CheckFonts(executable);
         // No DESKTOP_SWITCHDESKTOP access; never activate or fall back to the input desktop.
         string name = "DaymarkSmoke-" + Guid.NewGuid().ToString("N");
         IntPtr desktop = CreateDesktopW(name, IntPtr.Zero, IntPtr.Zero, 0, 0x87, IntPtr.Zero);
