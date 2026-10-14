@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../data/store.dart';
 import 'theme.dart';
-import 'tag_visual.dart';
 import 'workspace_style.dart';
 
 /// Shared tag row for the sidebar and event tag pickers.
@@ -40,9 +39,19 @@ class TagTreeTile extends StatelessWidget {
       left: 4 + depth * WorkspaceStyle.tagIndent,
       right: 4,
     ),
-    leading: AppTagBadge(
-      family: tagFamily(store, tagId),
-      accent: tagDot(store, tagId),
+    leading: SizedBox(
+      width: WorkspaceStyle.tagSize,
+      child: Center(
+        child: Container(
+          key: ValueKey('tag-dot-${tagId ?? 'unclassified'}'),
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: tagDot(store, tagId),
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
     ),
     title: Text(
       label,

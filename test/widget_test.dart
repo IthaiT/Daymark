@@ -1,5 +1,4 @@
 import 'support/screenshot_fonts.dart';
-import 'package:daymark/ui/tag_visual.dart';
 import 'package:daymark/ui/workspace_style.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
@@ -771,11 +770,16 @@ void main() {
           )
           .height,
     );
-    final leftDot = sidebar.leading! as AppTagBadge;
-    final pickerDot = picker.leading! as AppTagBadge;
-    expect(pickerDot.family, leftDot.family);
-    expect(pickerDot.accent, leftDot.accent);
-    expect(pickerDot.size, leftDot.size);
+    Finder dot(String scope) => find.descendant(
+      of: find.byKey(ValueKey(scope)),
+      matching: find.byKey(const ValueKey('tag-dot-work')),
+    );
+    final leftDot = tester.widget<Container>(dot('tag-work'));
+    final pickerDot = tester.widget<Container>(dot('tag-choice-work'));
+    expect(pickerDot.decoration, leftDot.decoration);
+    expect((leftDot.decoration! as BoxDecoration).shape, BoxShape.circle);
+    expect(tester.getSize(dot('tag-work')), const Size(10, 10));
+    expect(tester.getSize(dot('tag-choice-work')), const Size(10, 10));
     expect(
       tile('tag-choice-linux').contentPadding,
       tile('tag-linux').contentPadding,
