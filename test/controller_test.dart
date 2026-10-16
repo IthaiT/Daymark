@@ -49,6 +49,102 @@ void main() {
     day.add(Duration(hours: end)),
   );
 
+  Future<void> seedLegacyGap(
+    List<Event> events, {
+    String title = '未定义',
+    String notes = '',
+  }) async {
+    final gap = undefinedEvents(
+      events,
+    ).single.copyWith(title: title, notes: notes);
+    await store.replaceEvents({
+      for (final event in [...events, gap]) event.id: event,
+    });
+  }
+
+  test(
+    'separated events and drafts never create or persist automatic gaps',
+    () async {
+      final first = item('a', 9, 10);
+      final second = item('b', 12, 13);
+      await store.replaceEvents({first.id: first, second.id: second});
+      final before = writes;
+      await controller.initialize();
+      expect(controller.rows, [first, second]);
+      expect(writes, before);
+
+      final draft = await controller.addDraft(
+        start: day.add(const Duration(hours: 16)),
+      );
+      expect(store.events.length, 2);
+      expect(controller.rows.length, 3);
+      await controller.editCell(draft, EventColumn.title, '第三项');
+      await controller.updateEvent(item('b', 14, 15));
+      controller.select('b');
+      await controller.deleteSelected();
+      await controller.undo();
+      expect(controller.rows.length, 3);
+      expect(store.events.values.any((event) => event.isUndefined), isFalse);
+      await controller.redo();
+      await controller.shiftDay(1);
+      expect(controller.rows, isEmpty);
+      await controller.setDay(day);
+      expect(controller.rows.map((event) => event.id), ['a', draft]);
+      expect((await Store.open(directory)).events, store.events);
+    },
+  );
+
+  test(
+    'startup removes default legacy gaps across all days but keeps manual events',
+    () async {
+      final first = item('a', 9, 10);
+      final last = item('b', 60, 61);
+      final gap = undefinedEvents([first, last]).single;
+      final manual = item(
+        'manual',
+        11,
+        12,
+      ).copyWith(title: '未定义', clearTag: true);
+      await store.replaceEvents({
+        for (final event in [first, last, gap, manual]) event.id: event,
+      });
+      await controller.initialize();
+      expect(store.events, {first.id: first, last.id: last, manual.id: manual});
+      await controller.shiftDay(1);
+      expect(controller.rows, isEmpty);
+      expect((await Store.open(directory)).events, store.events);
+    },
+  );
+
+  test(
+    'startup retains customized legacy gaps without generating new defaults',
+    () async {
+      final events = [
+        item('a', 9, 10),
+        item('b', 12, 13),
+        item('c', 15, 16),
+        item('d', 18, 19),
+      ];
+      final gaps = undefinedEvents(events);
+      final named = gaps[0].copyWith(title: '准备午饭');
+      final annotated = gaps[1].copyWith(notes: '旧版备注');
+      await store.replaceEvents({
+        for (final event in [...events, named, annotated, gaps[2]])
+          event.id: event,
+      });
+      final before = writes;
+      await controller.initialize();
+      expect(store.events.values.where((event) => event.isUndefined), [
+        named,
+        annotated,
+      ]);
+      expect(writes - before, 1);
+      await controller.initialize();
+      expect(writes - before, 1);
+      expect((await Store.open(directory)).events, store.events);
+    },
+  );
+
   test(
     'range selection can follow displayed group order while timeline stays chronological',
     () async {
@@ -270,12 +366,13 @@ void main() {
     },
   );
 
-  test('tag names a generic gap but keeps a renamed gap title', () async {
-    await store.replaceEvents({'a': item('a', 9, 10), 'b': item('b', 12, 13)});
+  test('tag assignment names a legacy gap with notes after its tag', () async {
+    await seedLegacyGap([item('a', 9, 10), item('b', 12, 13)], notes: '旧版备注');
     await controller.initialize();
     final gap = controller.rows.singleWhere((event) => event.isUndefined);
     final promoted = await controller.editCell(gap.id, EventColumn.tag, 'work');
     expect(store.events[promoted]!.title, store.tagName('work'));
+    expect(store.events[promoted]!.notes, '旧版备注');
   });
 
   test(
@@ -317,10 +414,7 @@ void main() {
   test(
     'gap rename survives boundary changes and promotion only happens on tag assignment',
     () async {
-      await store.replaceEvents({
-        'a': item('a', 9, 10),
-        'b': item('b', 12, 13),
-      });
+      await seedLegacyGap([item('a', 9, 10), item('b', 12, 13)], title: '煮饭');
       await controller.initialize();
       final gap = controller.rows.singleWhere(
         (event) => event.isUndefined && event.start.hour == 10,
@@ -345,7 +439,7 @@ void main() {
   );
 
   test(
-    'delete mixed selection keeps unrelated drafts and derived rows, undo restores all',
+    'delete mixed selection keeps unrelated drafts, undo restores all',
     () async {
       await store.saveEvent(item('saved', 9, 10));
       final first = await controller.addDraft(
@@ -386,22 +480,25 @@ void main() {
     },
   );
 
-  test('event mutation and gap sync are a single atomic write', () async {
-    await store.replaceEvents({'a': item('a', 9, 10), 'b': item('b', 12, 13)});
-    await controller.initialize();
-    final before = writes;
-    await controller.updateEvent(item('a', 9, 11));
-    expect(writes - before, 1);
-    final restored = await Store.open(directory);
-    expect(restored.events['a']!.end!.hour, 11);
-    expect(
-      restored.events.values
-          .singleWhere((event) => event.isUndefined && event.start.hour == 11)
-          .end!
-          .hour,
-      12,
-    );
-  });
+  test(
+    'event mutation and legacy gap sync are a single atomic write',
+    () async {
+      await seedLegacyGap([item('a', 9, 10), item('b', 12, 13)], title: '煮饭');
+      await controller.initialize();
+      final before = writes;
+      await controller.updateEvent(item('a', 9, 11));
+      expect(writes - before, 1);
+      final restored = await Store.open(directory);
+      expect(restored.events['a']!.end!.hour, 11);
+      expect(
+        restored.events.values
+            .singleWhere((event) => event.isUndefined && event.start.hour == 11)
+            .end!
+            .hour,
+        12,
+      );
+    },
+  );
 
   test(
     'serialized simultaneous edits retain both results and undo ordering',
@@ -424,7 +521,7 @@ void main() {
   );
 
   test(
-    'date navigation discards drafts, synchronizes their gaps and leaves no blank-day rows',
+    'date navigation discards drafts and leaves no blank-day rows',
     () async {
       await controller.addDraft();
       await controller.shiftDay(1);
@@ -631,7 +728,7 @@ void main() {
         morning.add(const Duration(minutes: 6)),
         morning.add(const Duration(hours: 8)),
       );
-      await store.replaceEvents({video.id: video, sleep.id: sleep});
+      await seedLegacyGap([video, sleep], title: '跨天空档');
       await controller.initialize();
       final gap = controller.rows.singleWhere(
         (gap) => gap.isUndefined && gap.start == video.end,

@@ -179,7 +179,7 @@ public static class DaymarkPrivateDesktop {
             if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous);
         }
     }
-    public static void Run(string executable, string directory, string gapStart, string gapEnd) {
+    public static void Run(string executable, string directory) {
         CheckFonts(executable);
         // No DESKTOP_SWITCHDESKTOP access; never activate or fall back to the input desktop.
         string name = "DaymarkSmoke-" + Guid.NewGuid().ToString("N");
@@ -188,6 +188,7 @@ public static class DaymarkPrivateDesktop {
         Process first = null, second = null;
         try {
             var ledgerBytes = File.ReadAllBytes(Path.Combine(directory, "ledger.json"));
+            var originalEvents = File.ReadAllLines(Path.Combine(directory, "events.csv"));
             first = Launch(executable, directory, name);
             var firstWindow = WaitForWindow(desktop, first);
             Thread.Sleep(500);
@@ -198,14 +199,16 @@ public static class DaymarkPrivateDesktop {
             }
             var bytes = File.ReadAllBytes(Path.Combine(directory, "events.csv"));
             var csv = Encoding.UTF8.GetString(bytes);
-            if (csv.Contains("undefined:legacy-leading")) {
-                throw new Exception("Native launch retained an unbounded gap before the first ordinary event.");
+            if (csv.Contains("undefined:")) {
+                throw new Exception("Native launch retained or created an automatic gap.");
             }
-            if (bytes.Length < 3 || bytes[0] != 0xef || bytes[1] != 0xbb || bytes[2] != 0xbf || !csv.Contains("undefined:")) {
-                throw new Exception("Native launch did not preserve BOM and synchronize derived gaps.");
+            if (bytes.Length < 3 || bytes[0] != 0xef || bytes[1] != 0xbb || bytes[2] != 0xbf) {
+                throw new Exception("Native launch did not preserve the CSV BOM.");
             }
-            if (!csv.Contains("," + gapStart + "," + gapEnd + ",")) {
-                throw new Exception("Native launch did not persist the complete cross-midnight gap.");
+            foreach (var row in originalEvents) {
+                if (!row.StartsWith("undefined:", StringComparison.Ordinal) && !csv.Contains(row + "\r\n")) {
+                    throw new Exception("Native launch changed an ordinary CSV record.");
+                }
             }
             second = Launch(executable, directory, name);
             var secondWindow = WaitForWindow(desktop, second);
@@ -231,5 +234,5 @@ public static class DaymarkPrivateDesktop {
     }
 }
 '@
-[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory)
+Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, automatic-gap cleanup without regeneration, CSV BOM and ordinary-event preservation, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"

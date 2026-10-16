@@ -281,7 +281,7 @@ class EventTableState extends State<EventTable> {
 
   Widget _summaryRow(EventGroup group, List<double> widths) {
     final title = group.isUnclassified
-        ? '未分类 / 未定义'
+        ? '未分类'
         : widget.journal.store.tagName(group.key.tagId);
     final expanded = _expanded.contains(group.key);
     final selected = group.events

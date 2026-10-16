@@ -881,7 +881,7 @@ void main() {
   );
 
   testWidgets(
-    'cross-midnight gap is drawn and context-selectable on both days with daily duration',
+    'customized legacy cross-midnight gap stays selectable with daily duration',
     (tester) async {
       final tomorrow = day.add(const Duration(days: 1));
       final video = Event(
@@ -898,7 +898,15 @@ void main() {
         tomorrow.add(const Duration(minutes: 6)),
         tomorrow.add(const Duration(hours: 8)),
       );
-      await journal.store.replaceEvents({video.id: video, sleep.id: sleep});
+      final legacyGap = undefinedEvents([
+        video,
+        sleep,
+      ]).single.copyWith(title: '睡前空闲');
+      await journal.store.replaceEvents({
+        video.id: video,
+        sleep.id: sleep,
+        legacyGap.id: legacyGap,
+      });
       await open(tester);
       final gap = journal.rows.singleWhere(
         (row) => row.isUndefined && row.start == video.end,
@@ -939,6 +947,52 @@ void main() {
       );
       await clickMinute(3);
       expect(journal.selected, {gap.id});
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'creating a separated event leaves empty space in timeline and both table views',
+    (tester) async {
+      await open(tester);
+      final id = await journal.addDraft(
+        start: day.add(const Duration(hours: 18)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(cell(id, 'title'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input(id, 'title'), '晚饭');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.rows.length, 3);
+      expect(journal.store.events.length, 3);
+      expect(find.text('未定义'), findsNothing);
+
+      final rectangle = tester.getRect(find.byType(Timeline));
+      final blank = Offset(
+        rectangle.left + 24 + (rectangle.width - 50) * 16.5 / 24,
+        rectangle.top + 80,
+      );
+      await tester.tapAt(blank, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      expect(find.text('在此新增事件'), findsOneWidget);
+      expect(find.text('设置标签'), findsNothing);
+      await key(tester, LogicalKeyboardKey.escape);
+      await tester.tap(find.text('汇总'));
+      await tester.pumpAndSettle();
+      expect(find.text('未定义'), findsNothing);
+      final bucket = find.byKey(const ValueKey('group-unclassified'));
+      expect(
+        find.descendant(of: bucket, matching: find.text('未分类')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(of: bucket, matching: find.text('1 条')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: bucket, matching: find.text('1 小时 00 分')),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     },
   );
@@ -1185,7 +1239,7 @@ void main() {
   );
 
   testWidgets(
-    'gap time cells stay derived and tag assignment promotes renamed gap',
+    'legacy gap time cells stay derived and tag assignment promotes renamed gap',
     (tester) async {
       await journal.store.saveEvent(
         Event(
@@ -1196,6 +1250,10 @@ void main() {
           day.add(const Duration(hours: 19)),
         ),
       );
+      final legacyGap = undefinedEvents(
+        journal.store.events.values,
+      ).single.copyWith(title: '旧版空档');
+      await journal.store.saveEvent(legacyGap);
       await open(tester);
       final gap = journal.rows.firstWhere((event) => event.isUndefined);
       await tester.tap(cell(gap.id, 'start'));
@@ -1492,7 +1550,17 @@ void main() {
       debugDisableShadows = false;
       addTearDown(() => debugDisableShadows = previousShadows);
       await loadScreenshotFonts(tester);
+      await journal.store.saveEvent(
+        Event(
+          'later',
+          '晚饭',
+          'life',
+          day.add(const Duration(hours: 18)),
+          day.add(const Duration(hours: 19)),
+        ),
+      );
       await open(tester);
+      expect(journal.rows.length, 3);
       final boundaryKey = GlobalKey();
       await tester.pumpWidget(
         RepaintBoundary(

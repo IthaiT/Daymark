@@ -239,6 +239,7 @@ String undefinedHeadId(DateTime day) =>
 
 /// Derive only gaps bounded by ordinary events. Merge the complete journal
 /// before filtering by day, preserving cross-midnight intervals and identities.
+/// Used for legacy compatibility; new records must not create automatic gaps.
 List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
   final intervals =
       <Event>[

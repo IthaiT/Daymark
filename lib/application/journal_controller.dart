@@ -74,13 +74,19 @@ class JournalController extends ChangeNotifier {
     Map<String, Event> drafts,
   ) {
     final storedGaps = {
-      for (final item in events.values.where((event) => event.isUndefined))
+      for (final item in events.values.where(
+        (event) =>
+            event.isUndefined &&
+            (event.title.trim() != '未定义' || event.notes.trim().isNotEmpty),
+      ))
         item.id: item,
     };
     final regular = {
       for (final item in events.values.where((event) => !event.isUndefined))
         item.id: item,
     };
+    // Only retain customized legacy gaps; never create automatic empty rows.
+    if (storedGaps.isEmpty) return regular;
     final result = {...regular};
     for (final gap in undefinedEvents([...regular.values, ...drafts.values])) {
       var previous = storedGaps[gap.id];
@@ -94,14 +100,13 @@ class JournalController extends ChangeNotifier {
           previous = legacyHead;
         }
       }
-      result[gap.id] =
-          previous?.copyWith(
-            id: gap.id,
-            start: gap.start,
-            end: gap.end,
-            clearTag: true,
-          ) ??
-          gap;
+      if (previous == null) continue;
+      result[gap.id] = previous.copyWith(
+        id: gap.id,
+        start: gap.start,
+        end: gap.end,
+        clearTag: true,
+      );
     }
     return result;
   }

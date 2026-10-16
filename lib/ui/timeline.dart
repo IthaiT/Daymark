@@ -76,14 +76,26 @@ class TimelineState extends State<Timeline> {
     for (final event in widget.journal.visibleEvents)
       event.id == _preview?.id ? _preview! : event,
   ];
-  List<Event> get _displayEvents => [
-    ..._events,
-    for (final gap in undefinedEvents([
-      for (final event in widget.journal.regularEvents)
-        event.id == _preview?.id ? _preview! : event,
-    ], widget.journal.day))
-      gap.copyWith(title: widget.journal.event(gap.id)?.title ?? gap.title),
-  ];
+  List<Event> get _displayEvents {
+    final storedGaps = {
+      for (final event in widget.journal.store.events.values)
+        if (event.isUndefined) event.id: event,
+    };
+    if (storedGaps.isEmpty) return _events;
+    return [
+      ..._events,
+      for (final gap in undefinedEvents([
+        for (final event in widget.journal.regularEvents)
+          event.id == _preview?.id ? _preview! : event,
+      ], widget.journal.day))
+        if (storedGaps.containsKey(gap.id))
+          gap.copyWith(
+            title: storedGaps[gap.id]!.title,
+            notes: storedGaps[gap.id]!.notes,
+          ),
+    ];
+  }
+
   double _x(DateTime value) =>
       24 +
       value.difference(widget.journal.day).inMicroseconds /
