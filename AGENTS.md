@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Best Practice for All Work
+
+For research, demos, code and documentation, prefer proven community practices and mature implementations. For unfamiliar or consequential decisions, check official guidance and reference implementations applicable to this repository's versions and constraints; explain material departures.
+
+## Parallel Agent Safety
+
+Multiple agents may work concurrently; unrelated modified or untracked files can appear at any time. Check the branch, status and diffs before editing and committing. Preserve others' work; stage and commit only your own changes. Reread files changed during your task and coordinate overlapping edits.
+
+Prefer a separate worktree for parallel work: branches alone do not isolate a shared checkout. Never switch branches in a checkout another agent is using.
+
 ## Project Structure & Module Organization
 
 `lib/` contains the Flutter / Dart Windows desktop application. `domain/` implements local calendar models, overlap segmentation, timeline drag calculations, Unicode compatibility and snapshot history. `data/` validates and persists JSON/CSV and locks the data directory. `application/journal_controller.dart` serializes mutations and combines event changes with derived-gap synchronization in one atomic write. `ui/` implements the tag tree, pickers, dialogs, event table, inline editing and timeline. Keep calculations and persistence independent of UI code.
@@ -29,6 +39,10 @@ Use `dart format`, `flutter_lints`, strict analyzer types, `lowerCamelCase` memb
 
 `.gitattributes` specifies LF except for CMD launchers, which use CRLF. `lib/domain/unicode_data.dart` contains a compressed Unicode 15.0 snapshot matching original Python 3.12 casefold and printable classification. Do not casually replace it with Dart lowercasing or UTF-16 ordering.
 
+## UI Design & Consistency
+
+For UI changes, reuse existing themes, widgets and interaction patterns. Match neighboring screens' typography, spacing and density; consult mature desktop applications for new interaction designs. Verify usability, accessibility and visual consistency within the testing constraints below.
+
 ## Testing Guidelines
 
 Use Flutter `test` and `testWidgets`, naming files `*_test.dart`. Add regression tests for changed persistence and time-accounting behavior, especially tag moves, midnight boundaries, overlaps, legacy-data compatibility and failed writes. Test right-click, drag, pickers and inline editing when changing the UI. Use isolated temporary directories under `.test-artifacts/`; never test against personal `/data/`.
@@ -36,6 +50,8 @@ Use Flutter `test` and `testWidgets`, naming files `*_test.dart`. Add regression
 Widget tests run without native windows. The Release smoke test requires Windows and a desktop session. It creates a private inactive desktop without desktop-switch access and owns every process it launches. Never activate that desktop or fall back to opening test windows on the active desktop. Creation failures must stop validation. Run affected tests before committing; no numeric coverage threshold is configured.
 
 ## Commit & Pull Request Guidelines
+
+You must create your own task branch (`codex/<task-name>`) before editing code, demos or documentation; reuse it for continuations. You must commit completed, validated steps promptly. Rebase only your own unpublished commits and integrate by fast-forward; do not rewrite shared history or force-push without explicit authorization.
 
 Follow existing prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, and `chore:`. Keep commits small and focused; preserve linear history through rebase or fast-forward integration.
 
