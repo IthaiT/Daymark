@@ -124,7 +124,7 @@ class _LedgerIconPickerState extends State<_LedgerIconPicker> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
-                                  option.data,
+                                  ledgerIconData(option.name),
                                   size: 22,
                                   color: selected
                                       ? scheme.onSecondaryContainer
