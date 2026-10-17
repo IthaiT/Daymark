@@ -9,7 +9,7 @@ import 'dialogs.dart';
 import 'tag_map_view.dart';
 import 'workspace_style.dart';
 
-/// Minimal tag mind map: the canvas, its essential actions and one save button.
+/// Minimal tag mind map: a full-height canvas that saves changes automatically.
 class TagMapScreen extends StatefulWidget {
   const TagMapScreen({super.key, required this.controller});
   final TagMapController controller;
@@ -24,6 +24,7 @@ class TagMapScreenState extends State<TagMapScreen> {
   bool _canUndo = false;
   bool _canRedo = false;
   bool _mapReady = false;
+  bool _editing = false;
   Timer? _autoSave;
   Future<bool>? _saving;
   String? _themeKey;
@@ -116,9 +117,12 @@ class TagMapScreenState extends State<TagMapScreen> {
     bool canUndo,
     bool canRedo,
   ) {
-    final expected = widget.controller.view?.root.id;
-    if (expected != null && tree.root.id != expected) return;
-    widget.controller.applyViewTree(tree);
+    try {
+      widget.controller.applyViewTree(tree);
+    } on FormatException {
+      // A change serialized before the root switch arrived late.
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _selection = selection;
@@ -129,11 +133,22 @@ class TagMapScreenState extends State<TagMapScreen> {
   }
 
   /// Debounces writes so a drag or a burst of edits costs one atomic save.
+  /// An open inline editor is committed when it closes, never mid-typing.
   void _scheduleSave() {
     _autoSave?.cancel();
+    if (_editing) return;
     _autoSave = Timer(const Duration(milliseconds: 500), () {
       unawaited(_save());
     });
+  }
+
+  void _editingChanged(bool editing) {
+    _editing = editing;
+    if (editing) {
+      _autoSave?.cancel();
+    } else {
+      _scheduleSave();
+    }
   }
 
   void _showError(Object error) {
@@ -284,6 +299,7 @@ class TagMapScreenState extends State<TagMapScreen> {
                     onSave: () => unawaited(_saveNow()),
                     onDelete: () => unawaited(_deleteSelected()),
                     onEnter: (id) => unawaited(_setRoot(id)),
+                    onEditing: _editingChanged,
                     onError: _showError,
                   ),
                 ),

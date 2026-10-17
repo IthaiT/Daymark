@@ -24,6 +24,7 @@ document.body.appendChild(menu)
 let mindMap = null
 let ready = false
 let currentRootId = ''
+let editing = false
 let emitTimer = 0
 let lastTree = ''
 let lastSelection = ''
@@ -369,6 +370,16 @@ function createMap(payload) {
   mindMap.on('contextmenu', hideMenu)
   mindMap.on('node_click', hideMenu)
   mindMap.on('draw_click', hideMenu)
+  mindMap.on('before_show_text_edit', () => {
+    if (editing) return
+    editing = true
+    post({ type: 'editing', value: true })
+  })
+  mindMap.on('hide_text_edit', () => {
+    if (!editing) return
+    editing = false
+    post({ type: 'editing', value: false })
+  })
 }
 
 function load(payload) {
