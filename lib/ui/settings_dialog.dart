@@ -65,7 +65,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('自动生成未定义事件'),
                 subtitle: const Text(
-                  '在相邻事件之间的空档生成「未定义」记录。关闭后，现有的未定义记录会从事件表和记录文件中移除。',
+                  '在相邻事件之间的空档生成「未定义」记录。关闭后记录不再显示，但已填写的名称会保留，重新开启后恢复。',
                 ),
                 value: _autoUndefined,
                 onChanged: _saving

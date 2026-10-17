@@ -123,7 +123,7 @@ void main() {
     expect(savedSettings, isNull);
   });
 
-  testWidgets('saving persists both settings and drops undefined rows', (
+  testWidgets('saving persists both settings and only hides undefined rows', (
     tester,
   ) async {
     expect(journal.rows.where((event) => event.isUndefined), isNotEmpty);
@@ -141,7 +141,7 @@ void main() {
     expect(journal.rows.where((event) => event.isUndefined), isEmpty);
     expect(
       journal.store.events.values.where((event) => event.isUndefined),
-      isEmpty,
+      isNotEmpty,
     );
     expect(jsonDecode(savedSettings!), {
       'version': 1,

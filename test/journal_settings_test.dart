@@ -70,18 +70,20 @@ void main() {
     expect(gapIds(store.events.values), gapIds(controller.rows));
   });
 
-  test('disabling undefined records removes stored gaps atomically', () async {
-    final gaps = gapIds(store.events.values);
-    expect(gaps, isNotEmpty);
-    await controller.applySettings(const AppSettings(autoUndefined: false));
-    expect(controller.autoUndefined, isFalse);
-    expect(controller.rows.where((event) => event.isUndefined), isEmpty);
-    expect(gapIds(store.events.values), isEmpty);
-    expect(store.events.keys, containsAll(['a', 'b']));
-    final reopened = await Store.open(directory);
-    expect(gapIds(reopened.events.values), isEmpty);
-    expect(reopened.events.length, 2);
-  });
+  test(
+    'disabling undefined records hides them but keeps the stored rows',
+    () async {
+      final gaps = gapIds(store.events.values);
+      expect(gaps, isNotEmpty);
+      await controller.applySettings(const AppSettings(autoUndefined: false));
+      expect(controller.autoUndefined, isFalse);
+      expect(controller.rows.where((event) => event.isUndefined), isEmpty);
+      expect(gapIds(store.events.values), gaps);
+      expect(store.events.keys, containsAll(['a', 'b']));
+      final reopened = await Store.open(directory);
+      expect(gapIds(reopened.events.values), gaps);
+    },
+  );
 
   test('re-enabling restores the same gap identities', () async {
     final before = gapIds(store.events.values);
@@ -92,7 +94,7 @@ void main() {
     expect(gapIds(controller.rows), before);
   });
 
-  test('settings passed at construction suppress gaps at startup', () async {
+  test('settings passed at construction hide gaps at startup', () async {
     controller.dispose();
     controller = JournalController(
       store,
@@ -101,24 +103,59 @@ void main() {
     );
     await controller.initialize();
     expect(controller.autoUndefined, isFalse);
-    expect(gapIds(store.events.values), isEmpty);
+    expect(gapIds(store.events.values), isNotEmpty);
     expect(controller.rows.where((event) => event.isUndefined), isEmpty);
   });
 
-  test('failed toggle keeps gaps and the previous setting', () async {
-    final gaps = gapIds(store.events.values);
+  test('failed re-enable keeps the previous setting and stored rows', () async {
+    await controller.applySettings(const AppSettings(autoUndefined: false));
+    // Move a neighbour while hidden so enabling must persist new boundaries.
+    await controller.editCell(
+      'b',
+      EventColumn.start,
+      day.add(const Duration(hours: 11, minutes: 30)),
+    );
+    final before = Map.of(store.events);
     failWrites = true;
     await expectLater(
-      controller.applySettings(const AppSettings(autoUndefined: false)),
+      controller.applySettings(const AppSettings()),
       throwsA(isA<FileSystemException>()),
     );
-    expect(controller.autoUndefined, isTrue);
-    expect(gapIds(store.events.values), gaps);
-    expect(gapIds(controller.rows), gaps);
-    failWrites = false;
-    await controller.applySettings(const AppSettings(autoUndefined: false));
     expect(controller.autoUndefined, isFalse);
-    expect(gapIds(store.events.values), isEmpty);
+    expect(store.events, before);
+    failWrites = false;
+    await controller.applySettings(const AppSettings());
+    expect(controller.autoUndefined, isTrue);
+    expect(gapIds(controller.rows), isNotEmpty);
+  });
+
+  test('renamed gaps survive switching the feature off and on', () async {
+    final gap = store.events.values.firstWhere((event) => event.isUndefined);
+    await controller.editCell(gap.id, EventColumn.title, '写周报');
+    expect(controller.event(gap.id)!.title, '写周报');
+    await controller.applySettings(const AppSettings(autoUndefined: false));
+    expect(controller.rows.where((event) => event.isUndefined), isEmpty);
+    expect(store.events[gap.id]!.title, '写周报');
+    await controller.applySettings(const AppSettings());
+    expect(
+      controller.rows.firstWhere((event) => event.id == gap.id).title,
+      '写周报',
+    );
+  });
+
+  test('hidden gap names survive event changes while disabled', () async {
+    final gap = store.events.values.firstWhere((event) => event.isUndefined);
+    await controller.editCell(gap.id, EventColumn.title, '写周报');
+    await controller.applySettings(const AppSettings(autoUndefined: false));
+    await controller.editCell(
+      'a',
+      EventColumn.end,
+      day.add(const Duration(hours: 10, minutes: 30)),
+    );
+    await controller.applySettings(const AppSettings());
+    final restored = controller.rows.firstWhere((event) => event.isUndefined);
+    expect(restored.title, '写周报');
+    expect(restored.start, day.add(const Duration(hours: 10, minutes: 30)));
   });
 
   test('changing drag granularity alone does not rewrite events', () async {

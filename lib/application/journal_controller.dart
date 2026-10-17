@@ -93,7 +93,11 @@ class JournalController extends ChangeNotifier {
         item.id: item,
     };
     final result = {...regular};
-    if (!_settings.autoUndefined) return result;
+    if (!_settings.autoUndefined) {
+      // Switching the feature off only hides derived rows. Their names and
+      // notes stay on disk so enabling it again restores the same records.
+      return {...result, ...storedGaps};
+    }
     for (final gap in undefinedEvents([...regular.values, ...drafts.values])) {
       var previous = storedGaps[gap.id];
       if (previous == null &&
@@ -140,8 +144,8 @@ class JournalController extends ChangeNotifier {
   Future<void> initialize() =>
       _run(() => _apply(store.events, _drafts, record: false));
 
-  /// Applies a new recording policy. Disabling derived undefined records drops
-  /// the stored gaps in the same atomic write so rows and CSV stay in step.
+  /// Applies a new recording policy. Disabling derived undefined records only
+  /// hides them; stored gaps and their user-edited names are never discarded.
   Future<void> applySettings(AppSettings value) => _run(() async {
     if (value == _settings) return;
     final previous = _settings;
