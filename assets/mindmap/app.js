@@ -2,8 +2,7 @@
 // https://github.com/wanglin2/mind-map
 import MindMap from './vendor/simpleMindMap.esm.min.js'
 
-const ROOT_ID = 'daymark:root'
-const ROOT_NAME = '标签'
+const VIRTUAL_ROOT_ID = 'daymark:root'
 const NEW_PREFIX = 'new:'
 
 // The page only needs dragging and node activation from the library. Keeping
@@ -77,8 +76,8 @@ function serializeTree() {
   const root = mindMap?.renderer?.root
   if (!root) return null
   return {
-    id: ROOT_ID,
-    name: ROOT_NAME,
+    id: idOf(root),
+    name: textOf(root),
     children: (root.children || []).map(serializeNode)
   }
 }
@@ -94,12 +93,13 @@ function walk(node, visit) {
 
 function findNode(id) {
   if (!mindMap || !id) return null
-  if (id === ROOT_ID) return mindMap.renderer.root
+  const root = mindMap.renderer.root
+  if (id === idOf(root)) return root
   if (id.startsWith(NEW_PREFIX)) {
     return mindMap.renderer.findNodeByUid?.(id.slice(NEW_PREFIX.length)) || null
   }
   let found = null
-  walk(mindMap.renderer.root, node => {
+  walk(root, node => {
     if (node.getData('_daymarkId') === id) {
       found = node
       return true
@@ -166,8 +166,8 @@ function toNodeData(node) {
   }
 }
 
-function applyTheme(colors) {
-  MindMap.defineTheme('daymark', {
+function buildThemeConfig(colors) {
+  return {
     backgroundColor: colors.background,
     lineColor: colors.line,
     lineWidth: 1.5,
@@ -222,20 +222,21 @@ function applyTheme(colors) {
       fontFamily: colors.fontFamily,
       textAlign: 'left'
     }
-  })
+  }
 }
 
 function createMap(payload) {
-  applyTheme(payload.colors)
+  const root = payload.tree
   const data = {
-    data: { text: ROOT_NAME, _daymarkId: ROOT_ID, expand: true },
-    children: (payload.tree.children || []).map(toNodeData)
+    data: { text: root.name, _daymarkId: root.id, expand: true },
+    children: (root.children || []).map(toNodeData)
   }
   mindMap = new MindMap({
     el: container,
     data,
     layout: 'logicalStructure',
-    theme: 'daymark',
+    theme: 'default',
+    themeConfig: buildThemeConfig(payload.colors),
     readonly: false,
     fit: true,
     fitPadding: 88,
@@ -248,7 +249,10 @@ function createMap(payload) {
     beforeTextEdit: () => false,
     defaultInsertSecondLevelNodeText: '新标签',
     defaultInsertBelowSecondLevelNodeText: '新标签',
-    expandBtnStyle: { color: payload.colors.muted, fill: payload.colors.surface },
+    expandBtnStyle: {
+      color: payload.colors.muted,
+      fill: payload.colors.surface
+    },
     errorHandler: (type, error) => {
       console.error(type, error)
       post({
@@ -258,12 +262,17 @@ function createMap(payload) {
     }
   })
 
+  // Flutter owns all keyboard actions. Library shortcuts would otherwise
+  // create nodes on Tab, delete nodes on Del, etc. without confirmation.
+  mindMap.keyCommand.shortcutMap = {}
+
   mindMap.on('data_change', scheduleEmit)
   mindMap.on('back_forward', scheduleEmit)
   mindMap.on('node_active', scheduleEmit)
   mindMap.on('node_tree_render_end', scheduleEmit)
   mindMap.on('node_dblclick', node => {
-    if (!node || node.isRoot) return
+    if (!node) return
+    if (node.isRoot && idOf(node) === VIRTUAL_ROOT_ID) return
     post({ type: 'rename', ...describe(node) })
   })
 }
@@ -273,16 +282,18 @@ function load(payload) {
     fail('导图数据不完整。')
     return
   }
+  const root = payload.tree
+  const data = {
+    data: { text: root.name, _daymarkId: root.id, expand: true },
+    children: (root.children || []).map(toNodeData)
+  }
   if (!mindMap) {
     createMap(payload)
-    setTimeout(() => mindMap?.view.fit(), 250)
   } else {
     const view = mindMap.view.getTransformData()
-    mindMap.setData({
-      data: { text: ROOT_NAME, _daymarkId: ROOT_ID, expand: true },
-      children: (payload.tree.children || []).map(toNodeData)
-    })
+    mindMap.setData(data)
     if (view) mindMap.view.setTransformData(view)
+    mindMap.setThemeConfig(buildThemeConfig(payload.colors))
   }
   ready = true
   if (status) status.hidden = true
@@ -290,6 +301,15 @@ function load(payload) {
   lastSelection = ''
   lastUndo = null
   lastRedo = null
+  if (payload.fit) {
+    setTimeout(() => mindMap?.view.fit(), 200)
+  }
+  scheduleEmit()
+}
+
+function setColors(colors) {
+  if (!colors || !mindMap) return
+  mindMap.setThemeConfig(buildThemeConfig(colors))
   scheduleEmit()
 }
 
@@ -317,7 +337,8 @@ function addChild(parentId, name) {
 
 function rename(id, name) {
   const node = findNode(id)
-  if (!node || node.isRoot) return
+  if (!node) return
+  if (node.isRoot && idOf(node) === VIRTUAL_ROOT_ID) return
   mindMap.execCommand('SET_NODE_TEXT', node, name, false)
   scheduleEmit()
 }
@@ -363,6 +384,7 @@ function collapseAll() {
 
 window.Daymark = {
   load,
+  setColors,
   addChild,
   rename,
   remove,

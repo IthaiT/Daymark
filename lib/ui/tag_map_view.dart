@@ -74,6 +74,7 @@ class TagMapViewState extends State<TagMapView> {
   bool _loading = true;
   String? _error;
   bool _disposed = false;
+  String? _rootId;
 
   @override
   void initState() {
@@ -180,8 +181,12 @@ class TagMapViewState extends State<TagMapView> {
         final tree = value['tree'];
         if (tree == null) return;
         try {
+          final rootId = tree is Map<String, Object?> ? tree['id'] : null;
           widget.onChange(
-            TagTree.fromJson(tree),
+            TagTree.fromJson(
+              tree,
+              expectedRootId: rootId is String ? rootId : _rootId,
+            ),
             TagMapSelection.fromJson(value['selection']),
             value['canUndo'] == true,
             value['canRedo'] == true,
@@ -211,9 +216,19 @@ class TagMapViewState extends State<TagMapView> {
     }
   }
 
-  Future<void> load(TagTree tree, Map<String, Object?> colors) => _run(
-    'window.Daymark.load(${jsonEncode({'tree': tree.toJson(), 'colors': colors})})',
-  );
+  Future<void> load(
+    TagTree tree,
+    Map<String, Object?> colors, {
+    bool fit = false,
+  }) {
+    _rootId = tree.root.id;
+    return _run(
+      'window.Daymark.load(${jsonEncode({'tree': tree.toJson(), 'colors': colors, 'fit': fit})})',
+    );
+  }
+
+  Future<void> applyColors(Map<String, Object?> colors) =>
+      _run('window.Daymark.setColors(${jsonEncode(colors)})');
 
   Future<void> addChild(String parentId, String name) => _run(
     'window.Daymark.addChild(${jsonEncode(parentId)}, ${jsonEncode(name)})',
