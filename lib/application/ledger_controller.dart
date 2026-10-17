@@ -311,6 +311,7 @@ class LedgerController extends ChangeNotifier {
       source.kind,
       parentId,
       source.color,
+      source.icon,
     );
     await _apply(
       state.copyWith(

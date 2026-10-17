@@ -1092,6 +1092,27 @@ void main() {
     },
   );
 
+  test('dragging a category keeps its icon, colour and parent move', () async {
+    await ledger.saveCategory(
+      '咖啡',
+      MoneyKind.expense,
+      'food',
+      icon: 'local_cafe',
+      color: CategoryColor.pink,
+    );
+    final id = store.state.categories.values
+        .singleWhere((item) => item.name == '咖啡')
+        .id;
+    await ledger.placeCategory(id, 'food', beforeId: 'breakfast');
+    expect(store.state.categories[id]!.icon, 'local_cafe');
+    expect(store.state.categories[id]!.color, CategoryColor.pink);
+    await ledger.placeCategory(id, 'food', afterId: 'other-food');
+    expect(store.state.categories[id]!.icon, 'local_cafe');
+    await ledger.placeCategory(id, null);
+    expect(store.state.categories[id]!.icon, 'local_cafe');
+    expect(store.state.categories[id]!.parentId, isNull);
+  });
+
   test(
     'ordering rejects cycles and foreign kinds and rolls back failed writes',
     () async {
