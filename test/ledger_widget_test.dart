@@ -284,6 +284,231 @@ void main() {
   );
 
   testWidgets(
+    'income rows select accounts and record editing moves the credit',
+    (tester) async {
+      await open(tester);
+      await tester.tap(find.text('收入标签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('quick-account-salary')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('公积金').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(quick('salary'), '120');
+      fail = true;
+      await enter(tester);
+      expect(store.state.records, isEmpty);
+      expect(tester.widget<TextField>(quick('salary')).controller!.text, '120');
+      fail = false;
+      await tester.tap(quick('salary'));
+      await enter(tester);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1000000);
+      expect(store.state.accounts[providentAccountId]!.balanceCents, 212000);
+      final id = store.state.records.keys.single;
+      expect(store.state.records[id]!.accountId, providentAccountId);
+      await tester.tap(find.byKey(ValueKey('money-record-$id')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('record-account')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('现金').last);
+      await tester.pumpAndSettle();
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[id]!.accountId, providentAccountId);
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1012000);
+      expect(store.state.accounts[providentAccountId]!.balanceCents, 200000);
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.records[id]!.accountId, providentAccountId);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'movement click and context menu edit accounts, amount and date',
+    (tester) async {
+      await open(tester);
+      await ledger.transfer(cashAccountId, investmentAccountId, 1000, day);
+      final transferId = store.state.records.keys.single;
+      await tester.pumpAndSettle();
+      final transfer = find.byKey(ValueKey('money-record-$transferId'));
+      await tester.tap(transfer);
+      await tester.pumpAndSettle();
+      expect(find.text('修改转账'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('转出账户-cash')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('公积金  ¥ 2000.00').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('转入账户-investment')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('现金  ¥ 9990.00').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('movement-amount')),
+        '20',
+      );
+      final date = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byKey(const ValueKey('money-date')),
+      );
+      await tester.enterText(date, '2026-10-10');
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[transferId]!.accountId, cashAccountId);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('movement-amount')))
+            .controller!
+            .text,
+        '20',
+      );
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 1);
+      expect(store.state.records[transferId]!.accountId, providentAccountId);
+      expect(store.state.records[transferId]!.toAccountId, cashAccountId);
+      expect(store.state.records[transferId]!.date, DateTime.utc(2026, 10, 10));
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1002000);
+      expect(store.state.accounts[investmentAccountId]!.balanceCents, 300000);
+      await ledger.calibrate(investmentAccountId, 310000, day);
+      final adjustmentId = store.state.records.keys.last;
+      await ledger.saveInputs([expense(1000, 'lunch')]);
+      await tester.pumpAndSettle();
+      final adjustment = find.byKey(ValueKey('money-record-$adjustmentId'));
+      await tester.tap(adjustment, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改账单'));
+      await tester.pumpAndSettle();
+      expect(find.text('修改余额校准'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('movement-amount')))
+            .controller!
+            .text,
+        '100.00',
+      );
+      await tester.tap(find.byKey(const ValueKey('账户-investment')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('现金  ¥ 10010.00').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('movement-amount')),
+        '-50',
+      );
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records[adjustmentId]!.amountCents, 10000);
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.records.length, 3);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 996000);
+      expect(store.state.accounts[investmentAccountId]!.balanceCents, 300000);
+      await shortcut(tester, LogicalKeyboardKey.keyZ);
+      expect(store.state.accounts[cashAccountId]!.balanceCents, 1001000);
+      expect(store.state.accounts[investmentAccountId]!.balanceCents, 310000);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'statistics filters recalculate totals and hover identifies ring segments',
+    (tester) async {
+      await open(tester, size: const Size(1100, 740));
+      await ledger.saveInputs([
+        expense(700000, 'transport'),
+        expense(200000, 'lunch'),
+        expense(100000, 'housing'),
+      ]);
+      await tester.tap(find.text('分类统计'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('stats-filter')));
+      await tester.pumpAndSettle();
+      final transport = find.byKey(const ValueKey('stats-filter-transport'));
+      await tester.scrollUntilVisible(
+        transport,
+        160,
+        scrollable: find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      await tester.tap(transport);
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('stats-transport-false')), findsNothing);
+      expect(find.text('¥ 2000.00  66.7%'), findsOneWidget);
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('ledger-donut-amount')))
+            .data,
+        '¥ 3000.00',
+      );
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: Offset.zero);
+      final ring = tester.getRect(find.byKey(const ValueKey('ledger-donut')));
+      await mouse.moveTo(ring.center + Offset(ring.width * .4, 0));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('ledger-donut-label')))
+            .data,
+        '餐饮',
+      );
+      expect(find.text('66.7%'), findsOneWidget);
+      await mouse.moveTo(ring.center + Offset(-ring.width * .4, 0));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(find.byKey(const ValueKey('ledger-donut-label')))
+            .data,
+        '住房',
+      );
+      expect(find.text('33.3%'), findsOneWidget);
+      await mouse.moveTo(ring.center);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('ledger-donut-percentage')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(const ValueKey('stats-food-false')));
+      await tester.pumpAndSettle();
+      expect(find.text('¥ 2000.00  100.0%'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('stats-back')));
+      await tester.tap(find.text('按年'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('stats-transport-false')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('stats-filter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('仅包含所选'));
+      await tester.tap(find.text('清空选择'));
+      await tester.tap(find.byKey(const ValueKey('stats-filter-food')));
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(find.text('¥ 2000.00  100.0%'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('stats-filter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('清空选择'));
+      await tester.tap(find.text('应用'));
+      await tester.pumpAndSettle();
+      expect(find.text('筛选后暂无支出'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('stats-filter-reset')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('stats-transport-false')),
+        findsOneWidget,
+      );
+      await mouse.removePointer();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'selected month totals and nested expense percentages exclude income and transfers',
     (tester) async {
       await open(tester);
@@ -578,6 +803,22 @@ void main() {
     }
 
     await screenshot('ledger');
+    await tester.tap(find.text('收入标签'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('quick-account-salary')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('公积金').last);
+    await tester.pumpAndSettle();
+    await screenshot('ledger-income-accounts');
+    await tester.tap(find.text('支出标签'));
+    await ledger.transfer(cashAccountId, investmentAccountId, 10000, day);
+    final movementId = store.state.records.keys.last;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('money-record-$movementId')));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-edit-transfer');
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('mode-0')));
     await tester.pumpAndSettle();
     await screenshot('workspace-journal');
@@ -603,6 +844,22 @@ void main() {
     await tester.tap(find.text('按年'));
     await tester.pumpAndSettle();
     await screenshot('ledger-year-statistics');
+    await tester.tap(find.byKey(const ValueKey('stats-filter')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('stats-filter-housing')));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-statistics-filter');
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    final ring = tester.getRect(find.byKey(const ValueKey('ledger-donut')));
+    await mouse.moveTo(ring.center + Offset(ring.width * .4, 0));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-statistics-hover');
+    await mouse.removePointer();
+    await tester.tap(find.byKey(const ValueKey('stats-filter-reset')));
+    await tester.pumpAndSettle();
     tester.view.physicalSize = const Size(1100, 740);
     await tester.pumpAndSettle();
     await screenshot('ledger-statistics-compact');

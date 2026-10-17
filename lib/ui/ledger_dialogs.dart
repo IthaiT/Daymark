@@ -102,6 +102,8 @@ class _MoneyEditorState extends State<_MoneyEditor> {
     text: dateText(widget.record?.date ?? widget.ledger.clock()),
   );
   late final _notes = TextEditingController(text: widget.record?.notes ?? '');
+  late String _account =
+      widget.record?.accountId ?? widget.ledger.state.defaultCashId;
   String? _error;
   bool _saving = false;
   @override
@@ -126,6 +128,7 @@ class _MoneyEditorState extends State<_MoneyEditor> {
           date: parseDate(_date.text),
           categoryId: _category,
           notes: _notes.text,
+          accountId: _account,
         ),
       ], editId: widget.record?.id);
       if (mounted) Navigator.pop(context);
@@ -198,6 +201,25 @@ class _MoneyEditorState extends State<_MoneyEditor> {
             const SizedBox(height: 16),
             MoneyDateField(controller: _date, enabled: !_saving),
             const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: const ValueKey('record-account'),
+              initialValue: _account,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: _kind == MoneyKind.income ? '入账账户' : '支出账户',
+              ),
+              items: [
+                for (final account in widget.ledger.state.accounts.values)
+                  DropdownMenuItem(
+                    value: account.id,
+                    child: Text(account.name),
+                  ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) => setState(() => _account = value!),
+            ),
+            const SizedBox(height: 16),
             TextField(
               key: const ValueKey('record-notes'),
               controller: _notes,
@@ -242,10 +264,15 @@ Future<void> showMoneyMovement(
   LedgerController ledger,
   MoneyKind kind, {
   String? accountId,
+  MoneyRecord? record,
 }) => showDialog<void>(
   context: context,
-  builder: (_) =>
-      _MovementDialog(ledger: ledger, kind: kind, accountId: accountId),
+  builder: (_) => _MovementDialog(
+    ledger: ledger,
+    kind: kind,
+    accountId: accountId,
+    record: record,
+  ),
 );
 
 Future<void> showMoneyNotes(
@@ -340,24 +367,31 @@ class _MovementDialog extends StatefulWidget {
     required this.ledger,
     required this.kind,
     this.accountId,
+    this.record,
   });
   final LedgerController ledger;
   final MoneyKind kind;
   final String? accountId;
+  final MoneyRecord? record;
   @override
   State<_MovementDialog> createState() => _MovementDialogState();
 }
 
 class _MovementDialogState extends State<_MovementDialog> {
-  late String _from = widget.accountId ?? widget.ledger.state.defaultCashId;
-  late String? _to = widget.ledger.state.accounts.keys
-      .where((id) => id != _from)
-      .firstOrNull;
-  final _amount = TextEditingController();
-  late final _date = TextEditingController(
-    text: dateText(widget.ledger.clock()),
+  late String _from =
+      widget.record?.accountId ??
+      widget.accountId ??
+      widget.ledger.state.defaultCashId;
+  late String? _to =
+      widget.record?.toAccountId ??
+      widget.ledger.state.accounts.keys.where((id) => id != _from).firstOrNull;
+  late final _amount = TextEditingController(
+    text: widget.record == null ? '' : moneyText(widget.record!.amountCents),
   );
-  final _notes = TextEditingController();
+  late final _date = TextEditingController(
+    text: dateText(widget.record?.date ?? widget.ledger.clock()),
+  );
+  late final _notes = TextEditingController(text: widget.record?.notes ?? '');
   String? _error;
   bool _saving = false;
   bool get _transfer => widget.kind == MoneyKind.transfer;
@@ -383,6 +417,15 @@ class _MovementDialogState extends State<_MovementDialog> {
         await widget.ledger.transfer(
           _from,
           _to!,
+          cents,
+          date,
+          notes: _notes.text,
+          editId: widget.record?.id,
+        );
+      } else if (widget.record != null) {
+        await widget.ledger.updateAdjustment(
+          widget.record!.id,
+          _from,
           cents,
           date,
           notes: _notes.text,
@@ -420,7 +463,9 @@ class _MovementDialogState extends State<_MovementDialog> {
       );
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(moneyKindText(widget.kind)),
+    title: Text(
+      '${widget.record == null ? '' : '修改'}${moneyKindText(widget.kind)}',
+    ),
     content: SizedBox(
       width: 430,
       child: SingleChildScrollView(
@@ -443,7 +488,11 @@ class _MovementDialogState extends State<_MovementDialog> {
               autofocus: true,
               enabled: !_saving,
               decoration: InputDecoration(
-                labelText: _transfer ? '转账金额' : '当前实际余额',
+                labelText: _transfer
+                    ? '转账金额'
+                    : widget.record == null
+                    ? '当前实际余额'
+                    : '调整差额',
                 prefixText: '¥ ',
               ),
               onChanged: (_) => setState(() {}),
@@ -452,14 +501,21 @@ class _MovementDialogState extends State<_MovementDialog> {
             if (!_transfer)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: Text(_deltaText()),
+                child: Text(
+                  widget.record == null
+                      ? _deltaText()
+                      : '正数增加余额，负数减少余额；后续流水保留。',
+                ),
               ),
             const SizedBox(height: 16),
             MoneyDateField(controller: _date, enabled: !_saving),
             const SizedBox(height: 16),
             TextField(
+              key: const ValueKey('bill-notes'),
               controller: _notes,
               enabled: !_saving,
+              minLines: 1,
+              maxLines: 3,
               decoration: const InputDecoration(labelText: '备注（可选）'),
             ),
             if (_error != null)

@@ -151,6 +151,210 @@ void main() {
   );
 
   test(
+    'income accounts persist and edits reverse the previous account effect',
+    () async {
+      MoneyInput linked(int amount, String account) => MoneyInput(
+        kind: MoneyKind.income,
+        amountCents: amount,
+        date: october,
+        categoryId: 'salary',
+        accountId: account,
+      );
+      await ledger.saveInputs([
+        linked(10000, providentAccountId),
+        income(5000),
+      ]);
+      final id = ledger.state.records.values.first.id;
+      expect(cash(), 1005000);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 210000);
+      final before = ledger.state;
+      final bytes = await store.file.readAsBytes();
+      fail = true;
+      await expectLater(
+        ledger.saveInputs([linked(15000, investmentAccountId)], editId: id),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(ledger.state, same(before));
+      expect(await store.file.readAsBytes(), bytes);
+      fail = false;
+      await ledger.saveInputs([linked(15000, investmentAccountId)], editId: id);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 200000);
+      expect(ledger.state.accounts[investmentAccountId]!.balanceCents, 315000);
+      final reopened = (await LedgerStore.open(directory)).state;
+      expect(reopened.records[id]!.accountId, investmentAccountId);
+      expect(reopened.accounts[investmentAccountId]!.balanceCents, 315000);
+      await ledger.undo();
+      expect(ledger.state.records[id]!.accountId, providentAccountId);
+      await ledger.redo();
+      expect(ledger.state.records[id]!.accountId, investmentAccountId);
+      final valid = ledger.state;
+      await expectLater(
+        ledger.saveInputs([linked(100, 'missing')]),
+        throwsFormatException,
+      );
+      expect(ledger.state, same(valid));
+    },
+  );
+
+  test(
+    'movement edits replace one record atomically and preserve later flows',
+    () async {
+      await ledger.transfer(cashAccountId, investmentAccountId, 50000, october);
+      final transferId = ledger.state.records.keys.single;
+      await ledger.calibrate(providentAccountId, 210000, october);
+      final adjustmentId = ledger.state.records.keys.last;
+      await ledger.saveInputs([expense(1000)]);
+      final before = ledger.state;
+      final bytes = await store.file.readAsBytes();
+      fail = true;
+      for (final action in <Future<void> Function()>[
+        () => ledger.transfer(
+          providentAccountId,
+          cashAccountId,
+          20000,
+          september,
+          editId: transferId,
+          notes: '修改转账',
+        ),
+        () => ledger.updateAdjustment(
+          adjustmentId,
+          investmentAccountId,
+          -5000,
+          september,
+        ),
+      ]) {
+        await expectLater(action(), throwsA(isA<FileSystemException>()));
+        expect(ledger.state, same(before));
+        expect(await store.file.readAsBytes(), bytes);
+      }
+      fail = false;
+      await ledger.transfer(
+        providentAccountId,
+        cashAccountId,
+        20000,
+        september,
+        editId: transferId,
+        notes: '修改转账',
+      );
+      expect(cash(), 1019000);
+      expect(ledger.state.accounts[investmentAccountId]!.balanceCents, 300000);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 190000);
+      expect(ledger.state.records.length, 3);
+      expect(ledger.state.records[transferId]!.date, september);
+      expect(ledger.state.records[transferId]!.notes, '修改转账');
+      final afterTransfer = ledger.state;
+      await ledger.updateAdjustment(
+        adjustmentId,
+        investmentAccountId,
+        -5000,
+        september,
+        notes: '更正差额',
+      );
+      expect(cash(), 1019000);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 180000);
+      expect(ledger.state.accounts[investmentAccountId]!.balanceCents, 295000);
+      expect(ledger.state.records.length, 3);
+      final reopened = (await LedgerStore.open(directory)).state;
+      expect(reopened.toJson(), ledger.state.toJson());
+      await ledger.undo();
+      expect(ledger.state.toJson(), afterTransfer.toJson());
+      await ledger.undo();
+      expect(ledger.state.toJson(), before.toJson());
+      await ledger.redo();
+      await ledger.redo();
+      expect(ledger.state.toJson(), reopened.toJson());
+      final valid = ledger.state;
+      for (final action in <Future<void> Function()>[
+        () => ledger.transfer(
+          cashAccountId,
+          cashAccountId,
+          100,
+          october,
+          editId: transferId,
+        ),
+        () => ledger.transfer(
+          cashAccountId,
+          providentAccountId,
+          0,
+          october,
+          editId: transferId,
+        ),
+        () => ledger.transfer(
+          cashAccountId,
+          providentAccountId,
+          100,
+          october,
+          editId: adjustmentId,
+        ),
+        () => ledger.updateAdjustment(transferId, cashAccountId, 100, october),
+        () => ledger.updateAdjustment(adjustmentId, 'missing', 100, october),
+      ]) {
+        await expectLater(action(), throwsFormatException);
+        expect(ledger.state, same(valid));
+      }
+    },
+  );
+
+  test(
+    'category filters cover descendants, unclassified, periods and direct entries',
+    () async {
+      await ledger.saveInputs([
+        expense(1000, category: 'food'),
+        expense(2000),
+        expense(3000, category: 'breakfast'),
+        expense(4000, category: 'transport'),
+        MoneyInput(kind: MoneyKind.expense, amountCents: 500, date: october),
+        expense(100, category: 'transport', date: september),
+        income(20000),
+      ]);
+      await ledger.transfer(
+        cashAccountId,
+        investmentAccountId,
+        700000,
+        october,
+      );
+      List<CategoryAmount> rows({
+        String? parent,
+        Set<String?>? include,
+        Set<String?> exclude = const {},
+        LedgerPeriod period = LedgerPeriod.month,
+      }) => ledger.state.categoryBreakdown(
+        october,
+        period,
+        MoneyKind.expense,
+        parentId: parent,
+        includedCategoryIds: include,
+        excludedCategoryIds: exclude,
+      );
+      int sum(List<CategoryAmount> values) =>
+          values.fold(0, (sum, row) => sum + row.amountCents);
+      expect(sum(rows(exclude: {'transport'})), 6500);
+      expect(sum(rows(exclude: {'food'})), 4500);
+      expect(sum(rows(include: {'food', 'lunch'})), 6000);
+      expect(sum(rows(include: {'food'}, exclude: {'lunch'})), 4000);
+      expect(
+        sum(rows(parent: 'food', include: {'food'}, exclude: {'lunch'})),
+        4000,
+      );
+      expect(rows(parent: 'food', exclude: {'food'}), isEmpty);
+      expect(rows(include: {}), isEmpty);
+      expect(sum(rows(include: {null})), 500);
+      expect(sum(rows(exclude: {null})), 10000);
+      expect(
+        sum(rows(include: {'transport'}, period: LedgerPeriod.year)),
+        4100,
+      );
+      expect(
+        rows(
+          exclude: {'transport'},
+        ).fold<int>(0, (sum, row) => sum + row.count),
+        4,
+      );
+      expect(ledger.state.monthlyTotal(october, MoneyKind.expense), 10500);
+    },
+  );
+
+  test(
     'transfer conserves assets, adjustment is a reversible delta, neither enters statistics',
     () async {
       final total = ledger.state.totalCents;

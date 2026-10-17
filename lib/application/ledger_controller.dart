@@ -13,12 +13,14 @@ class MoneyInput {
     required this.date,
     this.categoryId,
     this.notes = '',
+    this.accountId,
   });
   final MoneyKind kind;
   final int amountCents;
   final DateTime date;
   final String? categoryId;
   final String notes;
+  final String? accountId;
 }
 
 class LedgerController extends ChangeNotifier {
@@ -103,7 +105,8 @@ class LedgerController extends ChangeNotifier {
           date: dayStart(input.date),
           categoryId: input.categoryId,
           notes: input.notes.trim(),
-          accountId: previous?.accountId ?? state.defaultCashId,
+          accountId:
+              input.accountId ?? previous?.accountId ?? state.defaultCashId,
           affectsBalance: previous?.affectsBalance ?? true,
         );
         records[record.id] = record;
@@ -140,9 +143,13 @@ class LedgerController extends ChangeNotifier {
     int cents,
     DateTime date, {
     String notes = '',
+    String? editId,
   }) => _run(() async {
+    if (editId != null && state.records[editId]?.kind != MoneyKind.transfer) {
+      throw const FormatException('所编辑的转账不存在。');
+    }
     final record = MoneyRecord(
-      id: _id(),
+      id: editId ?? _id(),
       kind: MoneyKind.transfer,
       amountCents: cents,
       date: dayStart(date),
@@ -152,6 +159,29 @@ class LedgerController extends ChangeNotifier {
       affectsBalance: true,
     );
     await _apply(_withRecords({...state.records, record.id: record}));
+  });
+
+  /// Editing a historical calibration replaces its delta, preserving later flows.
+  Future<void> updateAdjustment(
+    String id,
+    String accountId,
+    int deltaCents,
+    DateTime date, {
+    String notes = '',
+  }) => _run(() async {
+    if (state.records[id]?.kind != MoneyKind.adjustment) {
+      throw const FormatException('所编辑的校准记录不存在。');
+    }
+    final record = MoneyRecord(
+      id: id,
+      kind: MoneyKind.adjustment,
+      amountCents: deltaCents,
+      date: dayStart(date),
+      accountId: accountId,
+      notes: notes.trim(),
+      affectsBalance: true,
+    );
+    await _apply(_withRecords({...state.records, id: record}));
   });
 
   Future<void> calibrate(

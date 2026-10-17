@@ -405,11 +405,25 @@ class LedgerState {
     LedgerPeriod period,
     MoneyKind kind, {
     String? parentId,
+    Set<String?>? includedCategoryIds,
+    Set<String?> excludedCategoryIds = const {},
   }) {
-    final expenses = periodRecords(
-      anchor,
-      period,
-    ).where((record) => record.kind == kind).toList();
+    Set<String?> expand(Set<String?> ids) => {
+      for (final id in ids)
+        if (id == null) null else ...descendants(id),
+    };
+    final included = includedCategoryIds == null
+        ? null
+        : expand(includedCategoryIds);
+    final excluded = expand(excludedCategoryIds);
+    final expenses = periodRecords(anchor, period)
+        .where(
+          (record) =>
+              record.kind == kind &&
+              (included == null || included.contains(record.categoryId)) &&
+              !excluded.contains(record.categoryId),
+        )
+        .toList();
     final children = categories.values.where(
       (item) => item.kind == kind && item.parentId == parentId,
     );

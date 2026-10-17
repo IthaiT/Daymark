@@ -16,6 +16,7 @@ class _Entry {
   final notes = TextEditingController();
   final focus = FocusNode();
   bool notesOpen = false;
+  String? accountId;
   void dispose() {
     amount.dispose();
     notes.dispose();
@@ -211,6 +212,7 @@ class LedgerSidebarState extends State<LedgerSidebar> {
             date: date,
             categoryId: id,
             notes: entry.notes.text,
+            accountId: entry.accountId,
           ),
         );
       }
@@ -436,6 +438,10 @@ class LedgerSidebarState extends State<LedgerSidebar> {
 
   Widget _row(MoneyCategory category, int index) {
     final entry = _entries.putIfAbsent(category.id, _Entry.new);
+    if (entry.accountId != null &&
+        !_state.accounts.containsKey(entry.accountId)) {
+      entry.accountId = null;
+    }
     final hasChildren = _state.categories.values.any(
       (item) => item.parentId == category.id,
     );
@@ -637,6 +643,26 @@ class LedgerSidebarState extends State<LedgerSidebar> {
                             unawaited(saveAll(focusId: category.id)),
                       ),
                     ),
+                  ),
+                ),
+              if (category.kind == MoneyKind.income)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, left: 24),
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('quick-account-${category.id}'),
+                    initialValue: entry.accountId ?? _state.defaultCashId,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: '入账账户'),
+                    items: [
+                      for (final account in _state.accounts.values)
+                        DropdownMenuItem(
+                          value: account.id,
+                          child: Text(account.name),
+                        ),
+                    ],
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(() => entry.accountId = value),
                   ),
                 ),
             ],

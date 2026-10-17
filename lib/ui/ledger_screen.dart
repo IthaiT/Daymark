@@ -554,7 +554,18 @@ class _LedgerScreenState extends State<LedgerScreen> {
                       child: ListTile(
                         key: ValueKey('money-record-${record.id}'),
                         title: Text(title),
-                        subtitle: record.notes.isEmpty
+                        subtitle:
+                            record.kind == MoneyKind.income &&
+                                record.accountId != null
+                            ? Wrap(
+                                spacing: 8,
+                                children: [
+                                  Text(_state.accounts[record.accountId]!.name),
+                                  if (record.notes.isNotEmpty)
+                                    Text(record.notes),
+                                ],
+                              )
+                            : record.notes.isEmpty
                             ? null
                             : Text(record.notes),
                         leading: record.categoryId != null
@@ -599,10 +610,11 @@ class _LedgerScreenState extends State<LedgerScreen> {
                                         widget.ledger,
                                         record: record,
                                       )
-                                    : showMoneyNotes(
+                                    : showMoneyMovement(
                                         context,
                                         widget.ledger,
-                                        record,
+                                        record.kind,
+                                        record: record,
                                       ),
                               ),
                       ),
@@ -621,10 +633,6 @@ class _LedgerScreenState extends State<LedgerScreen> {
     if (_saving || widget.ledger.busy) return;
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final editable = [
-      MoneyKind.expense,
-      MoneyKind.income,
-    ].contains(record.kind);
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(
@@ -632,7 +640,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
         Offset.zero & overlay.size,
       ),
       items: [
-        if (editable) const PopupMenuItem(value: 'edit', child: Text('修改账单')),
+        const PopupMenuItem(value: 'edit', child: Text('修改账单')),
         const PopupMenuItem(value: 'notes', child: Text('修改备注')),
         const PopupMenuItem(value: 'delete', child: Text('删除账单')),
       ],
@@ -640,7 +648,16 @@ class _LedgerScreenState extends State<LedgerScreen> {
     if (!mounted) return;
     switch (choice) {
       case 'edit':
-        await showMoneyEditor(context, widget.ledger, record: record);
+        if ([MoneyKind.expense, MoneyKind.income].contains(record.kind)) {
+          await showMoneyEditor(context, widget.ledger, record: record);
+        } else {
+          await showMoneyMovement(
+            context,
+            widget.ledger,
+            record.kind,
+            record: record,
+          );
+        }
       case 'notes':
         await showMoneyNotes(context, widget.ledger, record);
       case 'delete':
