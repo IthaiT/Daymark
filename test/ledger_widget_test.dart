@@ -384,12 +384,15 @@ void main() {
       await tester.tap(find.text('修改账单'));
       await tester.pumpAndSettle();
       expect(find.text('修改余额校准'), findsOneWidget);
+      expect(find.text('当前实际余额'), findsOneWidget);
+      expect(find.textContaining('调整差额'), findsNothing);
+      expect(find.text('正数增加余额，负数减少余额；后续流水保留。'), findsNothing);
       expect(
         tester
             .widget<TextField>(find.byKey(const ValueKey('movement-amount')))
             .controller!
             .text,
-        '100.00',
+        '3100.00',
       );
       await tester.tap(find.byKey(const ValueKey('账户-investment')));
       await tester.pumpAndSettle();
@@ -397,7 +400,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('movement-amount')),
-        '-50',
+        '9960',
       );
       fail = true;
       await tester.tap(find.text('保存'));
@@ -909,7 +912,8 @@ void main() {
         '10001',
       );
       await tester.pumpAndSettle();
-      expect(find.text('调整差额：+¥ 101.00'), findsOneWidget);
+      expect(find.textContaining('调整差额'), findsNothing);
+      expect(find.text('输入实际余额后自动计算差额'), findsNothing);
       fail = true;
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();

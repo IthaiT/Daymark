@@ -386,7 +386,13 @@ class _MovementDialogState extends State<_MovementDialog> {
       widget.record?.toAccountId ??
       widget.ledger.state.accounts.keys.where((id) => id != _from).firstOrNull;
   late final _amount = TextEditingController(
-    text: widget.record == null ? '' : moneyText(widget.record!.amountCents),
+    text: widget.record == null
+        ? ''
+        : moneyText(
+            _transfer
+                ? widget.record!.amountCents
+                : widget.ledger.state.accounts[_from]!.balanceCents,
+          ),
   );
   late final _date = TextEditingController(
     text: dateText(widget.record?.date ?? widget.ledger.clock()),
@@ -422,16 +428,14 @@ class _MovementDialogState extends State<_MovementDialog> {
           notes: _notes.text,
           editId: widget.record?.id,
         );
-      } else if (widget.record != null) {
-        await widget.ledger.updateAdjustment(
-          widget.record!.id,
+      } else {
+        await widget.ledger.calibrate(
           _from,
           cents,
           date,
           notes: _notes.text,
+          editId: widget.record?.id,
         );
-      } else {
-        await widget.ledger.calibrate(_from, cents, date, notes: _notes.text);
       }
       if (mounted) Navigator.pop(context);
     } catch (error) {
@@ -475,7 +479,14 @@ class _MovementDialogState extends State<_MovementDialog> {
             _account(
               _transfer ? '转出账户' : '账户',
               _from,
-              (value) => setState(() => _from = value!),
+              (value) => setState(() {
+                _from = value!;
+                if (!_transfer && widget.record != null) {
+                  _amount.text = moneyText(
+                    widget.ledger.state.accounts[_from]!.balanceCents,
+                  );
+                }
+              }),
             ),
             if (_transfer) ...[
               const SizedBox(height: 16),
@@ -488,25 +499,11 @@ class _MovementDialogState extends State<_MovementDialog> {
               autofocus: true,
               enabled: !_saving,
               decoration: InputDecoration(
-                labelText: _transfer
-                    ? '转账金额'
-                    : widget.record == null
-                    ? '当前实际余额'
-                    : '调整差额',
+                labelText: _transfer ? '转账金额' : '当前实际余额',
                 prefixText: '¥ ',
               ),
-              onChanged: (_) => setState(() {}),
               onSubmitted: (_) => unawaited(_save()),
             ),
-            if (!_transfer)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  widget.record == null
-                      ? _deltaText()
-                      : '正数增加余额，负数减少余额；后续流水保留。',
-                ),
-              ),
             const SizedBox(height: 16),
             MoneyDateField(controller: _date, enabled: !_saving),
             const SizedBox(height: 16),
@@ -541,16 +538,6 @@ class _MovementDialogState extends State<_MovementDialog> {
       ),
     ],
   );
-  String _deltaText() {
-    try {
-      final delta =
-          parseMoney(_amount.text, signed: true) -
-          widget.ledger.state.accounts[_from]!.balanceCents;
-      return '调整差额：${delta > 0 ? '+' : ''}¥ ${moneyText(delta)}';
-    } catch (_) {
-      return '输入实际余额后自动计算差额';
-    }
-  }
 }
 
 Future<void> showLedgerCategories(

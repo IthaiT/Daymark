@@ -161,29 +161,6 @@ class LedgerController extends ChangeNotifier {
     await _apply(_withRecords({...state.records, record.id: record}));
   });
 
-  /// Editing a historical calibration replaces its delta, preserving later flows.
-  Future<void> updateAdjustment(
-    String id,
-    String accountId,
-    int deltaCents,
-    DateTime date, {
-    String notes = '',
-  }) => _run(() async {
-    if (state.records[id]?.kind != MoneyKind.adjustment) {
-      throw const FormatException('所编辑的校准记录不存在。');
-    }
-    final record = MoneyRecord(
-      id: id,
-      kind: MoneyKind.adjustment,
-      amountCents: deltaCents,
-      date: dayStart(date),
-      accountId: accountId,
-      notes: notes.trim(),
-      affectsBalance: true,
-    );
-    await _apply(_withRecords({...state.records, id: record}));
-  });
-
   Future<void> calibrate(
     String accountId,
     int actualCents,

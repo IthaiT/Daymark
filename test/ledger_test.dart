@@ -216,11 +216,11 @@ void main() {
           editId: transferId,
           notes: '修改转账',
         ),
-        () => ledger.updateAdjustment(
-          adjustmentId,
+        () => ledger.calibrate(
           investmentAccountId,
-          -5000,
+          295000,
           september,
+          editId: adjustmentId,
         ),
       ]) {
         await expectLater(action(), throwsA(isA<FileSystemException>()));
@@ -243,11 +243,11 @@ void main() {
       expect(ledger.state.records[transferId]!.date, september);
       expect(ledger.state.records[transferId]!.notes, '修改转账');
       final afterTransfer = ledger.state;
-      await ledger.updateAdjustment(
-        adjustmentId,
+      await ledger.calibrate(
         investmentAccountId,
-        -5000,
+        295000,
         september,
+        editId: adjustmentId,
         notes: '更正差额',
       );
       expect(cash(), 1019000);
@@ -286,8 +286,8 @@ void main() {
           october,
           editId: adjustmentId,
         ),
-        () => ledger.updateAdjustment(transferId, cashAccountId, 100, october),
-        () => ledger.updateAdjustment(adjustmentId, 'missing', 100, october),
+        () => ledger.calibrate(cashAccountId, 100, october, editId: transferId),
+        () => ledger.calibrate('missing', 100, october, editId: adjustmentId),
       ]) {
         await expectLater(action(), throwsFormatException);
         expect(ledger.state, same(valid));
