@@ -16,6 +16,7 @@ void main() {
     double minutes, {
     bool alt = false,
     List<Event>? events,
+    int granularity = 1,
   }) => previewDrag(
     original: event,
     day: day,
@@ -24,6 +25,7 @@ void main() {
     dayWidth: 1440,
     events: events ?? [event],
     alt: alt,
+    granularity: granularity,
   );
   test('resize, move and boundary clamps preserve valid intervals', () {
     expect(drag(DragEdge.move, 60).event.start.hour, 10);
@@ -150,4 +152,86 @@ void main() {
       expect(moved.end, legacy.end!.add(const Duration(minutes: 7)));
     },
   );
+
+  test('granularity rounds moves and resizes to the selected step', () {
+    expect(
+      drag(DragEdge.move, 8, granularity: 15).event.start,
+      event.start.add(const Duration(minutes: 15)),
+    );
+    expect(drag(DragEdge.move, 7, granularity: 15).event.start, event.start);
+    expect(drag(DragEdge.end, 7, granularity: 15).event.end, event.end);
+    expect(
+      drag(DragEdge.end, 22, granularity: 15).event.end,
+      event.end!.add(const Duration(minutes: 15)),
+    );
+    expect(
+      drag(DragEdge.end, 24, granularity: 15).event.end,
+      event.end!.add(const Duration(minutes: 30)),
+    );
+    expect(
+      drag(DragEdge.start, 8, granularity: 15).event.start,
+      event.start.add(const Duration(minutes: 15)),
+    );
+    final hourly = drag(DragEdge.move, 40, granularity: 60).event;
+    expect(hourly.start, event.start.add(const Duration(hours: 1)));
+    expect(hourly.end, event.end!.add(const Duration(hours: 1)));
+    expect(drag(DragEdge.move, 29, granularity: 60).event.start, event.start);
+  });
+
+  test('granularity keeps events valid at the day edges', () {
+    expect(
+      drag(DragEdge.start, 300, granularity: 15).event.start,
+      event.end!.subtract(const Duration(minutes: 15)),
+    );
+    expect(
+      drag(DragEdge.end, -300, granularity: 15).event.end,
+      event.start.add(const Duration(minutes: 15)),
+    );
+    final short = Event(
+      'short',
+      '短事件',
+      null,
+      day.add(const Duration(hours: 9)),
+      day.add(const Duration(hours: 9, minutes: 20)),
+    );
+    final resized = previewDrag(
+      original: short,
+      day: day,
+      edge: DragEdge.end,
+      deltaMinutes: -10,
+      dayWidth: 1440,
+      events: [short],
+      granularity: 60,
+    ).event;
+    expect(resized.end, short.end);
+    final moved = previewDrag(
+      original: short,
+      day: day,
+      edge: DragEdge.move,
+      deltaMinutes: -10000,
+      dayWidth: 1440,
+      events: [short],
+      granularity: 15,
+    ).event;
+    expect(moved.start, day);
+    expect(moved.end, day.add(const Duration(minutes: 20)));
+  });
+
+  test('coarse granularity still aligns to a nearby neighbor', () {
+    final neighbor = Event(
+      'b',
+      '相邻',
+      null,
+      day.add(const Duration(hours: 10, minutes: 3)),
+      day.add(const Duration(hours: 11)),
+    );
+    final preview = drag(
+      DragEdge.end,
+      4,
+      granularity: 10,
+      events: [event, neighbor],
+    );
+    expect(preview.event.end, neighbor.start);
+    expect(preview.snap, neighbor.start);
+  });
 }
