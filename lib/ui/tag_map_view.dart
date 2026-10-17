@@ -232,6 +232,9 @@ class TagMapViewState extends State<TagMapView> {
   Future<void> applyColors(Map<String, Object?> colors) =>
       _run('window.Daymark.setColors(${jsonEncode(colors)})');
 
+  Future<void> applyAssignedIds(Map<String, String> ids) =>
+      _run('window.Daymark.setAssignedIds(${jsonEncode(ids)})');
+
   Future<void> addChild(String parentId, String name) => _run(
     'window.Daymark.addChild(${jsonEncode(parentId)}, ${jsonEncode(name)})',
   );

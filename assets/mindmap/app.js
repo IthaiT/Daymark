@@ -23,6 +23,10 @@ let lastSelection = ''
 let lastUndo = null
 let lastRedo = null
 
+// Nodes created here use a temporary id until the host saves the tree. Keep
+// the assignment so the same node never changes identity while this page lives.
+const assignedIds = new Map()
+
 function post(message) {
   try {
     window.chrome?.webview?.postMessage(message)
@@ -41,7 +45,8 @@ function fail(message) {
 
 function idOf(node) {
   const data = node.getData()
-  return data._daymarkId || NEW_PREFIX + data.uid
+  const id = data._daymarkId || NEW_PREFIX + data.uid
+  return assignedIds.get(id) || id
 }
 
 function textOf(node) {
@@ -102,7 +107,7 @@ function findNode(id) {
   }
   let found = null
   walk(root, node => {
-    if (node.getData('_daymarkId') === id) {
+    if (idOf(node) === id) {
       found = node
       return true
     }
@@ -334,6 +339,21 @@ function setColors(colors) {
   scheduleEmit()
 }
 
+function setAssignedIds(ids) {
+  if (!ids) return
+  Object.entries(ids).forEach(([temporary, stable]) => {
+    if (
+      typeof temporary === 'string' &&
+      typeof stable === 'string' &&
+      temporary &&
+      stable
+    ) {
+      assignedIds.set(temporary, stable)
+    }
+  })
+  scheduleEmit()
+}
+
 
 
 function uniqueChildName(parent) {
@@ -412,6 +432,7 @@ function collapseAll() {
 window.Daymark = {
   load,
   setColors,
+  setAssignedIds,
   addChild,
   beginEdit,
   endEdit,

@@ -110,6 +110,21 @@ void main() {
       expect(plan.tags['linux']!.id, 'linux');
     });
 
+    test('临时 ID 映射保留名称、层级和未映射节点', () {
+      final tree = TagTree.fromJson(
+        _root([
+          _node('work', '主业', [_node('new:abc', '新标签')]),
+          _node('life', '生活'),
+        ]),
+      );
+      final mapped = tree.mapIds({'new:abc': 'stable'});
+      expect(mapped.root.id, tagTreeRootId);
+      expect(mapped.find('new:abc'), isNull);
+      expect(mapped.find('stable')!.name, '新标签');
+      expect(mapped.find('stable')!.children, isEmpty);
+      expect(mapped.find('life')!.name, '生活');
+    });
+
     test('真实标签可以作为视图根，子树合并保留根外标签', () {
       final tags = {for (final tag in defaultTags) tag.id: tag};
       final full = TagTree.fromTags(tags.values);
@@ -387,6 +402,39 @@ void main() {
       controller.applyTree(tree);
       expect(controller.draft.sameAs(tree), isTrue);
       expect(controller.dirty, isFalse);
+    });
+
+    test('保存后的临时节点 ID 固定，迟到的导图更新不会换 ID', () async {
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '嵌入式', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      await controller.save();
+      final added = store.tags.values.singleWhere((tag) => tag.name == '写代码');
+      expect(controller.assignedIds['new:code'], added.id);
+
+      // A change event serialized just before the save still carries the
+      // temporary id. It must update the persisted tag instead of creating a
+      // second one with a fresh id.
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '嵌入式', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码改名'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      expect(controller.draft.find('new:code'), isNull);
+      expect(controller.draft.find(added.id)!.name, '写代码改名');
+      await controller.save();
+      expect(store.tags[added.id]!.name, '写代码改名');
+      expect(store.tags.values.where((tag) => tag.name == '写代码'), isEmpty);
     });
 
     test('默认以第一个一级标签为根，可切换任意标签或全部标签', () {

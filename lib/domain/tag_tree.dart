@@ -259,6 +259,18 @@ class TagTree {
     return TagTreeSave(tags, assigned);
   }
 
+  /// Replaces temporary web-view ids with the stable ids assigned on save.
+  TagTree mapIds(Map<String, String> ids) {
+    if (ids.isEmpty) return this;
+    TagNode map(TagNode node) => TagNode(
+      id: ids[node.id] ?? node.id,
+      name: node.name,
+      children: [for (final child in node.children) map(child)],
+    );
+
+    return TagTree._(map(root));
+  }
+
   /// Equality of the displayed structure and names.
   bool sameAs(TagTree other) {
     bool equal(TagNode left, TagNode right) {

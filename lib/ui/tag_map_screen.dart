@@ -24,11 +24,14 @@ class TagMapScreenState extends State<TagMapScreen> {
   bool _canUndo = false;
   bool _canRedo = false;
   bool _mapReady = false;
+  Timer? _autoSave;
+  Future<bool>? _saving;
   String? _themeKey;
   static const _allRootValue = '__all__';
 
   @override
   void dispose() {
+    _autoSave?.cancel();
     _focus.dispose();
     super.dispose();
   }
@@ -70,6 +73,8 @@ class TagMapScreenState extends State<TagMapScreen> {
   Future<void> _setRoot(String? id) async {
     await _view.currentState?.endEdit();
     await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
+    if (!await _save()) return;
     if (!mounted) return;
     widget.controller.setRoot(id);
     _reloadView(fit: true);
@@ -120,6 +125,15 @@ class TagMapScreenState extends State<TagMapScreen> {
       _canUndo = canUndo;
       _canRedo = canRedo;
     });
+    _scheduleSave();
+  }
+
+  /// Debounces writes so a drag or a burst of edits costs one atomic save.
+  void _scheduleSave() {
+    _autoSave?.cancel();
+    _autoSave = Timer(const Duration(milliseconds: 500), () {
+      unawaited(_save());
+    });
   }
 
   void _showError(Object error) {
@@ -150,16 +164,41 @@ class TagMapScreenState extends State<TagMapScreen> {
       );
   }
 
-  Future<void> _save() async {
-    if (!_mapReady || widget.controller.saving) return;
+  /// Commits an inline rename before an explicit save or navigation.
+  Future<bool> _saveNow() async {
     await _view.currentState?.endEdit();
     await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return false;
+    return _save();
+  }
+
+  Future<bool> _save() {
+    _autoSave?.cancel();
+    final pending = _saving;
+    if (pending != null) return pending;
+    final future = _write();
+    _saving = future;
+    return future
+        .then((saved) {
+          if (saved && widget.controller.dirty) _scheduleSave();
+          return saved;
+        })
+        .whenComplete(() {
+          if (identical(_saving, future)) _saving = null;
+        });
+  }
+
+  Future<bool> _write() async {
+    final controller = widget.controller;
+    if (!_mapReady) return false;
+    if (!controller.dirty) return true;
     try {
-      await widget.controller.save();
-      _reloadView(fit: false);
-      _showMessage('标签已保存');
+      await controller.save();
+      await _view.currentState?.applyAssignedIds(controller.assignedIds);
+      return true;
     } catch (error) {
       _showError(error);
+      return false;
     }
   }
 
@@ -266,7 +305,7 @@ class TagMapScreenState extends State<TagMapScreen> {
           ): () =>
               unawaited(_redo()),
           const SingleActivator(LogicalKeyboardKey.keyS, control: true): () =>
-              unawaited(_save()),
+              unawaited(_saveNow()),
           const SingleActivator(LogicalKeyboardKey.f2): () =>
               unawaited(_renameSelected()),
           const SingleActivator(LogicalKeyboardKey.delete): () =>
@@ -292,7 +331,7 @@ class TagMapScreenState extends State<TagMapScreen> {
                               key: _view,
                               onReady: _viewReady,
                               onChange: _changed,
-                              onSave: () => unawaited(_save()),
+                              onSave: () => unawaited(_saveNow()),
                               onDelete: () => unawaited(_deleteSelected()),
                               onError: _showError,
                             ),
@@ -381,7 +420,7 @@ class TagMapScreenState extends State<TagMapScreen> {
         FilledButton.icon(
           key: const ValueKey('tag-map-save'),
           onPressed: _mapReady && !widget.controller.saving
-              ? () => unawaited(_save())
+              ? () => unawaited(_saveNow())
               : null,
           icon: widget.controller.saving
               ? const SizedBox(

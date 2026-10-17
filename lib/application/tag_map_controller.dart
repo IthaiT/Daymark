@@ -19,6 +19,9 @@ class TagMapController extends ChangeNotifier {
   String? _rootId;
   bool _saving = false;
 
+  /// Temporary web-view ids to the stable ids assigned by the last save.
+  final Map<String, String> _assignedIds = {};
+
   /// The full tag tree, including tags hidden by the current root view.
   TagTree get draft => _draft;
   bool get saving => _saving;
@@ -34,11 +37,15 @@ class TagMapController extends ChangeNotifier {
   }
 
   TagNode? get rootNode => _rootId == null ? null : _draft.find(_rootId!);
-  TagNode? node(String id) => _draft.find(id);
-  String? parentIdOf(String id) => _draft.parentIdOf(id);
+  TagNode? node(String id) => _draft.find(_stableId(id)!);
+  String? parentIdOf(String id) => _draft.parentIdOf(_stableId(id)!);
   List<(TagNode, int)> get rootChoices => _draft.flatten();
+  Map<String, String> get assignedIds => Map.unmodifiable(_assignedIds);
+
+  String? _stableId(String? id) => id == null ? null : _assignedIds[id] ?? id;
 
   void setRoot(String? id) {
+    id = _stableId(id);
     if (id != null && _draft.find(id) == null) return;
     if (_rootId == id) return;
     _rootId = id;
@@ -169,8 +176,9 @@ class TagMapController extends ChangeNotifier {
     if (!tree.isVirtualRoot) {
       throw const FormatException('标签导图缺少根节点。');
     }
-    if (tree.sameAs(_draft)) return;
-    _draft = tree;
+    final resolved = tree.mapIds(_assignedIds);
+    if (resolved.sameAs(_draft)) return;
+    _draft = resolved;
     _ensureRoot();
     notifyListeners();
   }
@@ -178,15 +186,17 @@ class TagMapController extends ChangeNotifier {
   /// Applies the subtree reported by the web view without touching tags
   /// outside the current root.
   void applyViewTree(TagTree tree) {
-    final id = _rootId;
+    final id = _stableId(_rootId);
     if (id == null) {
       applyTree(tree);
       return;
     }
-    if (tree.isVirtualRoot || tree.root.id != id) {
+    _rootId = id;
+    final resolved = tree.mapIds(_assignedIds);
+    if (resolved.isVirtualRoot || resolved.root.id != id) {
       throw const FormatException('导图根标签与当前视图不一致。');
     }
-    final updated = _draft.replaceSubtree(tree);
+    final updated = _draft.replaceSubtree(resolved);
     if (updated.sameAs(_draft)) return;
     _draft = updated;
     notifyListeners();
@@ -221,11 +231,16 @@ class TagMapController extends ChangeNotifier {
         _baseline = latest;
         _ensureRoot();
       }
-      final plan = _draft.toTagMap(journal.store.tags);
+      final saving = _draft;
+      final plan = saving.toTagMap(journal.store.tags);
       await journal.store.replaceTags(plan.tags);
+      _assignedIds.addAll(plan.assignedIds);
       final saved = TagTree.fromTags(journal.store.tags.values);
       _baseline = saved;
-      _draft = saved;
+      // Keep edits made while the write was in flight; their temporary ids
+      // now resolve to the stable ids that were just persisted.
+      _draft = _draft.sameAs(saving) ? saved : _draft.mapIds(plan.assignedIds);
+      _rootId = _stableId(_rootId);
       _ensureRoot();
       journal.notifyListeners();
       return saved;
