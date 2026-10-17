@@ -355,6 +355,69 @@ void main() {
   );
 
   test(
+    'calibration edits undo the old effect before targeting the actual balance',
+    () async {
+      await ledger.calibrate(investmentAccountId, 400000, october);
+      final id = ledger.state.records.keys.single;
+      await ledger.transfer(investmentAccountId, cashAccountId, 20000, october);
+      final before = ledger.state;
+      final bytes = await store.file.readAsBytes();
+      fail = true;
+      await expectLater(
+        ledger.calibrate(
+          investmentAccountId,
+          350000,
+          september,
+          editId: id,
+          notes: '更正余额',
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(ledger.state, same(before));
+      expect(await store.file.readAsBytes(), bytes);
+      fail = false;
+      await ledger.calibrate(
+        investmentAccountId,
+        350000,
+        september,
+        editId: id,
+        notes: '更正余额',
+      );
+      expect(ledger.state.accounts[investmentAccountId]!.balanceCents, 350000);
+      expect(ledger.state.records[id]!.amountCents, 70000);
+      expect(ledger.state.records[id]!.date, september);
+      expect(ledger.state.records.length, 2);
+      expect(cash(), 1020000);
+      final updated = ledger.state;
+      expect(
+        (await LedgerStore.open(directory)).state.toJson(),
+        updated.toJson(),
+      );
+      await ledger.undo();
+      expect(ledger.state.toJson(), before.toJson());
+      await ledger.redo();
+      expect(ledger.state.toJson(), updated.toJson());
+      await ledger.calibrate(providentAccountId, 220000, october, editId: id);
+      expect(ledger.state.accounts[investmentAccountId]!.balanceCents, 280000);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 220000);
+      expect(ledger.state.records[id]!.amountCents, 20000);
+      await ledger.calibrate(providentAccountId, 200000, october, editId: id);
+      expect(ledger.state.records[id]!.amountCents, 0);
+      expect(ledger.state.accounts[providentAccountId]!.balanceCents, 200000);
+      final valid = ledger.state;
+      await expectLater(
+        ledger.calibrate(cashAccountId, 0, october, editId: 'missing'),
+        throwsFormatException,
+      );
+      await expectLater(
+        ledger.calibrate('missing', 0, october, editId: id),
+        throwsFormatException,
+      );
+      expect(ledger.state, same(valid));
+    },
+  );
+
+  test(
     'transfer conserves assets, adjustment is a reversible delta, neither enters statistics',
     () async {
       final total = ledger.state.totalCents;

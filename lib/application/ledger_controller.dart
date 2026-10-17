@@ -189,15 +189,24 @@ class LedgerController extends ChangeNotifier {
     int actualCents,
     DateTime date, {
     String notes = '',
+    String? editId,
   }) => _run(() async {
-    final account = state.accounts[accountId];
+    if (editId != null && state.records[editId]?.kind != MoneyKind.adjustment) {
+      throw const FormatException('所编辑的校准记录不存在。');
+    }
+    final baseline = editId == null
+        ? state
+        : _withRecords({...state.records}..remove(editId));
+    final account = baseline.accounts[accountId];
     if (account == null || actualCents.abs() > maxMoneyCents) {
       throw const FormatException('账户或余额不正确。');
     }
     final delta = actualCents - account.balanceCents;
-    if (delta == 0) throw const FormatException('实际余额与账面余额一致，无需校准。');
+    if (delta == 0 && editId == null) {
+      throw const FormatException('实际余额与账面余额一致，无需校准。');
+    }
     final record = MoneyRecord(
-      id: _id(),
+      id: editId ?? _id(),
       kind: MoneyKind.adjustment,
       amountCents: delta,
       date: dayStart(date),
