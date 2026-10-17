@@ -333,6 +333,7 @@ class TagMapScreenState extends State<TagMapScreen> {
                               onChange: _changed,
                               onSave: () => unawaited(_saveNow()),
                               onDelete: () => unawaited(_deleteSelected()),
+                              onEnter: (id) => unawaited(_setRoot(id)),
                               onError: _showError,
                             ),
                           ),
@@ -373,7 +374,7 @@ class TagMapScreenState extends State<TagMapScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                '拖动调整层级 · Tab 新建并输入 · 双击就地改名',
+                '拖动调整层级 · Tab 新建并输入 · 双击就地改名 · 右键进入子标签',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(

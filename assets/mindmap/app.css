@@ -45,3 +45,40 @@ body {
 .smm-node {
   cursor: pointer;
 }
+
+.dm-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 136px;
+  padding: 4px;
+  border: 1px solid var(--dm-menu-border, #d5d7dd);
+  border-radius: 10px;
+  background: var(--dm-menu-bg, #ffffff);
+  box-shadow: 0 8px 28px rgb(15 23 42 / 18%);
+  font-family: var(--dm-menu-font, sans-serif);
+  font-size: 13px;
+  color: var(--dm-menu-text, #1b1b1f);
+}
+
+.dm-menu[hidden] {
+  display: none;
+}
+
+.dm-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dm-menu button:hover,
+.dm-menu button:focus-visible {
+  background: var(--dm-menu-hover, rgb(0 0 0 / 8%));
+  outline: none;
+}

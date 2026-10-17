@@ -15,8 +15,15 @@ MindMap.pluginList = MindMap.pluginList.filter(plugin =>
 const container = document.getElementById('map')
 const status = document.getElementById('status')
 
+const menu = document.createElement('div')
+menu.className = 'dm-menu'
+menu.setAttribute('role', 'menu')
+menu.hidden = true
+document.body.appendChild(menu)
+
 let mindMap = null
 let ready = false
+let currentRootId = ''
 let emitTimer = 0
 let lastTree = ''
 let lastSelection = ''
@@ -162,6 +169,53 @@ function scheduleEmit() {
   emitTimer = setTimeout(emitNow, 40)
 }
 
+function hideMenu() {
+  menu.hidden = true
+  menu.textContent = ''
+}
+
+function showMenu(event, node) {
+  if (!node) {
+    hideMenu()
+    return
+  }
+  const id = idOf(node)
+  const items = []
+  if (
+    currentRootId &&
+    currentRootId !== VIRTUAL_ROOT_ID &&
+    id === currentRootId
+  ) {
+    items.push({ label: '返回 Daymark', target: '' })
+  } else if (id !== VIRTUAL_ROOT_ID && id !== currentRootId) {
+    items.push({ label: '进入', target: id })
+  }
+  if (!items.length) {
+    hideMenu()
+    return
+  }
+  menu.textContent = ''
+  items.forEach(item => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.setAttribute('role', 'menuitem')
+    button.textContent = item.label
+    button.addEventListener('click', () => {
+      hideMenu()
+      post({ type: 'enter', id: item.target })
+    })
+    menu.appendChild(button)
+  })
+  menu.hidden = false
+  const rect = menu.getBoundingClientRect()
+  const x = event.clientX || 0
+  const y = event.clientY || 0
+  menu.style.left =
+    Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)) + 'px'
+  menu.style.top =
+    Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + 'px'
+}
+
 function toNodeData(node) {
   const data = { text: node.name, expand: true }
   if (node.id && !node.id.startsWith(NEW_PREFIX)) {
@@ -171,6 +225,15 @@ function toNodeData(node) {
     data,
     children: (node.children || []).map(toNodeData)
   }
+}
+
+function applyMenuColors(colors) {
+  const root = document.documentElement.style
+  root.setProperty('--dm-menu-bg', colors.surface)
+  root.setProperty('--dm-menu-text', colors.text)
+  root.setProperty('--dm-menu-border', colors.border)
+  root.setProperty('--dm-menu-hover', colors.hover)
+  root.setProperty('--dm-menu-font', colors.fontFamily)
 }
 
 function buildThemeConfig(colors) {
@@ -301,6 +364,10 @@ function createMap(payload) {
   mindMap.on('back_forward', scheduleEmit)
   mindMap.on('node_active', scheduleEmit)
   mindMap.on('node_tree_render_end', scheduleEmit)
+  mindMap.on('node_contextmenu', showMenu)
+  mindMap.on('contextmenu', hideMenu)
+  mindMap.on('node_click', hideMenu)
+  mindMap.on('draw_click', hideMenu)
 }
 
 function load(payload) {
@@ -309,6 +376,9 @@ function load(payload) {
     return
   }
   const root = payload.tree
+  applyMenuColors(payload.colors)
+  currentRootId = root.id
+  hideMenu()
   const data = {
     data: { text: root.name, _daymarkId: root.id, expand: true },
     children: (root.children || []).map(toNodeData)
@@ -335,6 +405,7 @@ function load(payload) {
 
 function setColors(colors) {
   if (!colors || !mindMap) return
+  applyMenuColors(colors)
   mindMap.setThemeConfig(buildThemeConfig(colors))
   scheduleEmit()
 }
@@ -449,6 +520,19 @@ window.Daymark = {
 document.addEventListener('contextmenu', event => event.preventDefault())
 document.addEventListener('dragover', event => event.preventDefault())
 document.addEventListener('drop', event => event.preventDefault())
+document.addEventListener(
+  'mousedown',
+  event => {
+    if (!menu.contains(event.target)) hideMenu()
+  },
+  true
+)
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') hideMenu()
+})
+window.addEventListener('blur', hideMenu)
+window.addEventListener('resize', hideMenu)
+document.addEventListener('wheel', hideMenu, true)
 window.addEventListener('error', event => {
   post({ type: 'error', message: event.message || '导图脚本错误。' })
 })

@@ -52,6 +52,7 @@ class TagMapView extends StatefulWidget {
     required this.onChange,
     required this.onSave,
     required this.onDelete,
+    required this.onEnter,
     required this.onError,
   });
   final VoidCallback onReady;
@@ -64,6 +65,9 @@ class TagMapView extends StatefulWidget {
   onChange;
   final VoidCallback onSave;
   final VoidCallback onDelete;
+
+  /// Null enters the all-tags view.
+  final ValueChanged<String?> onEnter;
   final ValueChanged<Object> onError;
   @override
   State<TagMapView> createState() => TagMapViewState();
@@ -200,6 +204,9 @@ class TagMapViewState extends State<TagMapView> {
         widget.onSave();
       case 'delete':
         widget.onDelete();
+      case 'enter':
+        final id = value['id'];
+        if (id is String) widget.onEnter(id.isEmpty ? null : id);
       case 'error':
         final message = value['message'];
         widget.onError(
