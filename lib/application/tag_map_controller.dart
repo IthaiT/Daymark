@@ -201,14 +201,17 @@ class TagMapController extends ChangeNotifier {
   /// Why [id] cannot be deleted, or null when deletion is allowed. The store
   /// repeats these checks before writing; this keeps the UI understandable.
   String? deleteBlocker(String id) {
-    if (id == tagTreeRootId) return '虚拟根节点不能删除。';
-    if (id == _rootId) return '当前根标签不能删除，请先切换根标签。';
-    final node = this.node(id);
+    final stable = _stableId(id) ?? id;
+    if (stable == tagTreeRootId) return '虚拟根节点不能删除。';
+    if (stable == _rootId) return '当前根标签不能删除，请先切换根标签。';
+    final node = this.node(stable);
     if (node == null) return '标签不存在。';
     if (node.children.isNotEmpty) return '请先删除或移动它的子标签。';
     final count =
-        journal.store.events.values.where((event) => event.tagId == id).length +
-        journal.drafts.values.where((event) => event.tagId == id).length;
+        journal.store.events.values
+            .where((event) => event.tagId == stable)
+            .length +
+        journal.drafts.values.where((event) => event.tagId == stable).length;
     if (count > 0) return '此标签还有 $count 个事件，请先给这些事件更换标签。';
     return null;
   }

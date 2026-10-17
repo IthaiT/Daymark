@@ -244,27 +244,6 @@ class TagMapScreenState extends State<TagMapScreen> {
       _showMessage(blocker);
       return;
     }
-    final confirmed =
-        await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('删除标签'),
-            content: Text('将在保存后删除标签「${_selection.name}」。'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                key: const ValueKey('tag-map-delete-confirm'),
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('删除'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed) return;
     final removedId = _selection.id;
     final view = _view.currentState;
     if (view != null) await view.remove(removedId);
