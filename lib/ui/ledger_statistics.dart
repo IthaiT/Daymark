@@ -103,42 +103,44 @@ class _LedgerStatisticsState extends State<LedgerStatistics> {
                 icon: const Icon(Icons.arrow_back),
               ),
             Expanded(
-              child: Text(
-                parent == null
-                    ? '全部${moneyKindText(kind)}'
-                    : state.categoryPath(parent.id),
-                key: const ValueKey('stats-path'),
-                style: Theme.of(context).textTheme.titleMedium,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      parent == null
+                          ? '全部${moneyKindText(kind)}'
+                          : state.categoryPath(parent.id),
+                      key: const ValueKey('stats-path'),
+                      style: Theme.of(context).textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton.icon(
+                    key: const ValueKey('stats-filter'),
+                    onPressed: _filter,
+                    icon: const Icon(Icons.filter_list, size: 18),
+                    label: Text(
+                      _filtered
+                          ? '${_exclude ? '已排除' : '仅包含'} ${_selection.length} 个标签'
+                          : '筛选标签',
+                    ),
+                  ),
+                  if (_filtered)
+                    TextButton(
+                      key: const ValueKey('stats-filter-reset'),
+                      onPressed: () => setState(() {
+                        _exclude = true;
+                        _selection = {};
+                      }),
+                      child: const Text('重置筛选'),
+                    ),
+                ],
               ),
             ),
+            const SizedBox(width: 12),
             Text('$count 笔'),
-          ],
-        ),
-        Wrap(
-          spacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            TextButton.icon(
-              key: const ValueKey('stats-filter'),
-              onPressed: _filter,
-              icon: const Icon(Icons.filter_list, size: 18),
-              label: Text(
-                _filtered
-                    ? '${_exclude ? '已排除' : '仅包含'} ${_selection.length} 个标签'
-                    : '筛选标签',
-              ),
-            ),
-            if (_filtered)
-              TextButton(
-                key: const ValueKey('stats-filter-reset'),
-                onPressed: () => setState(() {
-                  _exclude = true;
-                  _selection = {};
-                }),
-                child: const Text('重置筛选'),
-              ),
           ],
         ),
         const SizedBox(height: 12),
