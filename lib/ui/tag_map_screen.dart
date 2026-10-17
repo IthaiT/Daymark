@@ -24,6 +24,8 @@ class TagMapScreenState extends State<TagMapScreen> {
   bool _canUndo = false;
   bool _canRedo = false;
   bool _mapReady = false;
+  String? _themeKey;
+  static const _allRootValue = '__all__';
 
   @override
   void dispose() {
@@ -31,15 +33,31 @@ class TagMapScreenState extends State<TagMapScreen> {
     super.dispose();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final key = _colors().values.join('|');
+    final previous = _themeKey;
+    _themeKey = key;
+    if (previous != null && previous != key && _mapReady) {
+      final view = _view.currentState;
+      if (view != null) unawaited(view.applyColors(_colors()));
+    }
+  }
+
   void focus() => _focus.requestFocus();
 
   /// Re-reads tags edited in the journal sidebar while this page stayed alive.
   void synchronize() {
     if (!widget.controller.syncFromStore()) return;
+    _reloadView(fit: true);
+  }
+
+  void _reloadView({required bool fit}) {
+    final tree = widget.controller.view;
     final view = _view.currentState;
-    if (view != null) {
-      unawaited(view.load(widget.controller.draft, _colors()));
-    }
+    if (tree == null || view == null) return;
+    unawaited(view.load(tree, _colors(), fit: fit));
     if (mounted) {
       setState(() {
         _selection = const TagMapSelection.none();
@@ -47,6 +65,11 @@ class TagMapScreenState extends State<TagMapScreen> {
         _canRedo = false;
       });
     }
+  }
+
+  void _setRoot(String? id) {
+    widget.controller.setRoot(id);
+    _reloadView(fit: true);
   }
 
   Map<String, Object?> _colors() {
@@ -76,10 +99,7 @@ class TagMapScreenState extends State<TagMapScreen> {
 
   void _viewReady() {
     if (mounted) setState(() => _mapReady = true);
-    final view = _view.currentState;
-    if (view != null) {
-      unawaited(view.load(widget.controller.draft, _colors()));
-    }
+    _reloadView(fit: true);
   }
 
   void _changed(
@@ -88,7 +108,9 @@ class TagMapScreenState extends State<TagMapScreen> {
     bool canUndo,
     bool canRedo,
   ) {
-    widget.controller.applyTree(tree);
+    final expected = widget.controller.view?.root.id;
+    if (expected != null && tree.root.id != expected) return;
+    widget.controller.applyViewTree(tree);
     if (!mounted) return;
     setState(() {
       _selection = selection;
@@ -128,9 +150,8 @@ class TagMapScreenState extends State<TagMapScreen> {
   Future<void> _save() async {
     if (!_mapReady || widget.controller.saving) return;
     try {
-      final saved = await widget.controller.save();
-      final view = _view.currentState;
-      if (view != null) unawaited(view.load(saved, _colors()));
+      await widget.controller.save();
+      _reloadView(fit: false);
       _showMessage('标签已保存');
     } catch (error) {
       _showError(error);
@@ -155,24 +176,27 @@ class TagMapScreenState extends State<TagMapScreen> {
   Future<void> _add() async {
     if (!_mapReady) return;
     final selected = widget.controller.node(_selection.id);
-    final parent = selected == null || selected.isRoot ? null : selected;
+    final parentId = selected?.id ?? widget.controller.rootId ?? tagTreeRootId;
+    final parentName = selected?.name ?? widget.controller.rootNode?.name;
+    final topLevel = parentId == tagTreeRootId;
     final name = await _askName(
-      title: parent == null ? '新增一级标签' : '新增子标签',
+      title: topLevel ? '新增一级标签' : '新增子标签',
       initial: '新标签',
-      detail: parent == null ? null : '添加到「${parent.name}」',
-      validate: (value) => widget.controller.validateName(parent?.id, value),
+      detail: parentName == null ? null : '添加到「$parentName」',
+      validate: (value) =>
+          widget.controller.validateName(topLevel ? null : parentId, value),
     );
     if (name == null) return;
     final view = _view.currentState;
     if (view != null) {
-      await view.addChild(parent?.id ?? tagTreeRootId, name);
+      await view.addChild(parentId, name);
     }
   }
 
   Future<void> _rename(String id, String name) async {
     if (!_mapReady) return;
     final node = widget.controller.node(id);
-    if (node == null || node.isRoot) return;
+    if (node == null || id == tagTreeRootId) return;
     final updated = await _askName(
       title: '重命名标签',
       initial: name,
@@ -190,7 +214,9 @@ class TagMapScreenState extends State<TagMapScreen> {
   Future<void> _renameSelected() => _rename(_selection.id, _selection.name);
 
   Future<void> _deleteSelected() async {
-    if (!_mapReady || _selection.id.isEmpty || _selection.isRoot) return;
+    if (!_mapReady || _selection.id.isEmpty || _selection.id == tagTreeRootId) {
+      return;
+    }
     final blocker = widget.controller.deleteBlocker(_selection.id);
     if (blocker != null) {
       _showMessage(blocker);
@@ -258,6 +284,11 @@ class TagMapScreenState extends State<TagMapScreen> {
               unawaited(_renameSelected()),
           const SingleActivator(LogicalKeyboardKey.delete): () =>
               unawaited(_deleteSelected()),
+          // Tab must not create a node or land on "add" by accident.
+          const SingleActivator(LogicalKeyboardKey.tab): () =>
+              _focus.requestFocus(),
+          const SingleActivator(LogicalKeyboardKey.tab, shift: true): () =>
+              _focus.requestFocus(),
         },
         child: Focus(
           focusNode: _focus,
@@ -312,7 +343,13 @@ class TagMapScreenState extends State<TagMapScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('标签导图', style: Theme.of(context).textTheme.titleMedium),
+              Row(
+                children: [
+                  Text('标签导图', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(width: 10),
+                  Flexible(child: _rootPicker(context)),
+                ],
+              ),
               const SizedBox(height: 2),
               Text(
                 '拖动节点调整层级 · 双击节点重命名',
@@ -377,6 +414,67 @@ class TagMapScreenState extends State<TagMapScreen> {
     );
   }
 
+  Widget _rootPicker(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final label = widget.controller.isAllView
+        ? '全部标签'
+        : widget.controller.rootNode?.name ?? '选择根标签';
+    return PopupMenuButton<String>(
+      key: const ValueKey('tag-map-root'),
+      tooltip: '选择根标签',
+      onSelected: (value) => _setRoot(value == _allRootValue ? null : value),
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: _allRootValue, child: Text('全部标签')),
+        const PopupMenuDivider(),
+        for (final (node, depth) in widget.controller.rootChoices)
+          PopupMenuItem(
+            value: node.id,
+            child: Padding(
+              padding: EdgeInsets.only(left: depth * 14),
+              child: Text(node.name, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+      ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 200),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
+          decoration: BoxDecoration(
+            color: scheme.secondaryContainer.withValues(alpha: .55),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.account_tree_outlined,
+                size: 15,
+                color: scheme.onSecondaryContainer,
+              ),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSecondaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(
+                Icons.arrow_drop_down,
+                size: 18,
+                color: scheme.onSecondaryContainer,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _toolbar(BuildContext context) => Material(
     elevation: 2,
     color: Theme.of(context).colorScheme.surfaceContainerLowest,
@@ -391,14 +489,19 @@ class TagMapScreenState extends State<TagMapScreen> {
           _tool(
             Icons.edit_outlined,
             '重命名',
-            !_mapReady || _selection.id.isEmpty || _selection.isRoot
+            !_mapReady ||
+                    _selection.id.isEmpty ||
+                    _selection.id == tagTreeRootId
                 ? null
                 : _renameSelected,
           ),
           _tool(
             Icons.delete_outline,
             '删除',
-            !_mapReady || _selection.id.isEmpty || _selection.isRoot
+            !_mapReady ||
+                    _selection.id.isEmpty ||
+                    _selection.id == tagTreeRootId ||
+                    _selection.id == widget.controller.rootId
                 ? null
                 : _deleteSelected,
           ),
