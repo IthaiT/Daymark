@@ -51,9 +51,11 @@ Widget tests run without native windows. The Release smoke test requires Windows
 
 ## Commit & Pull Request Guidelines
 
-You must create your own task branch (`codex/<task-name>`) before editing code, demos or documentation; reuse it for continuations. You must commit completed, validated steps promptly. Rebase only your own unpublished commits and integrate by fast-forward; do not rewrite shared history or force-push without explicit authorization.
+- For each new task, you must fetch `origin` and create `codex/<task-name>` from the freshly fetched `origin/main` before editing code, demos or documentation; never branch from another task branch. Reuse a branch only for the same task.
+- You must commit each small, focused step as soon as its relevant checks pass; do not leave completed work uncommitted.
+- You must keep history linear: rebase your own unpublished commits onto the latest `origin/main` before fast-forward integration; no merge commits. Do not rewrite shared history or force-push without explicit authorization.
 
-Follow existing prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, and `chore:`. Keep commits small and focused; preserve linear history through rebase or fast-forward integration.
+Follow existing prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, and `chore:`.
 
 PR descriptions should explain the problem, resulting behavior, and validation performed. Link relevant issues when available; include screenshots for interface changes and describe storage-format changes.
 
