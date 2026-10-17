@@ -79,11 +79,12 @@ class TimelineState extends State<Timeline> {
   ];
   List<Event> get _displayEvents => [
     ..._events,
-    for (final gap in undefinedEvents([
-      for (final event in widget.journal.regularEvents)
-        event.id == _preview?.id ? _preview! : event,
-    ], widget.journal.day))
-      gap.copyWith(title: widget.journal.event(gap.id)?.title ?? gap.title),
+    if (widget.journal.autoUndefined)
+      for (final gap in undefinedEvents([
+        for (final event in widget.journal.regularEvents)
+          event.id == _preview?.id ? _preview! : event,
+      ], widget.journal.day))
+        gap.copyWith(title: widget.journal.event(gap.id)?.title ?? gap.title),
   ];
   double _x(DateTime value) =>
       24 +
@@ -208,6 +209,7 @@ class TimelineState extends State<Timeline> {
       dayWidth: _dayWidth,
       events: _events,
       alt: HardwareKeyboard.instance.isAltPressed,
+      granularity: widget.journal.dragMinutes,
     );
     setState(() {
       _preview = preview.event;

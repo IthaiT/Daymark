@@ -5,6 +5,7 @@ import '../data/store.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/history.dart';
 import '../domain/model.dart';
+import '../domain/settings.dart';
 
 enum EventColumn { title, start, end, tag }
 
@@ -27,12 +28,21 @@ class JournalSnapshot {
 }
 
 class JournalController extends ChangeNotifier {
-  JournalController(this.store, {DateTime? day, DateTime Function()? clock})
-    : _day = dayStart(day ?? DateTime.now()),
-      clock = clock ?? DateTime.now;
+  JournalController(
+    this.store, {
+    DateTime? day,
+    DateTime Function()? clock,
+    AppSettings settings = const AppSettings(),
+  }) : _day = dayStart(day ?? DateTime.now()),
+       _settings = settings,
+       clock = clock ?? DateTime.now;
   final Store store;
   final DateTime Function() clock;
   final history = History<JournalSnapshot>();
+  AppSettings _settings;
+  AppSettings get settings => _settings;
+  bool get autoUndefined => _settings.autoUndefined;
+  int get dragMinutes => _settings.dragMinutes;
   DateTime _day;
   DateTime get day => _day;
   Map<String, Event> _drafts = {};
@@ -65,7 +75,8 @@ class JournalController extends ChangeNotifier {
   ]..sort(compareEvents);
   List<Event> get rows => [
     ...visibleEvents,
-    ...store.eventsOn(day).where((event) => event.isUndefined),
+    if (_settings.autoUndefined)
+      ...store.eventsOn(day).where((event) => event.isUndefined),
   ]..sort(compareEvents);
 
   JournalSnapshot _capture() => JournalSnapshot(store.events, _drafts);
@@ -82,6 +93,7 @@ class JournalController extends ChangeNotifier {
         item.id: item,
     };
     final result = {...regular};
+    if (!_settings.autoUndefined) return result;
     for (final gap in undefinedEvents([...regular.values, ...drafts.values])) {
       var previous = storedGaps[gap.id];
       if (previous == null &&
@@ -127,6 +139,26 @@ class JournalController extends ChangeNotifier {
 
   Future<void> initialize() =>
       _run(() => _apply(store.events, _drafts, record: false));
+
+  /// Applies a new recording policy. Disabling derived undefined records drops
+  /// the stored gaps in the same atomic write so rows and CSV stay in step.
+  Future<void> applySettings(AppSettings value) => _run(() async {
+    if (value == _settings) return;
+    final previous = _settings;
+    _settings = value;
+    if (previous.autoUndefined == value.autoUndefined) {
+      notifyListeners();
+      return;
+    }
+    try {
+      await _apply(store.events, _drafts, record: false);
+    } catch (error) {
+      _settings = previous;
+      notifyListeners();
+      rethrow;
+    }
+  });
+
   Future<void> setDay(DateTime value) => _run(() async {
     if (value.year < 1 || value.year > 9999) {
       throw const FormatException('已经到达日期范围边界。');
