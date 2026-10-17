@@ -434,6 +434,7 @@ function setAssignedIds(ids) {
       assignedIds.set(temporary, stable)
     }
   })
+  if (assignedIds.has(currentRootId)) currentRootId = assignedIds.get(currentRootId)
   scheduleEmit()
 }
 
@@ -492,15 +493,31 @@ function redo() {
   scheduleEmit()
 }
 
+function zoomIn() {
+  mindMap?.view.enlarge()
+}
+
+function zoomOut() {
+  mindMap?.view.narrow()
+}
+
+function fit() {
+  mindMap?.view.fit()
+}
+
 window.Daymark = {
   load,
   setColors,
   setAssignedIds,
+  addChild,
   beginEdit,
   endEdit,
   remove,
   undo,
-  redo
+  redo,
+  zoomIn,
+  zoomOut,
+  fit
 }
 
 document.addEventListener('contextmenu', event => event.preventDefault())

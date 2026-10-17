@@ -247,6 +247,10 @@ class TagMapViewState extends State<TagMapView> {
   Future<void> applyAssignedIds(Map<String, String> ids) =>
       _run('window.Daymark.setAssignedIds(${jsonEncode(ids)})');
 
+  Future<void> addChild(String parentId, String name) => _run(
+    'window.Daymark.addChild(${jsonEncode(parentId)}, ${jsonEncode(name)})',
+  );
+
   Future<void> beginEdit(String id) =>
       _run('window.Daymark.beginEdit(${jsonEncode(id)})');
 
@@ -257,6 +261,9 @@ class TagMapViewState extends State<TagMapView> {
 
   Future<void> undo() => _run('window.Daymark.undo()');
   Future<void> redo() => _run('window.Daymark.redo()');
+  Future<void> zoomIn() => _run('window.Daymark.zoomIn()');
+  Future<void> zoomOut() => _run('window.Daymark.zoomOut()');
+  Future<void> fit() => _run('window.Daymark.fit()');
 
   @override
   Widget build(BuildContext context) {
