@@ -129,7 +129,7 @@ class TagMapScreenState extends State<TagMapScreen> {
       _canUndo = canUndo;
       _canRedo = canRedo;
     });
-    _scheduleSave();
+    if (widget.controller.dirty) _scheduleSave();
   }
 
   /// Debounces writes so a drag or a burst of edits costs one atomic save.
