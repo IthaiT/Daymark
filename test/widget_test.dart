@@ -1155,6 +1155,84 @@ void main() {
     },
   );
 
+  testWidgets('hour-minute choices mark the picked value and read it back', (
+    tester,
+  ) async {
+    DateTime? chosen;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: TimeChoices(
+              value: DateTime.utc(2026, 10, 7, 13, 5),
+              onChoose: (value) => chosen = value,
+            ),
+          ),
+        ),
+      ),
+    );
+    Color? tileColor(String key) =>
+        tester.widget<Material>(find.byKey(ValueKey(key))).color;
+    expect(find.text('13:05'), findsOneWidget);
+    expect(tileColor('time-hour-13'), isNot(Colors.transparent));
+    expect(tileColor('time-hour-12'), Colors.transparent);
+    await tester.tap(find.byKey(const ValueKey('time-hour-14')));
+    await tester.pumpAndSettle();
+    expect(find.text('14:05'), findsOneWidget);
+    expect(tileColor('time-hour-14'), isNot(Colors.transparent));
+    expect(tileColor('time-hour-13'), Colors.transparent);
+    await tester.tap(find.byKey(const ValueKey('time-minute-4')));
+    await tester.pumpAndSettle();
+    expect(find.text('14:04'), findsOneWidget);
+    await tester.tap(find.text('确定'));
+    await tester.pumpAndSettle();
+    expect(chosen, DateTime.utc(2026, 10, 7, 14, 4));
+  });
+
+  testWidgets('Enter in the time field confirms a manual hour-minute pick', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextField, '时间'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TimeChoices), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('time-hour-14')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('time-minute-4')));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.widgetWithText(TextField, '时间'))
+          .controller!
+          .text,
+      '14:04',
+    );
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.store.events['a']!.start, DateTime.utc(2026, 10, 7, 14, 4));
+    expect(input('a', 'start'), findsNothing);
+  });
+
+  testWidgets('a typed time still wins over the previous list selection', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextField, '时间'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('time-hour-14')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '时间'), '09:15');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.store.events['a']!.start, DateTime.utc(2026, 10, 7, 9, 15));
+  });
+
   testWidgets(
     'the first overnight sleep has no undefined row or timeline block before it',
     (tester) async {

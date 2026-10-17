@@ -295,6 +295,13 @@ class _EventEditorState extends State<_EventEditor> {
                   anchor: TextField(
                     controller: start ? _start : _end,
                     decoration: InputDecoration(labelText: start ? '开始' : '结束'),
+                    onSubmitted: (_) => setState(() {
+                      if (start) {
+                        _startOpen = false;
+                      } else {
+                        _endOpen = false;
+                      }
+                    }),
                     onTap: () => setState(() {
                       if (start) {
                         _startOpen = true;

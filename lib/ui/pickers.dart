@@ -294,19 +294,43 @@ class CalendarChoices extends StatelessWidget {
   );
 }
 
+/// Hour and minute columns with a readout of the current selection. The picked
+/// tile keeps a filled background, so a manual choice is always identifiable.
 class TimeChoices extends StatefulWidget {
-  const TimeChoices({super.key, required this.value, required this.onChoose});
+  const TimeChoices({
+    super.key,
+    required this.value,
+    required this.onChoose,
+    this.onChanged,
+  });
   final DateTime value;
   final ValueChanged<DateTime> onChoose;
+
+  /// Reports every manual hour or minute pick, so the caller can preview the
+  /// pending time while this picker stays open.
+  final ValueChanged<DateTime>? onChanged;
   @override
   State<TimeChoices> createState() => _TimeChoicesState();
 }
 
 class _TimeChoicesState extends State<TimeChoices> {
+  static const _extent = 36.0;
+  static const _viewport = 180.0;
   late int _hour = widget.value.hour;
   late int _minute = widget.value.minute;
-  late final _hours = ScrollController(initialScrollOffset: _hour * 36.0);
-  late final _minutes = ScrollController(initialScrollOffset: _minute * 36.0);
+  late final _hours = ScrollController(
+    initialScrollOffset: _centeredOffset(_hour, 24),
+  );
+  late final _minutes = ScrollController(
+    initialScrollOffset: _centeredOffset(_minute, 60),
+  );
+
+  static double _centeredOffset(int index, int count) =>
+      (index * _extent - (_viewport - _extent) / 2).clamp(
+        0.0,
+        count * _extent - _viewport,
+      );
+
   @override
   void dispose() {
     _hours.dispose();
@@ -314,38 +338,106 @@ class _TimeChoicesState extends State<TimeChoices> {
     super.dispose();
   }
 
+  DateTime get _time => DateTime.utc(
+    widget.value.year,
+    widget.value.month,
+    widget.value.day,
+    _hour,
+    _minute,
+  );
+
+  void _pick({required bool hours, required int value}) {
+    setState(() {
+      if (hours) {
+        _hour = value;
+      } else {
+        _minute = value;
+      }
+    });
+    widget.onChanged?.call(_time);
+  }
+
+  void _reveal(ScrollController controller, int index, int count) {
+    if (!controller.hasClients) return;
+    controller.animateTo(
+      _centeredOffset(index, count),
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget _tile(int value, {required bool hours}) {
+    final scheme = Theme.of(context).colorScheme;
+    final selected = value == (hours ? _hour : _minute);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: Material(
+        key: ValueKey('time-${hours ? 'hour' : 'minute'}-$value'),
+        color: selected ? scheme.secondaryContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _pick(hours: hours, value: value),
+          child: Center(
+            child: Text(
+              value.toString().padLeft(2, '0'),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                color: selected
+                    ? scheme.onSecondaryContainer
+                    : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      SizedBox(
-        height: 230,
-        child: Row(
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          key: const ValueKey('time-readout'),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            clockText(_time),
+            style: theme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
           children: [
             for (final hours in [true, false])
               Expanded(
                 child: Column(
                   children: [
-                    Text(hours ? '小时' : '分钟'),
-                    Expanded(
-                      child: ListView.builder(
+                    Text(
+                      hours ? '小时' : '分钟',
+                      style: theme.labelMedium?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    SizedBox(
+                      height: _viewport,
+                      child: Scrollbar(
                         controller: hours ? _hours : _minutes,
-                        itemExtent: 36,
-                        itemCount: hours ? 24 : 60,
-                        itemBuilder: (context, index) => ListTile(
-                          dense: true,
-                          selected: index == (hours ? _hour : _minute),
-                          title: Text(
-                            index.toString().padLeft(2, '0'),
-                            textAlign: TextAlign.center,
-                          ),
-                          onTap: () => setState(() {
-                            if (hours) {
-                              _hour = index;
-                            } else {
-                              _minute = index;
-                            }
-                          }),
+                        child: ListView.builder(
+                          controller: hours ? _hours : _minutes,
+                          itemExtent: _extent,
+                          itemCount: hours ? 24 : 60,
+                          itemBuilder: (context, index) =>
+                              _tile(index, hours: hours),
                         ),
                       ),
                     ),
@@ -354,36 +446,31 @@ class _TimeChoicesState extends State<TimeChoices> {
               ),
           ],
         ),
-      ),
-      Row(
-        children: [
-          TextButton(
-            onPressed: () {
-              final now = DateTime.now();
-              setState(() {
-                _hour = now.hour;
-                _minute = now.minute;
-              });
-            },
-            child: const Text('现在'),
-          ),
-          const Spacer(),
-          FilledButton(
-            onPressed: () => widget.onChoose(
-              DateTime.utc(
-                widget.value.year,
-                widget.value.month,
-                widget.value.day,
-                _hour,
-                _minute,
-              ),
+        Row(
+          children: [
+            TextButton(
+              onPressed: () {
+                final now = DateTime.now();
+                setState(() {
+                  _hour = now.hour;
+                  _minute = now.minute;
+                });
+                widget.onChanged?.call(_time);
+                _reveal(_hours, _hour, 24);
+                _reveal(_minutes, _minute, 60);
+              },
+              child: const Text('现在'),
             ),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    ],
-  );
+            const Spacer(),
+            FilledButton(
+              onPressed: () => widget.onChoose(_time),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 class DateTimeChoices extends StatefulWidget {
@@ -413,6 +500,16 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
     super.dispose();
   }
 
+  void _confirm() {
+    try {
+      widget.onChoose(
+        parseTimestamp('${_date.text.trim()}T${_time.text.trim()}:00'),
+      );
+    } on FormatException catch (error) {
+      setState(() => _error = error.message);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -424,6 +521,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
         anchor: TextField(
           controller: _date,
           decoration: const InputDecoration(labelText: '日期'),
+          onSubmitted: (_) => _confirm(),
           onTap: () => setState(() {
             _calendar = true;
             _clock = false;
@@ -445,6 +543,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
         anchor: TextField(
           controller: _time,
           decoration: const InputDecoration(labelText: '时间'),
+          onSubmitted: (_) => _confirm(),
           onTap: () => setState(() {
             _clock = true;
             _calendar = false;
@@ -452,6 +551,9 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
         ),
         builder: (context, close) => TimeChoices(
           value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
+          // Show the pending hour and minute in the field at once, so Enter
+          // confirms exactly the time that was just picked.
+          onChanged: (value) => _time.text = clockText(value),
           onChoose: (value) {
             _time.text = clockText(value);
             close();
@@ -468,20 +570,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           TextButton(onPressed: widget.onCancel, child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              try {
-                widget.onChoose(
-                  parseTimestamp(
-                    '${_date.text.trim()}T${_time.text.trim()}:00',
-                  ),
-                );
-              } on FormatException catch (error) {
-                setState(() => _error = error.message);
-              }
-            },
-            child: const Text('确定'),
-          ),
+          FilledButton(onPressed: _confirm, child: const Text('确定')),
         ],
       ),
     ],
