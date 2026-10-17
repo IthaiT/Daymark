@@ -353,6 +353,27 @@ void main() {
       expect(await store.tagsFile.readAsBytes(), before);
     });
 
+    test('保存失败后仍可进入尚未落盘的新标签', () async {
+      controller.setRoot('work');
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '嵌入式', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      failWrites = true;
+      await expectLater(controller.save(), throwsA(isA<FileSystemException>()));
+      expect(controller.dirty, isTrue);
+
+      controller.setRoot('new:code');
+      expect(controller.rootId, 'new:code');
+      expect(controller.view!.root.id, 'new:code');
+      expect(controller.view!.root.name, '写代码');
+    });
+
     test('删除规则与事件、子标签和虚拟根节点一致', () async {
       await store.saveEvent(
         Event(
