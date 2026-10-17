@@ -5,10 +5,12 @@ import 'package:window_manager/window_manager.dart';
 
 import '../application/journal_controller.dart';
 import '../application/ledger_controller.dart';
+import '../application/settings_controller.dart';
 import '../domain/appearance.dart';
 import 'palette_picker.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
+import 'settings_dialog.dart';
 import 'title_bar.dart';
 
 class AppScreen extends StatefulWidget {
@@ -16,6 +18,7 @@ class AppScreen extends StatefulWidget {
     super.key,
     required this.journal,
     required this.ledger,
+    required this.settings,
     this.palette = AppPalette.slate,
     this.onPaletteChanged,
     this.tagColors = const {},
@@ -23,6 +26,7 @@ class AppScreen extends StatefulWidget {
   });
   final JournalController journal;
   final LedgerController ledger;
+  final SettingsController settings;
   final AppPalette palette;
   final ValueChanged<AppPalette>? onPaletteChanged;
   final Map<String, TagColor> tagColors;
@@ -70,6 +74,17 @@ class _AppScreenState extends State<AppScreen> {
       if (mounted) _focusPage();
     });
   }
+
+  /// Journal data changes first so a failed preference write never leaves the
+  /// event table out of step with the stored policy; retrying is idempotent.
+  Future<void> _openSettings() => showSettingsDialog(
+    context,
+    settings: widget.journal.settings,
+    onSave: (value) async {
+      await widget.journal.applySettings(value);
+      await widget.settings.update(value);
+    },
+  );
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -145,6 +160,9 @@ class _AppScreenState extends State<AppScreen> {
                         '记账',
                         Icons.account_balance_wallet_outlined,
                       ),
+                      const Spacer(),
+                      _settingsButton(context),
+                      const SizedBox(height: 16),
                     ],
                   ),
                 ),
@@ -187,6 +205,18 @@ class _AppScreenState extends State<AppScreen> {
       ],
     ),
   );
+  Widget _settingsButton(BuildContext context) => IconButton(
+    key: const ValueKey('settings'),
+    onPressed: () => unawaited(_openSettings()),
+    tooltip: '设置',
+    style: IconButton.styleFrom(
+      foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+      fixedSize: const Size(44, 44),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+    icon: const Icon(Icons.settings_outlined, size: 22),
+  );
+
   Widget _mode(BuildContext context, int index, String label, IconData icon) =>
       IconButton(
         key: ValueKey('mode-$index'),

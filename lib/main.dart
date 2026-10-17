@@ -8,10 +8,12 @@ import 'package:window_manager/window_manager.dart';
 import 'application/journal_controller.dart';
 import 'application/ledger_controller.dart';
 import 'application/appearance_controller.dart';
+import 'application/settings_controller.dart';
 import 'data/appearance_store.dart';
 import 'domain/appearance.dart';
 import 'data/instance_lock.dart';
 import 'data/ledger_store.dart';
+import 'data/settings_store.dart';
 import 'data/store.dart';
 import 'ui/app_screen.dart';
 import 'ui/journal_screen.dart';
@@ -79,7 +81,8 @@ Future<void> main(List<String> arguments) async {
     lock = InstanceLock.acquire(directory);
     final ledgerStore = await LedgerStore.open(directory);
     final store = await Store.open(directory);
-    final journal = JournalController(store);
+    final settingsStore = await SettingsStore.open(directory);
+    final journal = JournalController(store, settings: settingsStore.state);
     await journal.initialize();
     final appearanceStore = await AppearanceStore.open(directory);
     runApp(
@@ -88,6 +91,7 @@ Future<void> main(List<String> arguments) async {
         ledger: LedgerController(ledgerStore),
         instanceLock: lock,
         appearance: AppearanceController(appearanceStore),
+        settings: SettingsController(settingsStore),
       ),
     );
     // The OS releases the byte lock on exit, including abnormal termination.
@@ -122,12 +126,14 @@ class DaymarkApp extends StatefulWidget {
     this.ledger,
     this.instanceLock,
     this.appearance,
+    this.settings,
   });
   final JournalController journal;
   final LedgerController? ledger;
   // Keep the native handle reachable for the entire application's lifetime.
   final InstanceLock? instanceLock;
   final AppearanceController? appearance;
+  final SettingsController? settings;
 
   @override
   State<DaymarkApp> createState() => _DaymarkAppState();
@@ -136,6 +142,8 @@ class DaymarkApp extends StatefulWidget {
 class _DaymarkAppState extends State<DaymarkApp> {
   late AppearanceController _appearance;
   late bool _ownsAppearance;
+  late SettingsController _settings;
+  late bool _ownsSettings;
   final _messenger = GlobalKey<ScaffoldMessengerState>();
 
   @override
@@ -143,11 +151,21 @@ class _DaymarkAppState extends State<DaymarkApp> {
     super.initState();
     _ownsAppearance = widget.appearance == null;
     _appearance = widget.appearance ?? AppearanceController();
+    _ownsSettings = widget.settings == null;
+    _settings = widget.settings ?? SettingsController();
     if (_appearance.store?.readError != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _messenger.currentState?.showSnackBar(
           const SnackBar(content: Text('配色设置无法读取，已使用默认配色。')),
+        );
+      });
+    }
+    if (_settings.store?.readError != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _messenger.currentState?.showSnackBar(
+          const SnackBar(content: Text('记录设置无法读取，已使用默认设置。')),
         );
       });
     }
@@ -160,6 +178,11 @@ class _DaymarkAppState extends State<DaymarkApp> {
       if (_ownsAppearance) _appearance.dispose();
       _ownsAppearance = widget.appearance == null;
       _appearance = widget.appearance ?? AppearanceController();
+    }
+    if (widget.settings != oldWidget.settings) {
+      if (_ownsSettings) _settings.dispose();
+      _ownsSettings = widget.settings == null;
+      _settings = widget.settings ?? SettingsController();
     }
   }
 
@@ -181,6 +204,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
   @override
   void dispose() {
     if (_ownsAppearance) _appearance.dispose();
+    if (_ownsSettings) _settings.dispose();
     widget.instanceLock?.close();
     super.dispose();
   }
@@ -208,6 +232,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
           : AppScreen(
               journal: widget.journal,
               ledger: widget.ledger!,
+              settings: _settings,
               palette: _appearance.state.palette,
               onPaletteChanged: _appearance.busy ? null : _setPalette,
               tagColors: _appearance.state.tagColors,
