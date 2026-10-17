@@ -54,8 +54,6 @@ class _TagSidebarState extends State<TagSidebar> {
         ),
         if (tag != null) ...[
           const PopupMenuItem(value: 'edit', child: Text('修改标签')),
-          if (tag.parentId != null)
-            const PopupMenuItem(value: 'root', child: Text('移至一级标签')),
           const PopupMenuItem(value: 'delete', child: Text('删除标签')),
         ],
       ],
@@ -78,8 +76,6 @@ class _TagSidebarState extends State<TagSidebar> {
             color: widget.tagColors[tag.id],
             onColorChanged: widget.onTagColorChanged,
           );
-        case 'root':
-          await widget.journal.moveTag(tag!.id, null);
         case 'delete':
           await widget.journal.deleteTag(tag!.id);
       }

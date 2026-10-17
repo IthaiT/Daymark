@@ -288,8 +288,6 @@ class LedgerSidebarState extends State<LedgerSidebar> {
         ),
         if (category != null) ...[
           const PopupMenuItem(value: 'edit', child: Text('修改标签')),
-          if (category.parentId != null)
-            const PopupMenuItem(value: 'root', child: Text('移至一级标签')),
           const PopupMenuItem(value: 'delete', child: Text('删除标签')),
         ],
       ],
@@ -309,15 +307,6 @@ class LedgerSidebarState extends State<LedgerSidebar> {
           widget.ledger,
           _kind,
           category: category,
-        );
-      case 'root':
-        await _run(
-          () => widget.ledger.saveCategory(
-            category!.name,
-            category.kind,
-            null,
-            id: category.id,
-          ),
         );
       case 'delete':
         await _run(() => widget.ledger.deleteCategory(category!.id));

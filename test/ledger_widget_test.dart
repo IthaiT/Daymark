@@ -1143,6 +1143,7 @@ void main() {
       expect(quick('lunch'), findsOneWidget);
       await tester.tap(find.text('午餐'), buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
+      expect(find.text('移至一级标签'), findsNothing);
       await tester.tap(find.text('修改标签'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('category-color-pink')));

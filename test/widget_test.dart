@@ -1436,7 +1436,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('新增子标签'), findsOneWidget);
     expect(find.text('新增一级标签'), findsNothing);
-    expect(find.text('移至一级标签'), findsOneWidget);
+    expect(find.text('移至一级标签'), findsNothing);
     await key(tester, LogicalKeyboardKey.escape);
     expect(find.byType(PopupMenuItem<String>), findsNothing);
     final sidebar = tester.getRect(find.byType(TagSidebar));
