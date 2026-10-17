@@ -418,6 +418,123 @@ void main() {
   );
 
   test(
+    'income category accounts persist and only apply to new records',
+    () async {
+      await ledger.saveCategory(
+        '工资',
+        MoneyKind.income,
+        null,
+        id: 'salary',
+        incomeAccountId: providentAccountId,
+      );
+      expect((await LedgerStore.open(directory)).state.incomeAccounts, {
+        'salary': providentAccountId,
+      });
+      await ledger.saveInputs([income(10000)]);
+      final id = ledger.state.records.keys.single;
+      expect(ledger.state.records[id]!.accountId, providentAccountId);
+      await ledger.saveCategory(
+        '工资',
+        MoneyKind.income,
+        null,
+        id: 'salary',
+        incomeAccountId: investmentAccountId,
+      );
+      await ledger.saveInputs([income(12000)], editId: id);
+      expect(ledger.state.records[id]!.accountId, providentAccountId);
+      await ledger.saveInputs([income(2000)]);
+      expect(ledger.state.records.values.last.accountId, investmentAccountId);
+      expect(cash(), 1000000);
+      await ledger.saveCategory('工资改名', MoneyKind.income, null, id: 'salary');
+      await ledger.placeCategory('salary', 'bonus');
+      expect(ledger.state.incomeAccounts['salary'], investmentAccountId);
+      final before = ledger.state;
+      final bytes = await store.file.readAsBytes();
+      fail = true;
+      await expectLater(
+        ledger.saveCategory(
+          '工资改名',
+          MoneyKind.income,
+          'bonus',
+          id: 'salary',
+          incomeAccountId: cashAccountId,
+        ),
+        throwsA(isA<FileSystemException>()),
+      );
+      expect(ledger.state, same(before));
+      expect(await store.file.readAsBytes(), bytes);
+      fail = false;
+      await ledger.saveCategory(
+        '工资改名',
+        MoneyKind.income,
+        'bonus',
+        id: 'salary',
+        incomeAccountId: cashAccountId,
+      );
+      expect(ledger.state.incomeAccounts, isEmpty);
+      await ledger.undo();
+      expect(ledger.state.incomeAccounts['salary'], investmentAccountId);
+      await ledger.redo();
+      expect(ledger.state.incomeAccounts, isEmpty);
+      final legacy = ledger.state.toJson()..remove('income_accounts');
+      expect(LedgerStore.decode(legacy).incomeAccounts, isEmpty);
+      for (final invalid in <Object?>[
+        null,
+        [],
+        {'salary': 123},
+        {'missing': cashAccountId},
+        {'lunch': cashAccountId},
+        {'salary': 'missing'},
+      ]) {
+        expect(
+          () => LedgerStore.decode({...legacy, 'income_accounts': invalid}),
+          throwsFormatException,
+        );
+      }
+    },
+  );
+
+  test(
+    'category account links protect accounts and are removed with the category',
+    () async {
+      await ledger.saveAccount('未使用账户');
+      final account = ledger.state.accounts.keys.last;
+      await ledger.saveCategory(
+        '专项收入',
+        MoneyKind.income,
+        null,
+        incomeAccountId: account,
+      );
+      final category = ledger.state.categories.keys.last;
+      await expectLater(ledger.deleteAccount(account), throwsFormatException);
+      await expectLater(
+        ledger.saveCategory(
+          '专项收入',
+          MoneyKind.income,
+          null,
+          id: category,
+          incomeAccountId: 'missing',
+        ),
+        throwsFormatException,
+      );
+      await expectLater(
+        ledger.saveCategory(
+          '午餐',
+          MoneyKind.expense,
+          'food',
+          id: 'lunch',
+          incomeAccountId: account,
+        ),
+        throwsFormatException,
+      );
+      await ledger.deleteCategory(category);
+      expect(ledger.state.incomeAccounts, isEmpty);
+      await ledger.deleteAccount(account);
+      expect(ledger.state.accounts.containsKey(account), isFalse);
+    },
+  );
+
+  test(
     'transfer conserves assets, adjustment is a reversible delta, neither enters statistics',
     () async {
       final total = ledger.state.totalCents;

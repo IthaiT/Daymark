@@ -106,7 +106,12 @@ class LedgerController extends ChangeNotifier {
           categoryId: input.categoryId,
           notes: input.notes.trim(),
           accountId:
-              input.accountId ?? previous?.accountId ?? state.defaultCashId,
+              input.accountId ??
+              previous?.accountId ??
+              (input.kind == MoneyKind.income
+                  ? state.incomeAccounts[input.categoryId]
+                  : null) ??
+              state.defaultCashId,
           affectsBalance: previous?.affectsBalance ?? true,
         );
         records[record.id] = record;
@@ -201,6 +206,7 @@ class LedgerController extends ChangeNotifier {
     String? id,
     CategoryColor? color,
     bool inheritColor = false,
+    String? incomeAccountId,
   }) => _run(() async {
     final previous = id == null ? null : state.categories[id];
     if (id != null && (previous == null || previous.kind != kind)) {
@@ -213,8 +219,23 @@ class LedgerController extends ChangeNotifier {
       parentId,
       inheritColor ? null : color ?? previous?.color,
     );
+    final incomeAccounts = {...state.incomeAccounts};
+    if (incomeAccountId != null) {
+      if (kind != MoneyKind.income ||
+          !state.accounts.containsKey(incomeAccountId)) {
+        throw const FormatException('收入标签的入账账户不正确。');
+      }
+      if (incomeAccountId == state.defaultCashId) {
+        incomeAccounts.remove(category.id);
+      } else {
+        incomeAccounts[category.id] = incomeAccountId;
+      }
+    }
     await _apply(
-      state.copyWith(categories: {...state.categories, category.id: category}),
+      state.copyWith(
+        categories: {...state.categories, category.id: category},
+        incomeAccounts: incomeAccounts,
+      ),
     );
   });
 
@@ -231,6 +252,7 @@ class LedgerController extends ChangeNotifier {
         categories: {...state.categories}..remove(id),
         pinned: state.pinned.where((item) => item != id).toList(),
         categoryOrder: state.categoryOrder.where((item) => item != id).toList(),
+        incomeAccounts: {...state.incomeAccounts}..remove(id),
       ),
     );
   });
@@ -316,6 +338,9 @@ class LedgerController extends ChangeNotifier {
     }
     if (state.accounts[id]!.balanceCents != 0) {
       throw const FormatException('请先转出账户余额。');
+    }
+    if (state.incomeAccounts.containsValue(id)) {
+      throw const FormatException('请先修改收入标签绑定的入账账户。');
     }
     await _apply(state.copyWith(accounts: {...state.accounts}..remove(id)));
   });

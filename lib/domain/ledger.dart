@@ -218,11 +218,13 @@ class LedgerState {
     required this.balanceEnabled,
     required List<String> pinned,
     List<String> categoryOrder = const [],
+    Map<String, String> incomeAccounts = const {},
   }) : accounts = Map.unmodifiable(accounts),
        categories = Map.unmodifiable(categories),
        records = Map.unmodifiable(records),
        pinned = List.unmodifiable(pinned),
-       categoryOrder = List.unmodifiable(categoryOrder);
+       categoryOrder = List.unmodifiable(categoryOrder),
+       incomeAccounts = Map.unmodifiable(incomeAccounts);
   final Map<String, MoneyAccount> accounts;
   final Map<String, MoneyCategory> categories;
   final Map<String, MoneyRecord> records;
@@ -230,6 +232,7 @@ class LedgerState {
   final bool balanceEnabled;
   final List<String> pinned;
   final List<String> categoryOrder;
+  final Map<String, String> incomeAccounts;
 
   factory LedgerState.empty() {
     return LedgerState(
@@ -266,6 +269,7 @@ class LedgerState {
     Map<String, MoneyRecord>? records,
     List<String>? pinned,
     List<String>? categoryOrder,
+    Map<String, String>? incomeAccounts,
     bool? balanceEnabled,
   }) => LedgerState(
     accounts: accounts ?? this.accounts,
@@ -273,6 +277,7 @@ class LedgerState {
     records: records ?? this.records,
     pinned: pinned ?? this.pinned,
     categoryOrder: categoryOrder ?? this.categoryOrder,
+    incomeAccounts: incomeAccounts ?? this.incomeAccounts,
     defaultCashId: defaultCashId,
     balanceEnabled: balanceEnabled ?? this.balanceEnabled,
   );
@@ -528,6 +533,13 @@ class LedgerState {
         categoryOrder.any((id) => !categories.containsKey(id))) {
       throw const FormatException('分类顺序数据不正确。');
     }
+    if (incomeAccounts.entries.any(
+      (entry) =>
+          categories[entry.key]?.kind != MoneyKind.income ||
+          !accounts.containsKey(entry.value),
+    )) {
+      throw const FormatException('收入标签的入账账户不正确。');
+    }
     final expected = {
       for (final account in accounts.values) account.id: account.openingCents,
     };
@@ -595,5 +607,6 @@ class LedgerState {
     'records': records.values.map((item) => item.toJson()).toList(),
     'pinned': pinned,
     'category_order': categoryOrder,
+    'income_accounts': incomeAccounts,
   };
 }

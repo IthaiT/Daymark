@@ -173,6 +173,12 @@ class LedgerStore {
     if (order.any((item) => item is! String)) {
       throw const FormatException('分类顺序 ID 格式不正确。');
     }
+    final incomeAccounts = payload.containsKey('income_accounts')
+        ? object(payload['income_accounts'])
+        : const <String, Object?>{};
+    if (incomeAccounts.values.any((value) => value is! String)) {
+      throw const FormatException('收入标签的入账账户格式不正确。');
+    }
     final state = LedgerState(
       accounts: accounts,
       categories: categories,
@@ -181,6 +187,7 @@ class LedgerStore {
       balanceEnabled: legacy ? false : boolean(payload, 'balance_enabled'),
       pinned: pins.cast<String>(),
       categoryOrder: order.cast<String>(),
+      incomeAccounts: incomeAccounts.cast<String, String>(),
     );
     state.validate();
     final presets = payload['category_presets_version'];
