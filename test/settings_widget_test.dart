@@ -9,6 +9,8 @@ import 'package:daymark/data/settings_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
+import 'package:daymark/ui/timeline.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -151,6 +153,39 @@ void main() {
     await tester.pumpAndSettle();
     expect(autoUndefinedSwitch(tester), isFalse);
     expect(chipSelected(tester, 15), isTrue);
+  });
+
+  testWidgets('saved granularity changes real timeline drags', (tester) async {
+    await openSettings(tester);
+    await tester.tap(find.byKey(const ValueKey('granularity-30')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('save-settings')));
+    await tester.pumpAndSettle();
+
+    Future<void> dragBy(int minutes) async {
+      final rect = tester.getRect(find.byType(Timeline));
+      final width = rect.width - 50;
+      final gesture = await tester.startGesture(
+        Offset(rect.left + 24 + width * 14.5 / 24, rect.top + 120),
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pump();
+      await gesture.moveBy(Offset(width * minutes / 1440, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    await dragBy(10);
+    expect(
+      journal.store.events['a']!.start,
+      day.add(const Duration(hours: 13)),
+    );
+    await dragBy(20);
+    expect(
+      journal.store.events['a']!.start,
+      day.add(const Duration(hours: 13, minutes: 30)),
+    );
   });
 
   testWidgets('failed preference write keeps the dialog and input for retry', (
