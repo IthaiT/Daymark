@@ -196,7 +196,11 @@ class EventTableState extends State<EventTable> {
       ? clockText(value)
       : '${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')} ${clockText(value)}';
   Widget _tagCell(Event event) {
-    final (background, foreground) = eventColors(widget.journal.store, event);
+    final (background, foreground) = eventColors(
+      context,
+      widget.journal.store,
+      event,
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(

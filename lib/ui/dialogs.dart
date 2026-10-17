@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../application/journal_controller.dart';
+import '../domain/appearance.dart';
 import '../domain/model.dart';
 import 'pickers.dart';
+import 'theme.dart';
 
 String errorText(Object error) =>
     error is FormatException ? error.message : error.toString();
@@ -12,16 +14,32 @@ Future<void> showTagEditor(
   JournalController journal, {
   String? id,
   String? parentId,
+  TagColor? color,
+  Future<void> Function(String id, TagColor? color)? onColorChanged,
 }) => showDialog<void>(
   context: context,
-  builder: (_) => _TagEditor(journal: journal, id: id, parentId: parentId),
+  builder: (_) => _TagEditor(
+    journal: journal,
+    id: id,
+    parentId: parentId,
+    color: color,
+    onColorChanged: onColorChanged,
+  ),
 );
 
 class _TagEditor extends StatefulWidget {
-  const _TagEditor({required this.journal, this.id, this.parentId});
+  const _TagEditor({
+    required this.journal,
+    this.id,
+    this.parentId,
+    this.color,
+    this.onColorChanged,
+  });
   final JournalController journal;
   final String? id;
   final String? parentId;
+  final TagColor? color;
+  final Future<void> Function(String id, TagColor? color)? onColorChanged;
   @override
   State<_TagEditor> createState() => _TagEditorState();
 }
@@ -33,6 +51,8 @@ class _TagEditorState extends State<_TagEditor> {
   late String? _parent = widget.id == null
       ? widget.parentId
       : widget.journal.store.tags[widget.id]!.parentId;
+  late TagColor? _color = widget.color;
+  String? _savedId;
   bool _saving = false;
   String? _error;
   @override
@@ -48,7 +68,17 @@ class _TagEditorState extends State<_TagEditor> {
       _error = null;
     });
     try {
-      await widget.journal.saveTag(_name.text, _parent, id: widget.id);
+      // A failed colour write keeps the dialog open; reuse the created tag
+      // instead of adding a duplicate on retry.
+      final tag = await widget.journal.saveTag(
+        _name.text,
+        _parent,
+        id: widget.id ?? _savedId,
+      );
+      _savedId = tag.id;
+      if (_color != widget.color) {
+        await widget.onColorChanged?.call(tag.id, _color);
+      }
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) setState(() => _error = errorText(error));
@@ -62,34 +92,86 @@ class _TagEditorState extends State<_TagEditor> {
     title: Text(widget.id == null ? '新增标签' : '修改 / 移动标签'),
     content: SizedBox(
       width: 440,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: '标签名称'),
-            onSubmitted: (_) => _save(),
-          ),
-          const SizedBox(height: 16),
-          TagField(
-            store: widget.journal.store,
-            value: _parent,
-            emptyLabel: '（一级标签）',
-            excluded: widget.id == null
-                ? {}
-                : widget.journal.store.descendants(widget.id!),
-            onChanged: (value) => setState(() => _parent = value),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _name,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: '标签名称'),
+              onSubmitted: (_) => _save(),
             ),
-        ],
+            const SizedBox(height: 16),
+            TagField(
+              store: widget.journal.store,
+              value: _parent,
+              emptyLabel: '（一级标签）',
+              excluded: widget.id == null
+                  ? {}
+                  : widget.journal.store.descendants(widget.id!),
+              onChanged: (value) => setState(() => _parent = value),
+            ),
+            if (widget.onColorChanged != null) ...[
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '标签颜色',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('自动／继承'),
+                      selected: _color == null,
+                      onSelected: _saving
+                          ? null
+                          : (_) => setState(() => _color = null),
+                    ),
+                    for (final color in TagColor.values)
+                      ChoiceChip(
+                        key: ValueKey('tag-color-${color.name}'),
+                        avatar: CircleAvatar(
+                          backgroundColor: tagColorSwatch(color)[500],
+                          radius: 8,
+                        ),
+                        label: Text(tagColorText(color)),
+                        selected: _color == color,
+                        onSelected: _saving
+                            ? null
+                            : (_) => setState(() => _color = color),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '子标签默认跟随最近一级已设置的颜色。',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
       ),
     ),
     actions: [

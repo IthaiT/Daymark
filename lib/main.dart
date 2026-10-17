@@ -174,6 +174,10 @@ class _DaymarkAppState extends State<DaymarkApp> {
     }
   }
 
+  /// Errors surface in the tag editor, which keeps the user's input.
+  Future<void> _setTagColor(String id, TagColor? color) =>
+      _appearance.setTagColor(id, color);
+
   @override
   void dispose() {
     if (_ownsAppearance) _appearance.dispose();
@@ -187,18 +191,27 @@ class _DaymarkAppState extends State<DaymarkApp> {
     builder: (context, _) => MaterialApp(
       title: 'Daymark',
       debugShowCheckedModeBanner: false,
-      theme: daymarkTheme(palette: _appearance.state.palette),
+      theme: daymarkTheme(
+        palette: _appearance.state.palette,
+        tagColors: _appearance.state.tagColors,
+      ),
       scaffoldMessengerKey: _messenger,
       locale: const Locale('zh', 'CN'),
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh', 'CN')],
       home: widget.ledger == null
-          ? JournalScreen(journal: widget.journal)
+          ? JournalScreen(
+              journal: widget.journal,
+              tagColors: _appearance.state.tagColors,
+              onTagColorChanged: _appearance.busy ? null : _setTagColor,
+            )
           : AppScreen(
               journal: widget.journal,
               ledger: widget.ledger!,
               palette: _appearance.state.palette,
               onPaletteChanged: _appearance.busy ? null : _setPalette,
+              tagColors: _appearance.state.tagColors,
+              onTagColorChanged: _appearance.busy ? null : _setTagColor,
             ),
     ),
   );

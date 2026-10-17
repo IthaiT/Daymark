@@ -23,7 +23,10 @@ MaterialColor paletteSwatch(AppPalette palette) => switch (palette) {
 };
 
 /// Shared Material 3 theme for time recording, the ledger and all dialogs.
-ThemeData daymarkTheme({AppPalette palette = AppPalette.slate}) {
+ThemeData daymarkTheme({
+  AppPalette palette = AppPalette.slate,
+  Map<String, TagColor> tagColors = const {},
+}) {
   final scheme = ColorScheme.fromSeed(
     seedColor: paletteSwatch(palette),
     dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
@@ -46,7 +49,7 @@ ThemeData daymarkTheme({AppPalette palette = AppPalette.slate}) {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    extensions: [DaymarkColors.fromScheme(scheme)],
+    extensions: [DaymarkColors.fromScheme(scheme), TagColorTheme(tagColors)],
     brightness: Brightness.light,
     fontFamily: 'Noto Sans SC',
     fontFamilyFallback: const ['Segoe UI', 'Microsoft YaHei UI'],
@@ -130,25 +133,73 @@ ThemeData daymarkTheme({AppPalette palette = AppPalette.slate}) {
   );
 }
 
-// Anchored family hues, far more than 30° apart on the color wheel: the hue
-// expresses the root family, the lightness expresses the member within it.
-const _families = [Colors.blue, Colors.deepPurple, Colors.teal, Colors.orange];
-const _familyDefaults = {'work': 0, 'side': 1, 'explore': 2, 'life': 3};
+String tagColorText(TagColor color) => switch (color) {
+  TagColor.teal => '青绿',
+  TagColor.amber => '金色',
+  TagColor.purple => '紫色',
+  TagColor.orange => '橙色',
+  TagColor.cyan => '青色',
+  TagColor.pink => '粉色',
+  TagColor.blue => '蓝色',
+};
 
-// Lightness steps handed out to family members in sidebar (tree) order so
-// adjacent siblings always differ; the root itself keeps the middle 500 step.
+MaterialColor tagColorSwatch(TagColor color) => switch (color) {
+  TagColor.teal => Colors.teal,
+  TagColor.amber => Colors.amber,
+  TagColor.purple => Colors.deepPurple,
+  TagColor.orange => Colors.orange,
+  TagColor.cyan => Colors.cyan,
+  TagColor.pink => Colors.pink,
+  TagColor.blue => Colors.blue,
+};
+
+/// Keeps the four original root tags on their familiar colours.
+const _tagDefaults = {
+  'work': TagColor.blue,
+  'side': TagColor.purple,
+  'explore': TagColor.teal,
+  'life': TagColor.orange,
+};
+
+// Anchored family hues, far apart on the color wheel: the hue expresses the
+// root family, the lightness expresses the member within it.
+// Lightness steps are handed out in sidebar (tree) order so adjacent siblings
+// always differ; the root keeps its family's anchor step.
 const _steps = [400, 600, 300, 700, 500, 800];
-MaterialColor tagFamily(Store store, String? tagId) {
+
+Map<String, TagColor> tagColorOverrides(BuildContext context) =>
+    Theme.of(context).extension<TagColorTheme>()?.overrides ??
+    const <String, TagColor>{};
+
+/// The nearest explicit override wins, then the root tag's automatic hue.
+MaterialColor tagFamilyFor(
+  Store store,
+  String? tagId,
+  Map<String, TagColor> overrides,
+) {
   if (tagId == null) return Colors.blueGrey;
-  final root = store.ancestors(tagId).first.id;
-  final index =
-      _familyDefaults[root] ??
-      root.codeUnits.fold(0, (hash, unit) => (hash * 31 + unit) & 0x7fffffff) %
-          _families.length;
-  return _families[index];
+  final path = store.ancestors(tagId);
+  for (final tag in path.reversed) {
+    final color = overrides[tag.id];
+    if (color != null) return tagColorSwatch(color);
+  }
+  final root = path.first.id;
+  final preset = _tagDefaults[root];
+  if (preset != null) return tagColorSwatch(preset);
+  final hash = root.codeUnits.fold(
+    0,
+    (sum, unit) => (sum * 31 + unit) & 0x7fffffff,
+  );
+  return tagColorSwatch(TagColor.values[hash % TagColor.values.length]);
 }
 
-int _stepFor(Store store, String? tagId) {
+MaterialColor tagFamily(BuildContext context, Store store, String? tagId) =>
+    tagFamilyFor(store, tagId, tagColorOverrides(context));
+
+/// Cyan uses a darker anchor so it stays distinct from blue at 10px.
+int _rootStep(MaterialColor family) => family == Colors.cyan ? 600 : 500;
+
+int _stepFor(Store store, String? tagId, MaterialColor family) {
   if (tagId == null) return 600;
   final root = store.ancestors(tagId).first.id;
   var index = 0;
@@ -157,23 +208,45 @@ int _stepFor(Store store, String? tagId) {
     if (tag.id == tagId) break;
     index++;
   }
-  return index == 0 ? 500 : _steps[(index - 1) % _steps.length];
+  return index == 0 ? _rootStep(family) : _steps[(index - 1) % _steps.length];
 }
 
 /// Background and foreground pair that keeps tagged events readable on any
 /// surface; use the foreground for text drawn on the background.
-(Color, Color) eventColors(Store store, Event event, {bool selected = false}) {
+(Color, Color) eventColorsFor(
+  Store store,
+  Event event,
+  Map<String, TagColor> overrides, {
+  bool selected = false,
+}) {
   if (event.tagId == null) {
     return (Colors.blueGrey[selected ? 200 : 100]!, Colors.blueGrey[800]!);
   }
-  final family = tagFamily(store, event.tagId);
+  final family = tagFamilyFor(store, event.tagId, overrides);
   return tagSurfaceColors(
     family,
-    tagDot(store, event.tagId),
+    tagDotFor(store, event.tagId, overrides),
     opacity: selected ? .34 : .20,
   );
 }
 
+(Color, Color) eventColors(
+  BuildContext context,
+  Store store,
+  Event event, {
+  bool selected = false,
+}) => eventColorsFor(
+  store,
+  event,
+  tagColorOverrides(context),
+  selected: selected,
+);
+
 /// Accent color for the dot marking a tag in the sidebar.
-Color tagDot(Store store, String? tagId) =>
-    tagFamily(store, tagId)[_stepFor(store, tagId)]!;
+Color tagDotFor(Store store, String? tagId, Map<String, TagColor> overrides) {
+  final family = tagFamilyFor(store, tagId, overrides);
+  return family[_stepFor(store, tagId, family)]!;
+}
+
+Color tagDot(BuildContext context, Store store, String? tagId) =>
+    tagDotFor(store, tagId, tagColorOverrides(context));

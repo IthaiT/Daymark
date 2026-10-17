@@ -1,5 +1,24 @@
 import 'package:flutter/material.dart';
 
+import '../domain/appearance.dart';
+
+/// Explicit tag colour overrides carried by the theme.
+///
+/// A tag without an entry keeps the automatic colour, so an empty map restores
+/// the original behaviour for existing journals.
+class TagColorTheme extends ThemeExtension<TagColorTheme> {
+  const TagColorTheme(this.overrides);
+
+  final Map<String, TagColor> overrides;
+
+  @override
+  TagColorTheme copyWith({Map<String, TagColor>? overrides}) =>
+      TagColorTheme(overrides ?? this.overrides);
+
+  @override
+  TagColorTheme lerp(covariant TagColorTheme? other, double t) => other ?? this;
+}
+
 /// Colors for Daymark visuals that are outside the standard Material roles.
 class DaymarkColors extends ThemeExtension<DaymarkColors> {
   const DaymarkColors({

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
+import '../domain/appearance.dart';
 import '../domain/model.dart';
 import '../domain/timeline_interaction.dart';
 import 'theme.dart';
@@ -442,6 +443,7 @@ class TimelineState extends State<Timeline> {
                                     dayWidth: _dayWidth,
                                     zoom: zoom,
                                     scheme: Theme.of(context).colorScheme,
+                                    tagColors: tagColorOverrides(context),
                                     textStyle: Theme.of(
                                       context,
                                     ).textTheme.bodySmall!,
@@ -507,6 +509,7 @@ class _TimelinePainter extends CustomPainter {
     required this.dayWidth,
     required this.zoom,
     required this.scheme,
+    required this.tagColors,
     required this.textStyle,
     this.preview,
     this.snap,
@@ -517,6 +520,7 @@ class _TimelinePainter extends CustomPainter {
   final double dayWidth;
   final double zoom;
   final ColorScheme scheme;
+  final Map<String, TagColor> tagColors;
   final TextStyle textStyle;
   final Event? preview;
   final DateTime? snap;
@@ -601,9 +605,10 @@ class _TimelinePainter extends CustomPainter {
         path.addRRect(RRect.fromRectAndRadius(body, Radius.circular(radius)));
       }
       final selected = journal.selected.contains(event.id);
-      final (background, foreground) = eventColors(
+      final (background, foreground) = eventColorsFor(
         journal.store,
         event,
+        tagColors,
         selected: selected,
       );
       canvas.drawPath(path, Paint()..color = background);

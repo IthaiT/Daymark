@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../application/journal_controller.dart';
 import '../data/store.dart';
+import '../domain/appearance.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
 import 'tag_tree_tile.dart';
@@ -13,10 +14,14 @@ class TagSidebar extends StatefulWidget {
     required this.journal,
     required this.beforeAction,
     required this.onError,
+    this.tagColors = const {},
+    this.onTagColorChanged,
   });
   final JournalController journal;
   final Future<bool> Function() beforeAction;
   final ValueChanged<Object> onError;
+  final Map<String, TagColor> tagColors;
+  final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
   @override
   State<TagSidebar> createState() => _TagSidebarState();
 }
@@ -59,9 +64,20 @@ class _TagSidebarState extends State<TagSidebar> {
     try {
       switch (choice) {
         case 'add':
-          await showTagEditor(context, widget.journal, parentId: tag?.id);
+          await showTagEditor(
+            context,
+            widget.journal,
+            parentId: tag?.id,
+            onColorChanged: widget.onTagColorChanged,
+          );
         case 'edit':
-          await showTagEditor(context, widget.journal, id: tag!.id);
+          await showTagEditor(
+            context,
+            widget.journal,
+            id: tag!.id,
+            color: widget.tagColors[tag.id],
+            onColorChanged: widget.onTagColorChanged,
+          );
         case 'root':
           await widget.journal.moveTag(tag!.id, null);
         case 'delete':

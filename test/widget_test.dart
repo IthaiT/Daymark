@@ -1486,6 +1486,52 @@ void main() {
   );
 
   testWidgets(
+    'tag colour overrides recolour the sidebar and can be inherited again',
+    (tester) async {
+      await open(tester);
+      Color dot() {
+        final container = tester.widget<Container>(
+          find.descendant(
+            of: find.byKey(const ValueKey('tag-work')),
+            matching: find.byKey(const ValueKey('tag-dot-work')),
+          ),
+        );
+        return (container.decoration! as BoxDecoration).color!;
+      }
+
+      expect(dot(), Colors.blue[500]);
+
+      await tester.tap(
+        find.byKey(const ValueKey('tag-work')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改标签'));
+      await tester.pumpAndSettle();
+      expect(find.text('标签颜色'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tag-color-pink')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(dot(), Colors.pink[500]);
+
+      await tester.tap(
+        find.byKey(const ValueKey('tag-work')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改标签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('自动／继承'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(dot(), Colors.blue[500]);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'renders a deterministic synthetic screenshot using system CJK and Material fonts',
     (tester) async {
       final previousShadows = debugDisableShadows;

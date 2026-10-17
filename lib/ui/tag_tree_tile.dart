@@ -47,7 +47,7 @@ class TagTreeTile extends StatelessWidget {
           width: 10,
           height: 10,
           decoration: BoxDecoration(
-            color: tagDot(store, tagId),
+            color: tagDot(context, store, tagId),
             shape: BoxShape.circle,
           ),
         ),

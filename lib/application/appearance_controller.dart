@@ -14,13 +14,25 @@ class AppearanceController extends ChangeNotifier {
   bool _disposed = false;
   Future<void> _tail = Future.value();
 
-  Future<void> setPalette(AppPalette palette) {
+  Future<void> setPalette(AppPalette palette) => _change(() {
+    if (state.palette == palette) return null;
+    return state.withPalette(palette);
+  });
+
+  Future<void> setTagColor(String tagId, TagColor? color) => _change(() {
+    if (state.tagColors[tagId] == color) return null;
+    return state.withTagColor(tagId, color);
+  });
+
+  /// Serializes appearance writes; a null result means nothing changed.
+  Future<void> _change(AppAppearance? Function() build) {
     final result = _tail.then((_) async {
-      if (_disposed || state.palette == palette) return;
+      if (_disposed) return;
+      final desired = build();
+      if (desired == null) return;
       _busy = true;
       notifyListeners();
       try {
-        final desired = state.withPalette(palette);
         if (store != null) await store!.replace(desired);
         _state = desired;
       } finally {

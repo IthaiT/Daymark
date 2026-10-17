@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/appearance.dart';
 import 'package:daymark/domain/ledger.dart';
 import 'package:daymark/ui/ledger_category_style.dart';
@@ -57,6 +60,54 @@ void main() {
         }
         expect(accents.length, CategoryColor.values.length);
       }
+    },
+  );
+
+  test(
+    'seven tag hues keep the original roots and inherit overrides',
+    () async {
+      final directory = await Directory(
+        '.test-artifacts',
+      ).createTemp('tag-color-');
+      addTearDown(() => directory.delete(recursive: true));
+      final store = await Store.open(directory);
+
+      expect(TagColor.values.length, 7);
+      expect(TagColor.values.map(tagColorSwatch).toSet().length, 7);
+      expect(tagFamilyFor(store, 'work', const {}), Colors.blue);
+      expect(tagFamilyFor(store, 'side', const {}), Colors.deepPurple);
+      expect(tagFamilyFor(store, 'explore', const {}), Colors.teal);
+      expect(tagFamilyFor(store, 'life', const {}), Colors.orange);
+      expect(tagFamilyFor(store, 'linux', const {}), Colors.blue);
+
+      expect(
+        tagFamilyFor(store, 'work', const {'work': TagColor.pink}),
+        Colors.pink,
+      );
+      expect(
+        tagFamilyFor(store, 'linux', const {'work': TagColor.pink}),
+        Colors.pink,
+      );
+      // The closest ancestor wins over a further one.
+      expect(
+        tagFamilyFor(store, 'linux', const {
+          'work': TagColor.pink,
+          'embedded': TagColor.amber,
+        }),
+        Colors.amber,
+      );
+      expect(
+        tagFamilyFor(store, 'linux', const {'linux': TagColor.teal}),
+        Colors.teal,
+      );
+      expect(tagFamilyFor(store, null, const {}), Colors.blueGrey);
+
+      expect(tagDotFor(store, 'work', const {}), Colors.blue[500]);
+      // Cyan uses a darker anchor so it stays apart from blue at 10px.
+      expect(
+        tagDotFor(store, 'explore', const {'explore': TagColor.cyan}),
+        Colors.cyan[600],
+      );
     },
   );
 }

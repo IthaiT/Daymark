@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
+import '../domain/appearance.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
@@ -21,9 +22,13 @@ class JournalScreen extends StatefulWidget {
     super.key,
     required this.journal,
     this.showTitleBar = true,
+    this.tagColors = const {},
+    this.onTagColorChanged,
   });
   final JournalController journal;
   final bool showTitleBar;
+  final Map<String, TagColor> tagColors;
+  final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
   @override
   State<JournalScreen> createState() => JournalScreenState();
 }
@@ -388,6 +393,8 @@ class JournalScreenState extends State<JournalScreen> {
                         journal: widget.journal,
                         beforeAction: _beforeAction,
                         onError: _showError,
+                        tagColors: widget.tagColors,
+                        onTagColorChanged: widget.onTagColorChanged,
                       ),
                       content: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

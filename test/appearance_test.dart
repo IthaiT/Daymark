@@ -90,6 +90,43 @@ void main() {
     },
   );
 
+  test(
+    'tag colour overrides persist, clear and tolerate unknown values',
+    () async {
+      final store = await AppearanceStore.open(directory);
+      final controller = AppearanceController(store);
+      addTearDown(controller.dispose);
+      await controller.setTagColor('work', TagColor.pink);
+      await controller.setTagColor('side', TagColor.amber);
+      expect(jsonDecode(await store.file.readAsString()), {
+        'version': 1,
+        'palette': 'slate',
+        'tag_colors': {'work': 'pink', 'side': 'amber'},
+      });
+      final reopened = await AppearanceStore.open(directory);
+      expect(reopened.state.tagColors, {
+        'work': TagColor.pink,
+        'side': TagColor.amber,
+      });
+
+      await controller.setTagColor('work', null);
+      expect(controller.state.tagColors, {'side': TagColor.amber});
+      expect(
+        (jsonDecode(await store.file.readAsString())
+            as Map<String, Object?>)['tag_colors'],
+        {'side': 'amber'},
+      );
+
+      await store.file.writeAsString(
+        '{"version":1,"palette":"slate","tag_colors":'
+        '{"work":"teal","ghost":"mauve","removed":1}}',
+      );
+      final lenient = await AppearanceStore.open(directory);
+      expect(lenient.state.tagColors, {'work': TagColor.teal});
+      expect(lenient.readError, isNull);
+    },
+  );
+
   test('queued theme changes commit in order', () async {
     final gate = Completer<void>();
     final writes = <String>[];

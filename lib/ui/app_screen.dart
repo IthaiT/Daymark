@@ -18,11 +18,15 @@ class AppScreen extends StatefulWidget {
     required this.ledger,
     this.palette = AppPalette.slate,
     this.onPaletteChanged,
+    this.tagColors = const {},
+    this.onTagColorChanged,
   });
   final JournalController journal;
   final LedgerController ledger;
   final AppPalette palette;
   final ValueChanged<AppPalette>? onPaletteChanged;
+  final Map<String, TagColor> tagColors;
+  final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
   @override
   State<AppScreen> createState() => _AppScreenState();
 }
@@ -159,6 +163,8 @@ class _AppScreenState extends State<AppScreen> {
                         key: _journal,
                         journal: widget.journal,
                         showTitleBar: false,
+                        tagColors: widget.tagColors,
+                        onTagColorChanged: widget.onTagColorChanged,
                       ),
                     ),
                     FocusScope(
