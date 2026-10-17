@@ -103,7 +103,11 @@ class _MoneyEditorState extends State<_MoneyEditor> {
   );
   late final _notes = TextEditingController(text: widget.record?.notes ?? '');
   late String _account =
-      widget.record?.accountId ?? widget.ledger.state.defaultCashId;
+      widget.record?.accountId ??
+      (_kind == MoneyKind.income
+          ? widget.ledger.state.incomeAccounts[_category]
+          : null) ??
+      widget.ledger.state.defaultCashId;
   String? _error;
   bool _saving = false;
   @override
@@ -739,6 +743,9 @@ class _NameDialogState extends State<_NameDialog> {
   );
   late String? _parent = widget.category?.parentId ?? widget.parentId;
   late CategoryColor? _color = widget.category?.color;
+  late String _incomeAccount =
+      widget.ledger.state.incomeAccounts[widget.category?.id] ??
+      widget.ledger.state.defaultCashId;
   bool _saving = false;
   String? _error;
   @override
@@ -762,6 +769,9 @@ class _NameDialogState extends State<_NameDialog> {
           id: widget.category?.id,
           color: _color,
           inheritColor: _color == null,
+          incomeAccountId: widget.kind == MoneyKind.income
+              ? _incomeAccount
+              : null,
         );
       } else {
         await widget.ledger.saveAccount(_name.text, id: widget.account?.id);
@@ -823,6 +833,25 @@ class _NameDialogState extends State<_NameDialog> {
                     : (value) =>
                           setState(() => _parent = value == '' ? null : value),
               ),
+              if (widget.kind == MoneyKind.income) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  key: const ValueKey('category-income-account'),
+                  initialValue: _incomeAccount,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '入账账户'),
+                  items: [
+                    for (final account in widget.ledger.state.accounts.values)
+                      DropdownMenuItem(
+                        value: account.id,
+                        child: Text(account.name),
+                      ),
+                  ],
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() => _incomeAccount = value!),
+                ),
+              ],
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,

@@ -284,15 +284,33 @@ void main() {
   );
 
   testWidgets(
-    'income rows select accounts and record editing moves the credit',
+    'income category editor binds the account and record editing moves the credit',
     (tester) async {
       await open(tester);
       await tester.tap(find.text('收入标签'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('quick-account-salary')));
+      expect(find.byType(DropdownButtonFormField<String>), findsNothing);
+      await tester.tap(find.text('工资'), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改标签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('category-income-account')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('公积金').last);
       await tester.pumpAndSettle();
+      fail = true;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.incomeAccounts, isEmpty);
+      expect(
+        find.byKey(const ValueKey('category-income-account')),
+        findsOneWidget,
+      );
+      fail = false;
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.incomeAccounts['salary'], providentAccountId);
+      expect(find.byType(DropdownButtonFormField<String>), findsNothing);
       await tester.enterText(quick('salary'), '120');
       fail = true;
       await enter(tester);
@@ -808,11 +826,18 @@ void main() {
     await screenshot('ledger');
     await tester.tap(find.text('收入标签'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('quick-account-salary')));
+    await tester.tap(find.text('工资').first, buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('修改标签'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('category-income-account')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('公积金').last);
     await tester.pumpAndSettle();
-    await screenshot('ledger-income-accounts');
+    await screenshot('ledger-income-category-account');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-income-sidebar');
     await tester.tap(find.text('支出标签'));
     await ledger.transfer(cashAccountId, investmentAccountId, 10000, day);
     final movementId = store.state.records.keys.last;
@@ -820,6 +845,21 @@ void main() {
     await tester.tap(find.byKey(ValueKey('money-record-$movementId')));
     await tester.pumpAndSettle();
     await screenshot('ledger-edit-transfer');
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    await ledger.calibrate(providentAccountId, 250000, day);
+    final calibrationId = store.state.records.keys.last;
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('money-record-$calibrationId')));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-edit-calibration');
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('account-actions')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('余额校准'));
+    await tester.pumpAndSettle();
+    await screenshot('ledger-calibration');
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('mode-0')));
