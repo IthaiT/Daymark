@@ -28,7 +28,6 @@ class TagMapScreenState extends State<TagMapScreen> {
   Timer? _autoSave;
   Future<bool>? _saving;
   String? _themeKey;
-  static const _allRootValue = '__all__';
 
   @override
   void dispose() {
@@ -284,115 +283,22 @@ class TagMapScreenState extends State<TagMapScreen> {
       autofocus: true,
       child: Padding(
         padding: WorkspaceStyle.padding,
-        child: Column(
-          children: [
-            _header(context),
-            const SizedBox(height: 10),
-            Expanded(
-              child: WorkspacePanel(
-                child: Listener(
-                  onPointerDown: (_) => _focus.requestFocus(),
-                  child: TagMapView(
-                    key: _view,
-                    onReady: _viewReady,
-                    onChange: _changed,
-                    onSave: () => unawaited(_saveNow()),
-                    onDelete: () => unawaited(_deleteSelected()),
-                    onEnter: (id) => unawaited(_setRoot(id)),
-                    onEditing: _editingChanged,
-                    onError: _showError,
-                  ),
-                ),
-              ),
+        child: WorkspacePanel(
+          child: Listener(
+            onPointerDown: (_) => _focus.requestFocus(),
+            child: TagMapView(
+              key: _view,
+              onReady: _viewReady,
+              onChange: _changed,
+              onSave: () => unawaited(_saveNow()),
+              onDelete: () => unawaited(_deleteSelected()),
+              onEnter: (id) => unawaited(_setRoot(id)),
+              onEditing: _editingChanged,
+              onError: _showError,
             ),
-          ],
+          ),
         ),
       ),
     ),
   );
-
-  Widget _header(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Text('标签导图', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(width: 10),
-        Flexible(child: _rootPicker(context)),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Text(
-            '拖动调整层级 · Tab 新建 · 双击改名 · 右键进入子标签',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.right,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _rootPicker(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final label = widget.controller.isAllView
-        ? tagTreeRootName
-        : widget.controller.rootNode?.name ?? '选择根标签';
-    return PopupMenuButton<String>(
-      key: const ValueKey('tag-map-root'),
-      tooltip: '选择根标签',
-      onSelected: (value) =>
-          unawaited(_setRoot(value == _allRootValue ? null : value)),
-      itemBuilder: (context) => [
-        const PopupMenuItem(value: _allRootValue, child: Text(tagTreeRootName)),
-        const PopupMenuDivider(),
-        for (final (node, depth) in widget.controller.rootChoices)
-          PopupMenuItem(
-            value: node.id,
-            child: Padding(
-              padding: EdgeInsets.only(left: depth * 14),
-              child: Text(node.name, overflow: TextOverflow.ellipsis),
-            ),
-          ),
-      ],
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 200),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(8, 3, 4, 3),
-          decoration: BoxDecoration(
-            color: scheme.secondaryContainer.withValues(alpha: .55),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.account_tree_outlined,
-                size: 15,
-                color: scheme.onSecondaryContainer,
-              ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: scheme.onSecondaryContainer,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Icon(
-                Icons.arrow_drop_down,
-                size: 18,
-                color: scheme.onSecondaryContainer,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
