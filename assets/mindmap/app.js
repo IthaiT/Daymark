@@ -358,6 +358,7 @@ function createMap(payload) {
   keys.addShortcut('Control+y', redo)
   keys.addShortcut('Control+Shift+z', redo)
   keys.addShortcut('Control+s', () => post({ type: 'save' }))
+  keys.addShortcut('Control+0', () => mindMap?.view.fit())
   keys.addShortcut('Del', () => post({ type: 'delete' }))
 
   mindMap.on('data_change', scheduleEmit)
@@ -480,41 +481,15 @@ function redo() {
   scheduleEmit()
 }
 
-function zoomIn() {
-  mindMap?.view.enlarge()
-}
-
-function zoomOut() {
-  mindMap?.view.narrow()
-}
-
-function fit() {
-  mindMap?.view.fit()
-}
-
-function expandAll() {
-  mindMap?.execCommand('EXPAND_ALL')
-}
-
-function collapseAll() {
-  mindMap?.execCommand('UNEXPAND_ALL')
-}
-
 window.Daymark = {
   load,
   setColors,
   setAssignedIds,
-  addChild,
   beginEdit,
   endEdit,
   remove,
   undo,
-  redo,
-  zoomIn,
-  zoomOut,
-  fit,
-  expandAll,
-  collapseAll
+  redo
 }
 
 document.addEventListener('contextmenu', event => event.preventDefault())
