@@ -3,8 +3,8 @@ import 'package:uuid/uuid.dart';
 import 'model.dart';
 import 'unicode.dart';
 
-/// Fixed identity of the virtual root shown on the tag map. It never becomes a
-/// persisted tag; real tags always live below it.
+/// Fixed identity of the "all tags" root. It never becomes a persisted tag;
+/// real tags always live below it.
 const tagTreeRootId = 'daymark:root';
 const tagTreeRootName = '标签';
 
@@ -16,12 +16,17 @@ const _maxNodes = 10000;
 
 /// Immutable tag tree used by the mind map. Siblings follow the same ordering
 /// as [Store.orderedTags]: case-folded names compared by Unicode code point.
+///
+/// The full tree has a virtual [tagTreeRootId] root. [subtree] returns a view
+/// whose root is a real tag; such a view can only be merged with
+/// [replaceSubtree], never written with [toTagMap].
 class TagTree {
   const TagTree._(this.root);
   final TagNode root;
 
   List<TagNode> get children => root.children;
   bool get isEmpty => root.children.isEmpty;
+  bool get isVirtualRoot => root.id == tagTreeRootId;
 
   factory TagTree.fromTags(Iterable<Tag> tags) {
     final children = <String?, List<Tag>>{};
@@ -40,15 +45,17 @@ class TagTree {
     );
   }
 
-  /// Parses the tree produced by the web view. The virtual root is accepted
-  /// only with its fixed identity and is never treated as a stored tag.
-  factory TagTree.fromJson(Object? value) {
+  /// Parses the tree produced by the web view. With [expectedRootId] the tree
+  /// is a view rooted at that real tag (or at [tagTreeRootId] for "all tags").
+  factory TagTree.fromJson(Object? value, {String? expectedRootId}) {
     if (value is! Map<String, Object?>) {
       throw const FormatException('标签导图数据格式不正确。');
     }
-    if (value['id'] != tagTreeRootId ||
-        value['name'] != tagTreeRootName ||
-        value['children'] is! List<Object?>) {
+    final expected = expectedRootId ?? tagTreeRootId;
+    if (value['id'] != expected || value['children'] is! List<Object?>) {
+      throw const FormatException('标签导图的根节点不正确。');
+    }
+    if (expected == tagTreeRootId && value['name'] != tagTreeRootName) {
       throw const FormatException('标签导图的根节点不正确。');
     }
     final seen = <String>{};
@@ -89,23 +96,137 @@ class TagTree {
       );
     }
 
-    final root = parse(value, 0, isRoot: true);
+    final parsed = parse(value, 0, isRoot: true);
+    if (expected != tagTreeRootId) return TagTree._(parsed);
     return TagTree._(
       TagNode(
         id: tagTreeRootId,
         name: tagTreeRootName,
-        children: root.children,
+        children: parsed.children,
       ),
     );
   }
 
-  /// Builds the complete tag map represented by this tree. Existing tags keep
-  /// their ids; new nodes receive generated ids. Validation (duplicate sibling
-  /// names, missing parents, cycles) is performed by the store before writing.
+  TagNode? find(String id) {
+    TagNode? visit(List<TagNode> nodes) {
+      for (final node in nodes) {
+        if (node.id == id) return node;
+        final found = visit(node.children);
+        if (found != null) return found;
+      }
+      return null;
+    }
+
+    return visit(root.children);
+  }
+
+  String? parentIdOf(String id) {
+    String? visit(List<TagNode> nodes, String? parentId) {
+      for (final node in nodes) {
+        if (node.id == id) return parentId;
+        final found = visit(node.children, node.id);
+        if (found != null) return found;
+      }
+      return null;
+    }
+
+    return visit(root.children, null);
+  }
+
+  /// A view whose root is the real tag [id]. The root's own parent is not part
+  /// of the view and is preserved by [replaceSubtree].
+  TagTree? subtree(String id) {
+    if (id == tagTreeRootId) return this;
+    final node = find(id);
+    return node == null ? null : TagTree._(node);
+  }
+
+  /// All real tags in display order with their depth, for root pickers.
+  List<(TagNode, int)> flatten() {
+    final result = <(TagNode, int)>[];
+    void visit(List<TagNode> nodes, int depth) {
+      for (final node in nodes) {
+        result.add((node, depth));
+        visit(node.children, depth + 1);
+      }
+    }
+
+    visit(root.children, 0);
+    return result;
+  }
+
+  /// Replaces the edited subtree in this full tree. Tags outside the view are
+  /// untouched, and a view may not contain tags from outside its original
+  /// subtree.
+  TagTree replaceSubtree(TagTree view) {
+    if (view.isVirtualRoot) {
+      return TagTree._(
+        TagNode(
+          id: tagTreeRootId,
+          name: tagTreeRootName,
+          children: view.root.children,
+        ),
+      );
+    }
+    final rootId = view.root.id;
+    final original = find(rootId);
+    if (original == null) {
+      throw const FormatException('根标签不存在。');
+    }
+    final allowed = <String>{};
+    void collect(TagNode node) {
+      if (!node.isNew) allowed.add(node.id);
+      for (final child in node.children) {
+        collect(child);
+      }
+    }
+
+    collect(original);
+    void check(TagNode node) {
+      if (!node.isNew && !allowed.contains(node.id)) {
+        throw const FormatException('导图包含当前根标签之外的标签。');
+      }
+      for (final child in node.children) {
+        check(child);
+      }
+    }
+
+    check(view.root);
+
+    TagNode replace(TagNode node) {
+      if (node.id == rootId) {
+        return TagNode(
+          id: rootId,
+          name: view.root.name,
+          children: view.root.children,
+        );
+      }
+      return TagNode(
+        id: node.id,
+        name: node.name,
+        children: [for (final child in node.children) replace(child)],
+      );
+    }
+
+    return TagTree._(
+      TagNode(
+        id: tagTreeRootId,
+        name: tagTreeRootName,
+        children: [for (final child in root.children) replace(child)],
+      ),
+    );
+  }
+
+  /// Builds the complete tag map represented by this full tree. Existing tags
+  /// keep their ids; new nodes receive generated ids. Validation (duplicate
+  /// sibling names, missing parents, cycles) is performed by the store.
   TagTreeSave toTagMap(
     Map<String, Tag> existing, {
     String Function()? createId,
   }) {
+    if (!isVirtualRoot) {
+      throw StateError('A tag map view cannot be persisted directly.');
+    }
     final generator = createId ?? () => const Uuid().v4().replaceAll('-', '');
     final tags = <String, Tag>{};
     final assigned = <String, String>{};
@@ -138,7 +259,7 @@ class TagTree {
     return TagTreeSave(tags, assigned);
   }
 
-  /// Order-insensitive equality of the displayed structure and names.
+  /// Equality of the displayed structure and names.
   bool sameAs(TagTree other) {
     bool equal(TagNode left, TagNode right) {
       if (left.id != right.id ||

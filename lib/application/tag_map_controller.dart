@@ -10,27 +10,46 @@ import '../domain/unicode.dart';
 class TagMapController extends ChangeNotifier {
   TagMapController(this.journal)
     : _baseline = TagTree.fromTags(journal.store.tags.values),
-      _draft = TagTree.fromTags(journal.store.tags.values);
+      _draft = TagTree.fromTags(journal.store.tags.values) {
+    _rootId = _draft.children.isEmpty ? null : _draft.children.first.id;
+  }
   final JournalController journal;
   TagTree _baseline;
   TagTree _draft;
+  String? _rootId;
   bool _saving = false;
 
+  /// The full tag tree, including tags hidden by the current root view.
   TagTree get draft => _draft;
   bool get saving => _saving;
   bool get dirty => !_draft.sameAs(_baseline);
 
-  TagNode? node(String id) {
-    TagNode? find(List<TagNode> nodes) {
-      for (final node in nodes) {
-        if (node.id == id) return node;
-        final child = find(node.children);
-        if (child != null) return child;
-      }
-      return null;
-    }
+  /// Null means the "all tags" view; otherwise a real tag is the map root and
+  /// only its subtree is shown.
+  String? get rootId => _rootId;
+  bool get isAllView => _rootId == null;
+  TagTree? get view {
+    final id = _rootId;
+    return id == null ? _draft : _draft.subtree(id);
+  }
 
-    return find(_draft.children);
+  TagNode? get rootNode => _rootId == null ? null : _draft.find(_rootId!);
+  TagNode? node(String id) => _draft.find(id);
+  String? parentIdOf(String id) => _draft.parentIdOf(id);
+  List<(TagNode, int)> get rootChoices => _draft.flatten();
+
+  void setRoot(String? id) {
+    if (id != null && _draft.find(id) == null) return;
+    if (_rootId == id) return;
+    _rootId = id;
+    notifyListeners();
+  }
+
+  void _ensureRoot() {
+    final id = _rootId;
+    if (id != null && _draft.find(id) == null) {
+      _rootId = _draft.children.isEmpty ? null : _draft.children.first.id;
+    }
   }
 
   /// Re-reads tags changed outside the map (the journal sidebar) while a draft
@@ -41,26 +60,13 @@ class TagMapController extends ChangeNotifier {
     if (!dirty) {
       _baseline = latest;
       _draft = latest;
-      notifyListeners();
-      return true;
+    } else {
+      _draft = _mergeExternal(_draft, latest);
+      _baseline = latest;
     }
-    _draft = _mergeExternal(_draft, latest);
-    _baseline = latest;
+    _ensureRoot();
     notifyListeners();
     return true;
-  }
-
-  String? parentIdOf(String id) {
-    String? find(List<TagNode> nodes, String? parentId) {
-      for (final node in nodes) {
-        if (node.id == id) return parentId;
-        final found = find(node.children, node.id);
-        if (found != null) return found;
-      }
-      return null;
-    }
-
-    return find(_draft.children, null);
   }
 
   /// Sibling names must stay unique under the same parent, matching
@@ -123,7 +129,6 @@ class TagMapController extends ChangeNotifier {
       }
       present.add(tag.id);
     }
-    // Rebuild once after inserting externally added tags.
     return TagTree.fromJson({
       'id': tagTreeRootId,
       'name': tagTreeRootName,
@@ -157,13 +162,33 @@ class TagMapController extends ChangeNotifier {
     'children': [for (final child in node.children) _toJsonWithChildren(child)],
   };
 
-  /// Applies the tree reported by the web view. Malformed input is rejected so
-  /// a scripting failure can never replace the in-memory draft with junk.
+  /// Applies a full tree (used by tests and the "all tags" view).
   void applyFromWeb(Object? value) => applyTree(TagTree.fromJson(value));
 
   void applyTree(TagTree tree) {
+    if (!tree.isVirtualRoot) {
+      throw const FormatException('标签导图缺少根节点。');
+    }
     if (tree.sameAs(_draft)) return;
     _draft = tree;
+    _ensureRoot();
+    notifyListeners();
+  }
+
+  /// Applies the subtree reported by the web view without touching tags
+  /// outside the current root.
+  void applyViewTree(TagTree tree) {
+    final id = _rootId;
+    if (id == null) {
+      applyTree(tree);
+      return;
+    }
+    if (tree.isVirtualRoot || tree.root.id != id) {
+      throw const FormatException('导图根标签与当前视图不一致。');
+    }
+    final updated = _draft.replaceSubtree(tree);
+    if (updated.sameAs(_draft)) return;
+    _draft = updated;
     notifyListeners();
   }
 
@@ -171,6 +196,7 @@ class TagMapController extends ChangeNotifier {
   /// repeats these checks before writing; this keeps the UI understandable.
   String? deleteBlocker(String id) {
     if (id == tagTreeRootId) return '虚拟根节点不能删除。';
+    if (id == _rootId) return '当前根标签不能删除，请先切换根标签。';
     final node = this.node(id);
     if (node == null) return '标签不存在。';
     if (node.children.isNotEmpty) return '请先删除或移动它的子标签。';
@@ -187,11 +213,20 @@ class TagMapController extends ChangeNotifier {
     _saving = true;
     notifyListeners();
     try {
+      // Never overwrite tags that were added outside this page while a draft
+      // was pending. Merge them first so a subtree save cannot erase them.
+      final latest = TagTree.fromTags(journal.store.tags.values);
+      if (!latest.sameAs(_baseline)) {
+        _draft = _mergeExternal(_draft, latest);
+        _baseline = latest;
+        _ensureRoot();
+      }
       final plan = _draft.toTagMap(journal.store.tags);
       await journal.store.replaceTags(plan.tags);
       final saved = TagTree.fromTags(journal.store.tags.values);
       _baseline = saved;
       _draft = saved;
+      _ensureRoot();
       journal.notifyListeners();
       return saved;
     } finally {

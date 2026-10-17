@@ -110,6 +110,40 @@ void main() {
       expect(plan.tags['linux']!.id, 'linux');
     });
 
+    test('真实标签可以作为视图根，子树合并保留根外标签', () {
+      final tags = {for (final tag in defaultTags) tag.id: tag};
+      final full = TagTree.fromTags(tags.values);
+      final view = TagTree.fromJson(
+        _node('work', '主业', [
+          _node('embedded', '学习', [_node('linux', 'Linux')]),
+          _node('new:code', '写代码'),
+        ]),
+        expectedRootId: 'work',
+      );
+      expect(view.root.id, 'work');
+      expect(view.root.name, '主业');
+      expect(() => view.toTagMap(tags), throwsStateError);
+
+      final merged = full.replaceSubtree(view);
+      expect(merged.find('new:code')!.name, '写代码');
+      expect(merged.find('life')!.name, '生活');
+      expect(merged.find('rest')!.name, '休息');
+      expect(merged.find('work')!.children.length, 2);
+    });
+
+    test('子树不得注入当前根之外的已有标签', () {
+      final full = TagTree.fromTags(defaultTags);
+      final view = TagTree.fromJson(
+        _node('work', '主业', [_node('life', '生活')]),
+        expectedRootId: 'work',
+      );
+      expect(() => full.replaceSubtree(view), throwsFormatException);
+      expect(
+        () => TagTree.fromJson(_node('life', '生活'), expectedRootId: 'work'),
+        throwsFormatException,
+      );
+    });
+
     test('拒绝损坏、重复、空名称和未知标签的树', () {
       for (final value in <Object?>[
         null,
@@ -315,6 +349,7 @@ void main() {
         ),
       );
       expect(controller.deleteBlocker(tagTreeRootId), '虚拟根节点不能删除。');
+      expect(controller.deleteBlocker('work'), '当前根标签不能删除，请先切换根标签。');
       expect(controller.deleteBlocker('embedded'), '请先删除或移动它的子标签。');
       expect(controller.deleteBlocker('linux'), contains('1 个事件'));
       expect(controller.deleteBlocker('rest'), isNull);
@@ -352,6 +387,111 @@ void main() {
       controller.applyTree(tree);
       expect(controller.draft.sameAs(tree), isTrue);
       expect(controller.dirty, isFalse);
+    });
+
+    test('默认以第一个一级标签为根，可切换任意标签或全部标签', () {
+      expect(controller.rootId, 'work');
+      expect(controller.view!.root.id, 'work');
+      expect(controller.view!.children.map((node) => node.id), ['embedded']);
+
+      controller.setRoot('life');
+      expect(controller.rootId, 'life');
+      expect(controller.view!.root.name, '生活');
+      expect(controller.view!.children.map((node) => node.id), ['rest']);
+
+      controller.setRoot('missing');
+      expect(controller.rootId, 'life');
+
+      controller.setRoot(null);
+      expect(controller.isAllView, isTrue);
+      expect(controller.view!.isVirtualRoot, isTrue);
+    });
+
+    test('编辑子树保存后保留根外标签', () async {
+      final before = Map.of(store.tags);
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '学习', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      expect(controller.dirty, isTrue);
+      expect(store.tags, before);
+
+      await controller.save();
+      final added = store.tags.values.singleWhere((tag) => tag.name == '写代码');
+      expect(added.parentId, 'work');
+      expect(store.tags['life']!.name, '生活');
+      expect(store.tags['rest']!.name, '休息');
+      expect(store.tags['side']!.name, '副业');
+      final reopened = await Store.open(directory);
+      expect(reopened.tags['life']!.name, '生活');
+      expect(reopened.tags['rest']!.name, '休息');
+    });
+
+    test('重命名真实根标签只改名称，根外标签不变', () async {
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业改名', [
+            _node('embedded', '学习', [_node('linux', 'Linux')]),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      expect(controller.rootNode!.name, '主业改名');
+      expect(controller.draft.find('life')!.name, '生活');
+      await controller.save();
+      expect(store.tags['work']!.name, '主业改名');
+      expect(store.tags['life']!.name, '生活');
+    });
+
+    test('子树不能注入根外标签，当前根不能删除', () {
+      final bad = TagTree.fromJson(
+        _node('work', '主业', [_node('life', '生活')]),
+        expectedRootId: 'work',
+      );
+      expect(() => controller.applyViewTree(bad), throwsFormatException);
+      expect(controller.deleteBlocker('work'), '当前根标签不能删除，请先切换根标签。');
+      controller.setRoot('life');
+      expect(controller.deleteBlocker('life'), '当前根标签不能删除，请先切换根标签。');
+      expect(controller.deleteBlocker('rest'), isNull);
+    });
+
+    test('保存前合并根外新增标签，避免整表覆盖', () async {
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '学习', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      await journal.saveTag('外部新增', 'life');
+      await controller.save();
+      expect(store.tags.values.where((tag) => tag.name == '外部新增'), isNotEmpty);
+      expect(store.tags.values.where((tag) => tag.name == '写代码'), isNotEmpty);
+      expect(store.tags['life']!.name, '生活');
+    });
+
+    test('切换根标签不丢失未保存的子树草稿', () {
+      controller.applyViewTree(
+        TagTree.fromJson(
+          _node('work', '主业', [
+            _node('embedded', '学习', [_node('linux', 'Linux')]),
+            _node('new:code', '写代码'),
+          ]),
+          expectedRootId: 'work',
+        ),
+      );
+      controller.setRoot('life');
+      expect(controller.view!.root.id, 'life');
+      expect(controller.draft.find('new:code')!.name, '写代码');
+      controller.setRoot('work');
+      expect(controller.view!.find('new:code')!.name, '写代码');
     });
 
     test('同级重名校验沿用 Unicode 大小写折叠', () {
