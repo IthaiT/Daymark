@@ -198,7 +198,7 @@ class _MoneyEditorState extends State<_MoneyEditor> {
                 for (final item in widget.ledger.state.orderedCategories(_kind))
                   DropdownMenuItem(
                     value: item.id,
-                    child: Text(widget.ledger.state.categoryPath(item.id)),
+                    child: Text(widget.ledger.state.categoryLabel(item.id)),
                   ),
               ],
               onChanged: _saving
@@ -865,7 +865,7 @@ class _NameDialogState extends State<_NameDialog> {
                             .contains(item.id))
                       DropdownMenuItem(
                         value: item.id,
-                        child: Text(widget.ledger.state.categoryPath(item.id)),
+                        child: Text(widget.ledger.state.categoryLabel(item.id)),
                       ),
                 ],
                 onChanged: _saving

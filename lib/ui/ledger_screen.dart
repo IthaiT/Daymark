@@ -473,9 +473,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
           final record = records[index];
           final totals = dailyTotals[record.date]!;
           final newDay = index == 0 || records[index - 1].date != record.date;
+          final path =
+              [MoneyKind.expense, MoneyKind.income].contains(record.kind)
+              ? _state.categoryPath(record.categoryId)
+              : null;
           final title = switch (record.kind) {
             MoneyKind.expense ||
-            MoneyKind.income => _state.categoryPath(record.categoryId),
+            MoneyKind.income => _state.categoryLabel(record.categoryId),
             MoneyKind.transfer =>
               '${_state.accounts[record.accountId]!.name} → ${_state.accounts[record.toAccountId]!.name}',
             MoneyKind.adjustment =>
@@ -553,7 +557,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
                           menu(details.globalPosition),
                       child: ListTile(
                         key: ValueKey('money-record-${record.id}'),
-                        title: Text(title),
+                        title: path != null && path != title
+                            ? Tooltip(
+                                message: path,
+                                waitDuration: const Duration(milliseconds: 700),
+                                child: Text(title),
+                              )
+                            : Text(title),
                         subtitle:
                             record.kind == MoneyKind.income &&
                                 record.accountId != null

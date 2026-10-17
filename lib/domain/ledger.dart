@@ -318,6 +318,18 @@ class LedgerState {
   String categoryPath(String? id) =>
       id == null ? '未分类' : ancestors(id).map((item) => item.name).join(' / ');
 
+  /// Leaf name for lists; the full path only when the leaf name is ambiguous.
+  String categoryLabel(String? id) {
+    if (id == null) return '未分类';
+    final category = categories[id];
+    if (category == null) return '未分类';
+    final name = category.name.trim();
+    final duplicated = categories.values.any(
+      (item) => item.id != id && item.name.trim() == name,
+    );
+    return duplicated ? categoryPath(id) : category.name;
+  }
+
   List<MoneyCategory> orderedCategories(MoneyKind kind) {
     final result = <MoneyCategory>[];
     void visit(String? parent) {

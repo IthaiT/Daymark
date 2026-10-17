@@ -1205,4 +1205,14 @@ void main() {
     );
     expect(store.state.categories[coffee.id]!.icon, isNull);
   });
+  test('category labels drop the parent path unless the leaf repeats', () {
+    final state = LedgerState.empty();
+    expect(state.categoryLabel(null), '未分类');
+    expect(state.categoryLabel('missing'), '未分类');
+    expect(state.categoryLabel('breakfast'), '早餐');
+    expect(state.categoryLabel('food'), '餐饮');
+    // Two categories share the leaf name「其他」, so they keep their paths.
+    expect(state.categoryLabel('other-food'), '餐饮 / 其他');
+    expect(state.categoryLabel('other-expense'), '其他');
+  });
 }

@@ -109,7 +109,7 @@ class _LedgerStatisticsState extends State<LedgerStatistics> {
                     child: Text(
                       parent == null
                           ? '全部${moneyKindText(kind)}'
-                          : state.categoryPath(parent.id),
+                          : state.categoryLabel(parent.id),
                       key: const ValueKey('stats-path'),
                       style: Theme.of(context).textTheme.titleMedium,
                       maxLines: 1,

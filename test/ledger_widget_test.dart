@@ -735,10 +735,21 @@ void main() {
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(store.state.records[id]!.notes, '更新后的备注');
+      // Lists show the leaf name; the full path stays in the tooltip.
+      expect(
+        find.descendant(of: row, matching: find.text('午餐')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: row, matching: find.text('餐饮 / 午餐')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: row, matching: find.byTooltip('餐饮 / 午餐')),
+        findsOneWidget,
+      );
       final focus = Focus.of(
-        tester.element(
-          find.descendant(of: row, matching: find.text('餐饮 / 午餐')),
-        ),
+        tester.element(find.descendant(of: row, matching: find.text('午餐'))),
       );
       focus.requestFocus();
       await tester.pump();
@@ -1177,7 +1188,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('ledger-fold-food')));
       await tester.pumpAndSettle();
       expect(quick('lunch'), findsOneWidget);
-      await tester.tap(find.text('午餐'), buttons: kSecondaryMouseButton);
+      await tester.tap(
+        find.descendant(
+          of: find.byType(LedgerSidebar),
+          matching: find.text('午餐'),
+        ),
+        buttons: kSecondaryMouseButton,
+      );
       await tester.pumpAndSettle();
       expect(find.text('移至一级标签'), findsNothing);
       await tester.tap(find.text('修改标签'));
@@ -1199,7 +1216,12 @@ void main() {
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(store.state.categories['lunch']!.color, CategoryColor.pink);
-      final source = tester.getCenter(find.text('午餐'));
+      final source = tester.getCenter(
+        find.descendant(
+          of: find.byType(LedgerSidebar),
+          matching: find.text('午餐'),
+        ),
+      );
       final target = tester.getCenter(find.text('住房'));
       final drag = await tester.startGesture(source);
       await tester.pump(const Duration(milliseconds: 300));
@@ -1652,7 +1674,12 @@ void main() {
       await tester.enterText(quick('breakfast'), '8');
       Future<void> dragBefore(String source, String target) async {
         final pointer = await tester.startGesture(
-          tester.getCenter(find.text(source)),
+          tester.getCenter(
+            find.descendant(
+              of: find.byType(LedgerSidebar),
+              matching: find.text(source),
+            ),
+          ),
           kind: PointerDeviceKind.mouse,
         );
         await tester.pump(const Duration(milliseconds: 300));
