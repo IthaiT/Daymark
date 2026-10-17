@@ -110,4 +110,47 @@ void main() {
       );
     },
   );
+
+  test('root tags take free hues before any colour repeats', () async {
+    final directory = await Directory(
+      '.test-artifacts',
+    ).createTemp('root-colours-');
+    addTearDown(() => directory.delete(recursive: true));
+    final store = await Store.open(directory);
+    List<Color> rootColors() => [
+      for (final tag in store.tags.values)
+        if (tag.parentId == null) tagFamilyFor(store, tag.id, const {}),
+    ];
+    final presets = {
+      Colors.blue,
+      Colors.deepPurple,
+      Colors.teal,
+      Colors.orange,
+    };
+
+    // Moving a child out to the root list must not reuse a preset hue.
+    final sleep = await store.saveTag('睡觉', null);
+    expect(rootColors().toSet().length, 5);
+    expect(presets.contains(tagFamilyFor(store, sleep.id, const {})), isFalse);
+    await store.saveTag('睡眠', null, id: 'rest');
+    expect(rootColors().toSet().length, 6);
+    expect(presets.contains(tagFamilyFor(store, 'rest', const {})), isFalse);
+
+    // Seven roots still keep seven different hues.
+    await store.saveTag('学习', null);
+    expect(rootColors().toSet().length, 7);
+    // The eighth root has to repeat, but must not disturb the seven above.
+    final before = rootColors();
+    await store.saveTag('健康', null);
+    final after = rootColors();
+    expect(after.toSet().length, 7);
+    expect(after.take(8).toSet().length, 7);
+    expect(after.take(7).toSet().length, 7);
+    expect(before.toSet().length, 7);
+    // The four original roots keep their familiar colours.
+    expect(tagFamilyFor(store, 'work', const {}), Colors.blue);
+    expect(tagFamilyFor(store, 'side', const {}), Colors.deepPurple);
+    expect(tagFamilyFor(store, 'explore', const {}), Colors.teal);
+    expect(tagFamilyFor(store, 'life', const {}), Colors.orange);
+  });
 }

@@ -171,6 +171,50 @@ Map<String, TagColor> tagColorOverrides(BuildContext context) =>
     Theme.of(context).extension<TagColorTheme>()?.overrides ??
     const <String, TagColor>{};
 
+int _tagHash(String id) =>
+    id.codeUnits.fold(0, (sum, unit) => (sum * 31 + unit) & 0x7fffffff);
+
+/// A root hue that no other root already uses, until all seven are taken.
+///
+/// Roots are walked in creation order, which a move does not change, so moving
+/// a child tag out to the root list only picks a free hue instead of recolouring
+/// its siblings. Beyond seven roots the hash repeats, as no free hue is left.
+TagColor rootTagColor(
+  Store store,
+  String rootId,
+  Map<String, TagColor> overrides,
+) {
+  // Reserve every explicit or preset root colour first so an automatic tag can
+  // never take a hue that a later root already claims.
+  final fixed = <String, TagColor>{};
+  for (final tag in store.tags.values) {
+    if (tag.parentId != null) continue;
+    final color = overrides[tag.id] ?? _tagDefaults[tag.id];
+    if (color != null) fixed[tag.id] = color;
+  }
+  final preset = fixed[rootId];
+  if (preset != null) return preset;
+
+  final used = {...fixed.values};
+  for (final tag in store.tags.values) {
+    if (tag.parentId != null || fixed.containsKey(tag.id)) continue;
+    if (used.length >= TagColor.values.length) {
+      final repeated =
+          TagColor.values[_tagHash(tag.id) % TagColor.values.length];
+      if (tag.id == rootId) return repeated;
+      continue;
+    }
+    var index = _tagHash(tag.id) % TagColor.values.length;
+    while (used.contains(TagColor.values[index])) {
+      index = (index + 1) % TagColor.values.length;
+    }
+    final color = TagColor.values[index];
+    if (tag.id == rootId) return color;
+    used.add(color);
+  }
+  return TagColor.values[_tagHash(rootId) % TagColor.values.length];
+}
+
 /// The nearest explicit override wins, then the root tag's automatic hue.
 MaterialColor tagFamilyFor(
   Store store,
@@ -183,14 +227,7 @@ MaterialColor tagFamilyFor(
     final color = overrides[tag.id];
     if (color != null) return tagColorSwatch(color);
   }
-  final root = path.first.id;
-  final preset = _tagDefaults[root];
-  if (preset != null) return tagColorSwatch(preset);
-  final hash = root.codeUnits.fold(
-    0,
-    (sum, unit) => (sum * 31 + unit) & 0x7fffffff,
-  );
-  return tagColorSwatch(TagColor.values[hash % TagColor.values.length]);
+  return tagColorSwatch(rootTagColor(store, path.first.id, overrides));
 }
 
 MaterialColor tagFamily(BuildContext context, Store store, String? tagId) =>
