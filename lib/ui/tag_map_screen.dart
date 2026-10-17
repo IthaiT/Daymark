@@ -438,7 +438,7 @@ class TagMapScreenState extends State<TagMapScreen> {
   Widget _rootPicker(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final label = widget.controller.isAllView
-        ? '全部标签'
+        ? tagTreeRootName
         : widget.controller.rootNode?.name ?? '选择根标签';
     return PopupMenuButton<String>(
       key: const ValueKey('tag-map-root'),
@@ -446,7 +446,7 @@ class TagMapScreenState extends State<TagMapScreen> {
       onSelected: (value) =>
           unawaited(_setRoot(value == _allRootValue ? null : value)),
       itemBuilder: (context) => [
-        const PopupMenuItem(value: _allRootValue, child: Text('全部标签')),
+        const PopupMenuItem(value: _allRootValue, child: Text(tagTreeRootName)),
         const PopupMenuDivider(),
         for (final (node, depth) in widget.controller.rootChoices)
           PopupMenuItem(

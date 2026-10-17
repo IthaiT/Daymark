@@ -6,7 +6,7 @@ import 'unicode.dart';
 /// Fixed identity of the "all tags" root. It never becomes a persisted tag;
 /// real tags always live below it.
 const tagTreeRootId = 'daymark:root';
-const tagTreeRootName = '标签';
+const tagTreeRootName = 'Daymark';
 
 /// Nodes created inside the web view are identified until saving assigns the
 /// final stable tag id.

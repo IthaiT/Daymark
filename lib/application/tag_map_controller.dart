@@ -10,9 +10,7 @@ import '../domain/unicode.dart';
 class TagMapController extends ChangeNotifier {
   TagMapController(this.journal)
     : _baseline = TagTree.fromTags(journal.store.tags.values),
-      _draft = TagTree.fromTags(journal.store.tags.values) {
-    _rootId = _draft.children.isEmpty ? null : _draft.children.first.id;
-  }
+      _draft = TagTree.fromTags(journal.store.tags.values);
   final JournalController journal;
   TagTree _baseline;
   TagTree _draft;
@@ -54,9 +52,7 @@ class TagMapController extends ChangeNotifier {
 
   void _ensureRoot() {
     final id = _rootId;
-    if (id != null && _draft.find(id) == null) {
-      _rootId = _draft.children.isEmpty ? null : _draft.children.first.id;
-    }
+    if (id != null && _draft.find(id) == null) _rootId = null;
   }
 
   /// Re-reads tags changed outside the map (the journal sidebar) while a draft

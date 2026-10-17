@@ -163,7 +163,7 @@ void main() {
       for (final value in <Object?>[
         null,
         _root([])..['id'] = 'other',
-        _root([_node(tagTreeRootId, '标签')]),
+        _root([_node(tagTreeRootId, 'Daymark')]),
         _root([_node('a', 'A'), _node('a', 'B')]),
         _root([_node('a', '   ')]),
         _root([_node('new:', '新标签')]),
@@ -364,6 +364,8 @@ void main() {
         ),
       );
       expect(controller.deleteBlocker(tagTreeRootId), '虚拟根节点不能删除。');
+      expect(controller.deleteBlocker('work'), '请先删除或移动它的子标签。');
+      controller.setRoot('work');
       expect(controller.deleteBlocker('work'), '当前根标签不能删除，请先切换根标签。');
       expect(controller.deleteBlocker('embedded'), '请先删除或移动它的子标签。');
       expect(controller.deleteBlocker('linux'), contains('1 个事件'));
@@ -405,6 +407,7 @@ void main() {
     });
 
     test('保存后的临时节点 ID 固定，迟到的导图更新不会换 ID', () async {
+      controller.setRoot('work');
       controller.applyViewTree(
         TagTree.fromJson(
           _node('work', '主业', [
@@ -437,10 +440,16 @@ void main() {
       expect(store.tags.values.where((tag) => tag.name == '写代码'), isEmpty);
     });
 
-    test('默认以第一个一级标签为根，可切换任意标签或全部标签', () {
-      expect(controller.rootId, 'work');
-      expect(controller.view!.root.id, 'work');
-      expect(controller.view!.children.map((node) => node.id), ['embedded']);
+    test('默认显示 Daymark 全部标签，可进入任意子树', () {
+      expect(controller.isAllView, isTrue);
+      expect(controller.view!.isVirtualRoot, isTrue);
+      expect(controller.view!.root.name, 'Daymark');
+      expect(controller.view!.children.map((node) => node.id), [
+        'work',
+        'side',
+        'explore',
+        'life',
+      ]);
 
       controller.setRoot('life');
       expect(controller.rootId, 'life');
@@ -457,6 +466,7 @@ void main() {
 
     test('编辑子树保存后保留根外标签', () async {
       final before = Map.of(store.tags);
+      controller.setRoot('work');
       controller.applyViewTree(
         TagTree.fromJson(
           _node('work', '主业', [
@@ -481,6 +491,7 @@ void main() {
     });
 
     test('重命名真实根标签只改名称，根外标签不变', () async {
+      controller.setRoot('work');
       controller.applyViewTree(
         TagTree.fromJson(
           _node('work', '主业改名', [
@@ -497,6 +508,7 @@ void main() {
     });
 
     test('子树不能注入根外标签，当前根不能删除', () {
+      controller.setRoot('work');
       final bad = TagTree.fromJson(
         _node('work', '主业', [_node('life', '生活')]),
         expectedRootId: 'work',
@@ -509,6 +521,7 @@ void main() {
     });
 
     test('保存前合并根外新增标签，避免整表覆盖', () async {
+      controller.setRoot('work');
       controller.applyViewTree(
         TagTree.fromJson(
           _node('work', '主业', [
@@ -526,6 +539,7 @@ void main() {
     });
 
     test('切换根标签不丢失未保存的子树草稿', () {
+      controller.setRoot('work');
       controller.applyViewTree(
         TagTree.fromJson(
           _node('work', '主业', [
