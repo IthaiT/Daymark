@@ -818,7 +818,11 @@ class _NameDialogState extends State<_NameDialog> {
   }
 
   Future<void> _pickIcon() async {
-    final result = await showLedgerIconPicker(context, selected: _icon);
+    final result = await showLedgerIconPicker(
+      context,
+      selected: _icon,
+      kind: widget.kind,
+    );
     if (!mounted || result == null) return;
     setState(() => _icon = result.isEmpty ? null : result);
   }

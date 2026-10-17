@@ -1,27 +1,43 @@
 import 'package:flutter/material.dart';
 
+import '../domain/ledger.dart';
 import 'ledger_icons.dart';
 
 /// Returns the chosen icon name, an empty string for "automatic/inherit", or
 /// null when the dialog is dismissed.
+///
+/// [kind] limits the groups to income or expense so the two lists stay apart.
 Future<String?> showLedgerIconPicker(
   BuildContext context, {
   String? selected,
+  MoneyKind? kind,
 }) => showDialog<String>(
   context: context,
-  builder: (_) => _LedgerIconPicker(selected: selected),
+  builder: (_) => _LedgerIconPicker(selected: selected, kind: kind),
 );
 
 class _LedgerIconPicker extends StatefulWidget {
-  const _LedgerIconPicker({this.selected});
+  const _LedgerIconPicker({this.selected, this.kind});
   final String? selected;
+  final MoneyKind? kind;
   @override
   State<_LedgerIconPicker> createState() => _LedgerIconPickerState();
 }
 
 class _LedgerIconPickerState extends State<_LedgerIconPicker> {
+  late final List<String> _groups = ledgerIconGroupsFor(
+    widget.kind ?? MoneyKind.expense,
+  );
+  late String _group = _initialGroup();
   final _query = TextEditingController();
-  String? _group;
+
+  /// Opens on the selected icon's group so the current choice stays visible.
+  String _initialGroup() {
+    final option = ledgerIconByName[widget.selected];
+    return option != null && _groups.contains(option.group)
+        ? option.group
+        : _groups.first;
+  }
 
   @override
   void dispose() {
@@ -29,10 +45,18 @@ class _LedgerIconPickerState extends State<_LedgerIconPicker> {
     super.dispose();
   }
 
+  /// Group browsing by default; typing searches every group of this kind.
+  List<LedgerIconOption> _options() {
+    final query = _query.text.trim();
+    return query.isEmpty
+        ? searchLedgerIcons('', groups: {_group})
+        : searchLedgerIcons(query, groups: _groups.toSet());
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final options = searchLedgerIcons(_query.text, group: _group);
+    final options = _options();
     return AlertDialog(
       title: const Text('选择图标'),
       content: SizedBox(
@@ -51,7 +75,7 @@ class _LedgerIconPickerState extends State<_LedgerIconPicker> {
               ),
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) {
-                final matches = searchLedgerIcons(_query.text, group: _group);
+                final matches = _options();
                 if (matches.isNotEmpty) {
                   Navigator.pop(context, matches.first.name);
                 }
@@ -64,22 +88,17 @@ class _LedgerIconPickerState extends State<_LedgerIconPicker> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ChoiceChip(
-                        label: const Text('全部'),
-                        selected: _group == null,
-                        onSelected: (_) => setState(() => _group = null),
-                      ),
-                    ),
-                    for (final group in ledgerIconGroups)
+                    for (final group in _groups)
                       Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: ChoiceChip(
                           key: ValueKey('ledger-icon-group-$group'),
                           label: Text(group),
                           selected: _group == group,
-                          onSelected: (_) => setState(() => _group = group),
+                          onSelected: (_) => setState(() {
+                            _group = group;
+                            _query.clear();
+                          }),
                         ),
                       ),
                   ],

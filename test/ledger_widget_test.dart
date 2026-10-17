@@ -1039,6 +1039,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const ValueKey('ledger-icon-search')),
+        'AI',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('ledger-icon-smart_toy')),
+        findsOneWidget,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('ledger-icon-search')),
         '咖啡',
       );
       await tester.pumpAndSettle();
@@ -1065,6 +1074,33 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('income icon picker only lists income groups and finds housing '
+      'provident fund', (tester) async {
+    await open(tester);
+    await tester.tap(find.text('收入标签'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('工资'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('修改标签'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('ledger-icon-picker')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ledger-icon-group-收入')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ledger-icon-group-餐饮')), findsNothing);
+    await tester.enterText(
+      find.byKey(const ValueKey('ledger-icon-search')),
+      '公积金',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('ledger-icon-apartment')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('ledger-icon-apartment')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.state.categories['salary']!.icon, 'apartment');
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'day arrows cross year boundaries and discard drafts on date change',

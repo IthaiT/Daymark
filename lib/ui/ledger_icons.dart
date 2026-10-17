@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../domain/ledger.dart';
+
 /// One entry in the built-in money icon library.
 ///
 /// [name] is what `ledger.json` stores. Glyphs live in [ledgerIconData] so each
@@ -15,12 +17,12 @@ class LedgerIconOption {
     final value = query.trim().toLowerCase();
     return value.isEmpty ||
         name.contains(value) ||
-        label.contains(value) ||
+        label.toLowerCase().contains(value) ||
         group.contains(value);
   }
 }
 
-/// Groups in display order.
+/// All groups in display order.
 const ledgerIconGroups = [
   '餐饮',
   '交通',
@@ -32,6 +34,29 @@ const ledgerIconGroups = [
   '人情',
   '通讯',
   '旅行',
+  '数码',
+  '收入',
+  '金融',
+  '账户',
+  '其他',
+];
+
+/// Income categories edit a short, income-only list.
+const ledgerIncomeIconGroups = ['收入', '金融', '账户', '其他'];
+
+/// Expense categories see the spending groups; income-only icons stay out.
+const ledgerExpenseIconGroups = [
+  '餐饮',
+  '交通',
+  '购物',
+  '居家',
+  '娱乐',
+  '健康',
+  '教育',
+  '人情',
+  '通讯',
+  '旅行',
+  '数码',
   '金融',
   '账户',
   '其他',
@@ -74,11 +99,10 @@ const ledgerIconOptions = <LedgerIconOption>[
   LedgerIconOption('local_mall', '商场', '购物'),
   LedgerIconOption('watch', '手表', '购物'),
   LedgerIconOption('diamond', '珠宝', '购物'),
-  LedgerIconOption('devices', '数码', '购物'),
 
   // 居家
   LedgerIconOption('home', '住房', '居家'),
-  LedgerIconOption('apartment', '物业', '居家'),
+  LedgerIconOption('domain', '物业', '居家'),
   LedgerIconOption('bolt', '电费', '居家'),
   LedgerIconOption('water_drop', '水费', '居家'),
   LedgerIconOption('local_fire_department', '燃气', '居家'),
@@ -116,13 +140,11 @@ const ledgerIconOptions = <LedgerIconOption>[
 
   // 人情
   LedgerIconOption('card_giftcard', '礼物', '人情'),
-  LedgerIconOption('redeem', '礼券', '人情'),
   LedgerIconOption('volunteer_activism', '公益', '人情'),
   LedgerIconOption('handshake', '人情来往', '人情'),
   LedgerIconOption('local_florist', '鲜花', '人情'),
 
   // 通讯
-  LedgerIconOption('smartphone', '手机', '通讯'),
   LedgerIconOption('phone_iphone', '话费', '通讯'),
   LedgerIconOption('sim_card', '流量', '通讯'),
   LedgerIconOption('router', '路由器', '通讯'),
@@ -134,6 +156,27 @@ const ledgerIconOptions = <LedgerIconOption>[
   LedgerIconOption('map', '地图', '旅行'),
   LedgerIconOption('beach_access', '度假', '旅行'),
 
+  // 数码
+  LedgerIconOption('devices', '数码', '数码'),
+  LedgerIconOption('smartphone', '手机', '数码'),
+  LedgerIconOption('computer', '电脑', '数码'),
+  LedgerIconOption('headphones', '耳机', '数码'),
+  LedgerIconOption('smart_toy', 'AI', '数码'),
+
+  // 收入
+  LedgerIconOption('work', '工资', '收入'),
+  LedgerIconOption('emoji_events', '奖金', '收入'),
+  LedgerIconOption('apartment', '公积金', '收入'),
+  LedgerIconOption('percent', '利息', '收入'),
+  LedgerIconOption('donut_large', '分红', '收入'),
+  LedgerIconOption('receipt_long', '报销', '收入'),
+  LedgerIconOption('redeem', '红包', '收入'),
+  LedgerIconOption('work_history', '兼职', '收入'),
+  LedgerIconOption('home_work', '房租', '收入'),
+  LedgerIconOption('undo', '退款', '收入'),
+  LedgerIconOption('trending_up', '投资收益', '收入'),
+  LedgerIconOption('attach_money', '其他收入', '收入'),
+
   // 金融
   LedgerIconOption('payments', '支付', '金融'),
   LedgerIconOption('account_balance_wallet', '钱包', '金融'),
@@ -141,10 +184,9 @@ const ledgerIconOptions = <LedgerIconOption>[
   LedgerIconOption('credit_card', '信用卡', '金融'),
   LedgerIconOption('currency_yuan', '人民币', '金融'),
   LedgerIconOption('savings', '储蓄', '金融'),
-  LedgerIconOption('receipt_long', '账单', '金融'),
-  LedgerIconOption('request_quote', '报销', '金融'),
+  LedgerIconOption('receipt', '账单', '金融'),
+  LedgerIconOption('request_quote', '请款', '金融'),
   LedgerIconOption('price_check', '对账', '金融'),
-  LedgerIconOption('monetization_on', '收入', '金融'),
 
   // 账户
   LedgerIconOption('swap_horiz', '转账', '账户'),
@@ -153,7 +195,6 @@ const ledgerIconOptions = <LedgerIconOption>[
   LedgerIconOption('show_chart', '基金', '账户'),
   LedgerIconOption('candlestick_chart', '股票', '账户'),
   LedgerIconOption('insights', '收益', '账户'),
-  LedgerIconOption('trending_up', '投资', '账户'),
 
   // 其他
   LedgerIconOption('label', '其他', '其他'),
@@ -197,9 +238,8 @@ IconData? ledgerIconData(String? name) => switch (name) {
   'local_mall' => Icons.local_mall_outlined,
   'watch' => Icons.watch_outlined,
   'diamond' => Icons.diamond_outlined,
-  'devices' => Icons.devices_outlined,
   'home' => Icons.home_outlined,
-  'apartment' => Icons.apartment_outlined,
+  'domain' => Icons.domain_outlined,
   'bolt' => Icons.bolt_outlined,
   'water_drop' => Icons.water_drop_outlined,
   'local_fire_department' => Icons.local_fire_department_outlined,
@@ -229,11 +269,9 @@ IconData? ledgerIconData(String? name) => switch (name) {
   'translate' => Icons.translate_outlined,
   'draw' => Icons.draw_outlined,
   'card_giftcard' => Icons.card_giftcard_outlined,
-  'redeem' => Icons.redeem_outlined,
   'volunteer_activism' => Icons.volunteer_activism_outlined,
   'handshake' => Icons.handshake_outlined,
   'local_florist' => Icons.local_florist_outlined,
-  'smartphone' => Icons.smartphone_outlined,
   'phone_iphone' => Icons.phone_iphone_outlined,
   'sim_card' => Icons.sim_card_outlined,
   'router' => Icons.router_outlined,
@@ -242,23 +280,38 @@ IconData? ledgerIconData(String? name) => switch (name) {
   'luggage' => Icons.luggage_outlined,
   'map' => Icons.map_outlined,
   'beach_access' => Icons.beach_access_outlined,
+  'devices' => Icons.devices_outlined,
+  'smartphone' => Icons.smartphone_outlined,
+  'computer' => Icons.computer_outlined,
+  'headphones' => Icons.headphones_outlined,
+  'smart_toy' => Icons.smart_toy_outlined,
+  'work' => Icons.work_outlined,
+  'emoji_events' => Icons.emoji_events_outlined,
+  'apartment' => Icons.apartment_outlined,
+  'percent' => Icons.percent_outlined,
+  'donut_large' => Icons.donut_large_outlined,
+  'receipt_long' => Icons.receipt_long_outlined,
+  'redeem' => Icons.redeem_outlined,
+  'work_history' => Icons.work_history_outlined,
+  'home_work' => Icons.home_work_outlined,
+  'undo' => Icons.undo_outlined,
+  'trending_up' => Icons.trending_up_outlined,
+  'attach_money' => Icons.attach_money_outlined,
   'payments' => Icons.payments_outlined,
   'account_balance_wallet' => Icons.account_balance_wallet_outlined,
   'account_balance' => Icons.account_balance_outlined,
   'credit_card' => Icons.credit_card_outlined,
   'currency_yuan' => Icons.currency_yuan_outlined,
   'savings' => Icons.savings_outlined,
-  'receipt_long' => Icons.receipt_long_outlined,
+  'receipt' => Icons.receipt_outlined,
   'request_quote' => Icons.request_quote_outlined,
   'price_check' => Icons.price_check_outlined,
-  'monetization_on' => Icons.monetization_on_outlined,
   'swap_horiz' => Icons.swap_horiz_outlined,
   'sync_alt' => Icons.sync_alt_outlined,
   'currency_exchange' => Icons.currency_exchange_outlined,
   'show_chart' => Icons.show_chart_outlined,
   'candlestick_chart' => Icons.candlestick_chart_outlined,
   'insights' => Icons.insights_outlined,
-  'trending_up' => Icons.trending_up_outlined,
   'label' => Icons.label_outlined,
   'star' => Icons.star_outlined,
   'bookmark' => Icons.bookmark_outlined,
@@ -270,8 +323,13 @@ final Map<String, LedgerIconOption> ledgerIconByName = {
   for (final option in ledgerIconOptions) option.name: option,
 };
 
-List<LedgerIconOption> searchLedgerIcons(String query, {String? group}) => [
-  for (final option in ledgerIconOptions)
-    if ((group == null || option.group == group) && option.matches(query))
-      option,
-];
+List<String> ledgerIconGroupsFor(MoneyKind kind) =>
+    kind == MoneyKind.income ? ledgerIncomeIconGroups : ledgerExpenseIconGroups;
+
+List<LedgerIconOption> searchLedgerIcons(String query, {Set<String>? groups}) =>
+    [
+      for (final option in ledgerIconOptions)
+        if ((groups == null || groups.contains(option.group)) &&
+            option.matches(query))
+          option,
+    ];
