@@ -82,6 +82,7 @@ class MoneyCategory {
     this.kind, [
     this.parentId,
     this.color,
+    this.icon,
   ]);
   final String id;
   final String name;
@@ -90,12 +91,16 @@ class MoneyCategory {
 
   /// Null inherits the closest ancestor's color.
   final CategoryColor? color;
+
+  /// Library name such as `breakfast_dining`; null inherits the ancestor icon.
+  final String? icon;
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'kind': kind.name,
     'parent_id': parentId,
     if (color != null) 'color': color!.name,
+    if (icon != null) 'icon': icon,
   };
 }
 

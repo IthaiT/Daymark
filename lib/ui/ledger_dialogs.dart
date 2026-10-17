@@ -6,7 +6,11 @@ import '../application/ledger_controller.dart';
 import '../domain/ledger.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
+import 'icon_picker.dart';
 import 'ledger_category_style.dart';
+import 'ledger_icons.dart';
+import 'tag_visual.dart';
+import 'theme_tokens.dart';
 import 'workspace_style.dart';
 
 String moneyKindText(MoneyKind kind) => switch (kind) {
@@ -743,6 +747,7 @@ class _NameDialogState extends State<_NameDialog> {
   );
   late String? _parent = widget.category?.parentId ?? widget.parentId;
   late CategoryColor? _color = widget.category?.color;
+  late String? _icon = widget.category?.icon;
   late String _incomeAccount =
       widget.ledger.state.incomeAccounts[widget.category?.id] ??
       widget.ledger.state.defaultCashId;
@@ -772,6 +777,8 @@ class _NameDialogState extends State<_NameDialog> {
           incomeAccountId: widget.kind == MoneyKind.income
               ? _incomeAccount
               : null,
+          icon: _icon,
+          inheritIcon: _icon == null,
         );
       } else {
         await widget.ledger.saveAccount(_name.text, id: widget.account?.id);
@@ -785,6 +792,35 @@ class _NameDialogState extends State<_NameDialog> {
         });
       }
     }
+  }
+
+  MaterialColor _previewFamily() {
+    if (_color != null) return categorySwatch(_color!);
+    final parent = _parent;
+    if (parent != null) {
+      return ledgerCategorySwatch(widget.ledger.state, parent);
+    }
+    final id = widget.category?.id;
+    return id == null
+        ? Colors.blueGrey
+        : ledgerCategorySwatch(widget.ledger.state, id);
+  }
+
+  IconData _previewIcon() {
+    final explicit = ledgerIconData(_icon);
+    if (explicit != null) return explicit;
+    final parent = _parent;
+    if (parent != null) return ledgerCategoryIcon(widget.ledger.state, parent);
+    final id = widget.category?.id;
+    return id == null
+        ? Icons.label_outline
+        : ledgerCategoryIcon(widget.ledger.state, id);
+  }
+
+  Future<void> _pickIcon() async {
+    final result = await showLedgerIconPicker(context, selected: _icon);
+    if (!mounted || result == null) return;
+    setState(() => _icon = result.isEmpty ? null : result);
   }
 
   @override
@@ -885,6 +921,47 @@ class _NameDialogState extends State<_NameDialog> {
                           ? null
                           : (_) => setState(() => _color = color),
                     ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '标签图标',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  AppTagBadge(
+                    family: _previewFamily(),
+                    accent: DaymarkColors.of(
+                      context,
+                    ).categoryAccent(_previewFamily()[500]!),
+                    icon: _previewIcon(),
+                    size: 36,
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    key: const ValueKey('ledger-icon-picker'),
+                    onPressed: _saving ? null : () => unawaited(_pickIcon()),
+                    icon: const Icon(Icons.apps, size: 18),
+                    label: Text(_icon == null ? '选择图标' : '更换图标'),
+                  ),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      _icon == null
+                          ? '自动／继承'
+                          : ledgerIconByName[_icon]?.label ?? _icon!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ],

@@ -1026,6 +1026,47 @@ void main() {
   );
 
   testWidgets(
+    'category icon picker searches, saves and can be inherited again',
+    (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('管理分类'));
+      await tester.pumpAndSettle();
+      final lunch = find.byKey(const ValueKey('category-manage-lunch'));
+      await tester.ensureVisible(lunch);
+      await tester.tap(lunch);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-icon-picker')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('ledger-icon-search')),
+        '咖啡',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('ledger-icon-local_cafe')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('ledger-icon-local_cafe')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.categories['lunch']!.icon, 'local_cafe');
+
+      await tester.tap(lunch);
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.local_cafe_outlined), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('ledger-icon-picker')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('ledger-icon-inherit')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(store.state.categories['lunch']!.icon, isNull);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'day arrows cross year boundaries and discard drafts on date change',
     (tester) async {
       await open(tester);

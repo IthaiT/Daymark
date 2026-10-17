@@ -207,6 +207,8 @@ class LedgerController extends ChangeNotifier {
     CategoryColor? color,
     bool inheritColor = false,
     String? incomeAccountId,
+    String? icon,
+    bool inheritIcon = false,
   }) => _run(() async {
     final previous = id == null ? null : state.categories[id];
     if (id != null && (previous == null || previous.kind != kind)) {
@@ -218,6 +220,7 @@ class LedgerController extends ChangeNotifier {
       kind,
       parentId,
       inheritColor ? null : color ?? previous?.color,
+      inheritIcon ? null : icon ?? previous?.icon,
     );
     final incomeAccounts = {...state.incomeAccounts};
     if (incomeAccountId != null) {

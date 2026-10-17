@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../domain/ledger.dart';
+import 'ledger_icons.dart';
 import 'tag_visual.dart';
 
 MaterialColor categorySwatch(CategoryColor color) => switch (color) {
@@ -111,11 +112,17 @@ Color ledgerCategoryColor(LedgerState state, String? id) {
   );
 }
 
+/// Explicit icons win, then the nearest ancestor, then the built-in preset.
 IconData ledgerCategoryIcon(LedgerState state, String? id) {
   if (id == null || !state.categories.containsKey(id)) {
     return Icons.label_outline;
   }
-  return switch (state.ancestors(id).first.id) {
+  final path = state.ancestors(id);
+  for (final category in path.reversed) {
+    final icon = ledgerIconData(category.icon);
+    if (icon != null) return icon;
+  }
+  return switch (path.first.id) {
     'food' => Icons.restaurant_outlined,
     'housing' => Icons.home_outlined,
     'daily' => Icons.cleaning_services_outlined,

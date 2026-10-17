@@ -127,6 +127,9 @@ class LedgerStore {
       final row = object(item);
       final id = string(row, 'id');
       if (categories.containsKey(id)) throw const FormatException('分类 ID 重复。');
+      // Icon names are decorative: unknown values fall back instead of failing
+      // the whole ledger, so files from newer builds still open.
+      final icon = optionalString(row, 'icon')?.trim();
       categories[id] = MoneyCategory(
         id,
         string(row, 'name'),
@@ -138,6 +141,7 @@ class LedgerStore {
                 (color) => color.name == row['color'],
                 orElse: () => throw const FormatException('标签颜色不支持。'),
               ),
+        icon == null || icon.isEmpty ? null : icon,
       );
     }
     // v1 had no automatic balance linkage. Never replay its historical entries.
@@ -206,6 +210,7 @@ class LedgerStore {
           previous.kind,
           previous.parentId,
           previous.color ?? preset.color,
+          previous.icon,
         );
       } else if ((preset.parentId == null ||
               upgraded[preset.parentId]?.kind == preset.kind) &&

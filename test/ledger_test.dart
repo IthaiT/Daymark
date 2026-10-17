@@ -1144,4 +1144,44 @@ void main() {
       }
     },
   );
+  test('category icons round trip, clear and survive unknown names', () async {
+    await ledger.saveCategory(
+      '咖啡',
+      MoneyKind.expense,
+      'food',
+      icon: 'local_cafe',
+    );
+    final coffee = store.state.categories.values.singleWhere(
+      (item) => item.name == '咖啡',
+    );
+    expect(coffee.icon, 'local_cafe');
+    final saved =
+        jsonDecode(await store.file.readAsString()) as Map<String, Object?>;
+    expect(saved['categories'], contains(containsPair('icon', 'local_cafe')));
+    final reopened = LedgerStore.decode(
+      jsonDecode(await store.file.readAsString()),
+    );
+    expect(reopened.categories[coffee.id]!.icon, 'local_cafe');
+
+    // A newer icon name must not make the whole ledger unreadable.
+    final payload =
+        jsonDecode(await store.file.readAsString()) as Map<String, Object?>;
+    final rows = (payload['categories']! as List<Object?>)
+        .cast<Map<String, Object?>>();
+    rows.firstWhere((row) => row['id'] == coffee.id)['icon'] = 'future_icon';
+    final tolerant = LedgerStore.decode(payload);
+    expect(tolerant.categories[coffee.id]!.icon, 'future_icon');
+
+    // Saving without the picker keeps the icon; inheriting clears it.
+    await ledger.saveCategory('拿铁', MoneyKind.expense, 'lunch', id: coffee.id);
+    expect(store.state.categories[coffee.id]!.icon, 'local_cafe');
+    await ledger.saveCategory(
+      '拿铁',
+      MoneyKind.expense,
+      'lunch',
+      id: coffee.id,
+      inheritIcon: true,
+    );
+    expect(store.state.categories[coffee.id]!.icon, isNull);
+  });
 }

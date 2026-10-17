@@ -95,4 +95,60 @@ void main() {
     );
     expect(ledgerCategoryIcon(custom, 'custom'), Icons.label_outline);
   });
+
+  test('explicit icons win, children inherit and unknown names fall back', () {
+    const coffee = MoneyCategory(
+      'food',
+      '餐饮',
+      MoneyKind.expense,
+      null,
+      null,
+      'local_cafe',
+    );
+    final withIcon = state.copyWith(
+      categories: {...state.categories, 'food': coffee},
+    );
+    expect(ledgerCategoryIcon(withIcon, 'food'), Icons.local_cafe_outlined);
+    expect(ledgerCategoryIcon(withIcon, 'lunch'), Icons.local_cafe_outlined);
+
+    // A child's own icon overrides the inherited one.
+    final childIcon = withIcon.copyWith(
+      categories: {
+        ...withIcon.categories,
+        'lunch': const MoneyCategory(
+          'lunch',
+          '午餐',
+          MoneyKind.expense,
+          'food',
+          null,
+          'ramen_dining',
+        ),
+      },
+    );
+    expect(ledgerCategoryIcon(childIcon, 'lunch'), Icons.ramen_dining_outlined);
+    expect(ledgerCategoryIcon(childIcon, 'dinner'), Icons.local_cafe_outlined);
+
+    final unknown = state.copyWith(
+      categories: {
+        ...state.categories,
+        'food': const MoneyCategory(
+          'food',
+          '餐饮',
+          MoneyKind.expense,
+          null,
+          null,
+          'not_a_real_icon',
+        ),
+      },
+    );
+    expect(ledgerCategoryIcon(unknown, 'lunch'), Icons.restaurant_outlined);
+
+    final cleared = state.copyWith(
+      categories: {
+        ...state.categories,
+        'food': const MoneyCategory('food', '餐饮', MoneyKind.expense),
+      },
+    );
+    expect(ledgerCategoryIcon(cleared, 'lunch'), Icons.restaurant_outlined);
+  });
 }
