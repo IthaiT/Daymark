@@ -50,7 +50,8 @@ class TagMapView extends StatefulWidget {
     super.key,
     required this.onReady,
     required this.onChange,
-    required this.onRename,
+    required this.onSave,
+    required this.onDelete,
     required this.onError,
   });
   final VoidCallback onReady;
@@ -61,7 +62,8 @@ class TagMapView extends StatefulWidget {
     bool canRedo,
   )
   onChange;
-  final void Function(String id, String name) onRename;
+  final VoidCallback onSave;
+  final VoidCallback onDelete;
   final ValueChanged<Object> onError;
   @override
   State<TagMapView> createState() => TagMapViewState();
@@ -194,10 +196,10 @@ class TagMapViewState extends State<TagMapView> {
         } catch (error) {
           widget.onError(error);
         }
-      case 'rename':
-        final id = value['id'];
-        final name = value['name'];
-        if (id is String && name is String) widget.onRename(id, name);
+      case 'save':
+        widget.onSave();
+      case 'delete':
+        widget.onDelete();
       case 'error':
         final message = value['message'];
         widget.onError(
@@ -234,8 +236,10 @@ class TagMapViewState extends State<TagMapView> {
     'window.Daymark.addChild(${jsonEncode(parentId)}, ${jsonEncode(name)})',
   );
 
-  Future<void> rename(String id, String name) =>
-      _run('window.Daymark.rename(${jsonEncode(id)}, ${jsonEncode(name)})');
+  Future<void> beginEdit(String id) =>
+      _run('window.Daymark.beginEdit(${jsonEncode(id)})');
+
+  Future<void> endEdit() => _run('window.Daymark.endEdit()');
 
   Future<void> remove(String id) =>
       _run('window.Daymark.remove(${jsonEncode(id)})');

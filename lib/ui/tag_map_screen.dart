@@ -67,7 +67,10 @@ class TagMapScreenState extends State<TagMapScreen> {
     }
   }
 
-  void _setRoot(String? id) {
+  Future<void> _setRoot(String? id) async {
+    await _view.currentState?.endEdit();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
     widget.controller.setRoot(id);
     _reloadView(fit: true);
   }
@@ -149,6 +152,8 @@ class TagMapScreenState extends State<TagMapScreen> {
 
   Future<void> _save() async {
     if (!_mapReady || widget.controller.saving) return;
+    await _view.currentState?.endEdit();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     try {
       await widget.controller.save();
       _reloadView(fit: false);
@@ -158,65 +163,43 @@ class TagMapScreenState extends State<TagMapScreen> {
     }
   }
 
-  Future<String?> _askName({
-    required String title,
-    String initial = '',
-    String? detail,
-    String? Function(String)? validate,
-  }) => showDialog<String>(
-    context: context,
-    builder: (_) => _TagNameDialog(
-      title: title,
-      initial: initial,
-      detail: detail,
-      validate: validate,
-    ),
-  );
-
-  Future<void> _add() async {
+  Future<void> _addInline() async {
     if (!_mapReady) return;
-    final selected = widget.controller.node(_selection.id);
-    final parentId = selected?.id ?? widget.controller.rootId ?? tagTreeRootId;
-    final parentName = selected?.name ?? widget.controller.rootNode?.name;
-    final topLevel = parentId == tagTreeRootId;
-    final name = await _askName(
-      title: topLevel ? '新增一级标签' : '新增子标签',
-      initial: '新标签',
-      detail: parentName == null ? null : '添加到「$parentName」',
-      validate: (value) =>
-          widget.controller.validateName(topLevel ? null : parentId, value),
-    );
-    if (name == null) return;
-    final view = _view.currentState;
-    if (view != null) {
-      await view.addChild(parentId, name);
+    final selected = _selection.id.isNotEmpty
+        ? _selection.id
+        : (widget.controller.rootId ?? tagTreeRootId);
+    final parentId = widget.controller.node(selected) == null
+        ? tagTreeRootId
+        : selected;
+    var name = '新标签';
+    var suffix = 1;
+    while (widget.controller.validateName(
+          parentId == tagTreeRootId ? null : parentId,
+          name,
+        ) !=
+        null) {
+      suffix++;
+      name = '新标签 $suffix';
     }
-  }
-
-  Future<void> _rename(String id, String name) async {
-    if (!_mapReady) return;
-    final node = widget.controller.node(id);
-    if (node == null || id == tagTreeRootId) return;
-    final updated = await _askName(
-      title: '重命名标签',
-      initial: name,
-      validate: (value) => widget.controller.validateName(
-        widget.controller.parentIdOf(id),
-        value,
-        ignoreId: id,
-      ),
-    );
-    if (updated == null || updated == name) return;
     final view = _view.currentState;
-    if (view != null) await view.rename(id, updated);
+    if (view != null) await view.addChild(parentId, name);
   }
 
-  Future<void> _renameSelected() => _rename(_selection.id, _selection.name);
+  Future<void> _beginEdit(String id) async {
+    if (!_mapReady || id.isEmpty || id == tagTreeRootId) return;
+    final view = _view.currentState;
+    if (view != null) await view.beginEdit(id);
+  }
+
+  Future<void> _renameSelected() => _beginEdit(_selection.id);
 
   Future<void> _deleteSelected() async {
     if (!_mapReady || _selection.id.isEmpty || _selection.id == tagTreeRootId) {
       return;
     }
+    await _view.currentState?.endEdit();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
     final blocker = widget.controller.deleteBlocker(_selection.id);
     if (blocker != null) {
       _showMessage(blocker);
@@ -253,11 +236,15 @@ class TagMapScreenState extends State<TagMapScreen> {
 
   Future<void> _undo() async {
     if (!_canUndo) return;
+    await _view.currentState?.endEdit();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
     await _view.currentState?.undo();
   }
 
   Future<void> _redo() async {
     if (!_canRedo) return;
+    await _view.currentState?.endEdit();
+    await Future<void>.delayed(const Duration(milliseconds: 60));
     await _view.currentState?.redo();
   }
 
@@ -284,11 +271,6 @@ class TagMapScreenState extends State<TagMapScreen> {
               unawaited(_renameSelected()),
           const SingleActivator(LogicalKeyboardKey.delete): () =>
               unawaited(_deleteSelected()),
-          // Tab must not create a node or land on "add" by accident.
-          const SingleActivator(LogicalKeyboardKey.tab): () =>
-              _focus.requestFocus(),
-          const SingleActivator(LogicalKeyboardKey.tab, shift: true): () =>
-              _focus.requestFocus(),
         },
         child: Focus(
           focusNode: _focus,
@@ -310,8 +292,8 @@ class TagMapScreenState extends State<TagMapScreen> {
                               key: _view,
                               onReady: _viewReady,
                               onChange: _changed,
-                              onRename: (id, name) =>
-                                  unawaited(_rename(id, name)),
+                              onSave: () => unawaited(_save()),
+                              onDelete: () => unawaited(_deleteSelected()),
                               onError: _showError,
                             ),
                           ),
@@ -352,7 +334,7 @@ class TagMapScreenState extends State<TagMapScreen> {
               ),
               const SizedBox(height: 2),
               Text(
-                '拖动节点调整层级 · 双击节点重命名',
+                '拖动调整层级 · Tab 新建并输入 · 双击就地改名',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(
@@ -398,7 +380,7 @@ class TagMapScreenState extends State<TagMapScreen> {
         const SizedBox(width: 8),
         FilledButton.icon(
           key: const ValueKey('tag-map-save'),
-          onPressed: _mapReady && dirty && !widget.controller.saving
+          onPressed: _mapReady && !widget.controller.saving
               ? () => unawaited(_save())
               : null,
           icon: widget.controller.saving
@@ -422,7 +404,8 @@ class TagMapScreenState extends State<TagMapScreen> {
     return PopupMenuButton<String>(
       key: const ValueKey('tag-map-root'),
       tooltip: '选择根标签',
-      onSelected: (value) => _setRoot(value == _allRootValue ? null : value),
+      onSelected: (value) =>
+          unawaited(_setRoot(value == _allRootValue ? null : value)),
       itemBuilder: (context) => [
         const PopupMenuItem(value: _allRootValue, child: Text('全部标签')),
         const PopupMenuDivider(),
@@ -485,7 +468,7 @@ class TagMapScreenState extends State<TagMapScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _tool(Icons.add, '新增子标签', _mapReady ? _add : null),
+          _tool(Icons.add, '新增子标签', _mapReady ? _addInline : null),
           _tool(
             Icons.edit_outlined,
             '重命名',
@@ -552,102 +535,5 @@ class TagMapScreenState extends State<TagMapScreen> {
     onPressed: action == null ? null : () => unawaited(action()),
     icon: Icon(icon, size: 19),
     style: IconButton.styleFrom(fixedSize: const Size(36, 36)),
-  );
-}
-
-class _TagNameDialog extends StatefulWidget {
-  const _TagNameDialog({
-    required this.title,
-    required this.initial,
-    required this.validate,
-    this.detail,
-  });
-  final String title;
-  final String initial;
-  final String? detail;
-  final String? Function(String)? validate;
-  @override
-  State<_TagNameDialog> createState() => _TagNameDialogState();
-}
-
-class _TagNameDialogState extends State<_TagNameDialog> {
-  late final _name = TextEditingController(text: widget.initial);
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _name.selection = TextSelection(
-      baseOffset: 0,
-      extentOffset: widget.initial.length,
-    );
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final value = _name.text.trim();
-    final error = widget.validate?.call(value);
-    if (error != null) {
-      setState(() => _error = error);
-      return;
-    }
-    Navigator.pop(context, value);
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.title),
-    content: SizedBox(
-      width: 420,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (widget.detail != null) ...[
-            Text(
-              widget.detail!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
-          TextField(
-            key: const ValueKey('tag-name-input'),
-            controller: _name,
-            autofocus: true,
-            decoration: const InputDecoration(labelText: '标签名称'),
-            onChanged: (_) {
-              if (_error != null) setState(() => _error = null);
-            },
-            onSubmitted: (_) => _submit(),
-          ),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
-        ],
-      ),
-    ),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('取消'),
-      ),
-      FilledButton(
-        key: const ValueKey('tag-name-confirm'),
-        onPressed: _submit,
-        child: const Text('确定'),
-      ),
-    ],
   );
 }

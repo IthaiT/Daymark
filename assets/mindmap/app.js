@@ -59,6 +59,8 @@ function describe(node) {
   }
 }
 
+
+
 function selectedNode() {
   const list = mindMap?.renderer?.activeNodeList || []
   return list.find(node => !node.isGeneralization) || null
@@ -246,7 +248,8 @@ function createMap(payload) {
     enableCtrlKeyNodeSelection: false,
     isDisableDrag: false,
     enableFreeDrag: false,
-    beforeTextEdit: () => false,
+    beforeTextEdit: node =>
+      !(node && node.isRoot && idOf(node) === VIRTUAL_ROOT_ID),
     defaultInsertSecondLevelNodeText: '新标签',
     defaultInsertBelowSecondLevelNodeText: '新标签',
     expandBtnStyle: {
@@ -262,19 +265,37 @@ function createMap(payload) {
     }
   })
 
-  // Flutter owns all keyboard actions. Library shortcuts would otherwise
-  // create nodes on Tab, delete nodes on Del, etc. without confirmation.
-  mindMap.keyCommand.shortcutMap = {}
+  // Keep the mind-map keyboard flow (Tab/Enter create and edit in place) but
+  // drop destructive defaults such as Del without confirmation.
+  const keys = mindMap.keyCommand
+  keys.shortcutMap = {}
+  keys.addShortcut('Tab', () => {
+    const parent = selectedNode() || mindMap.renderer.root
+    if (!parent) return
+    addChild(idOf(parent), uniqueChildName(parent))
+  })
+  keys.addShortcut('Enter', () => {
+    const node = selectedNode()
+    if (!node || node.isRoot || !node.parent) return
+    mindMap.execCommand('INSERT_NODE', true, [node], {
+      text: uniqueChildName(node.parent),
+      _daymarkId: ''
+    })
+  })
+  keys.addShortcut('F2', () => {
+    const node = selectedNode()
+    if (node) beginEdit(idOf(node))
+  })
+  keys.addShortcut('Control+z', undo)
+  keys.addShortcut('Control+y', redo)
+  keys.addShortcut('Control+Shift+z', redo)
+  keys.addShortcut('Control+s', () => post({ type: 'save' }))
+  keys.addShortcut('Del', () => post({ type: 'delete' }))
 
   mindMap.on('data_change', scheduleEmit)
   mindMap.on('back_forward', scheduleEmit)
   mindMap.on('node_active', scheduleEmit)
   mindMap.on('node_tree_render_end', scheduleEmit)
-  mindMap.on('node_dblclick', node => {
-    if (!node) return
-    if (node.isRoot && idOf(node) === VIRTUAL_ROOT_ID) return
-    post({ type: 'rename', ...describe(node) })
-  })
 }
 
 function load(payload) {
@@ -313,34 +334,40 @@ function setColors(colors) {
   scheduleEmit()
 }
 
+
+
+function uniqueChildName(parent) {
+  const used = new Set(
+    (parent.children || []).map(child => textOf(child).trim())
+  )
+  let name = '新标签'
+  let index = 1
+  while (used.has(name)) {
+    index++
+    name = '新标签 ' + index
+  }
+  return name
+}
+
 function addChild(parentId, name) {
   if (!mindMap) return
   const parent = findNode(parentId) || mindMap.renderer.root
-  mindMap.execCommand('INSERT_CHILD_NODE', false, [parent], {
+  mindMap.execCommand('INSERT_CHILD_NODE', true, [parent], {
     text: name,
     _daymarkId: ''
   })
-  const selectInserted = () => {
-    const children = parent.children || []
-    const inserted = children[children.length - 1]
-    if (!inserted) return false
-    inserted.active?.()
-    scheduleEmit()
-    return true
-  }
-  const afterRender = () => {
-    if (selectInserted()) mindMap.off('node_tree_render_end', afterRender)
-  }
-  mindMap.on('node_tree_render_end', afterRender)
-  setTimeout(selectInserted, 200)
 }
 
-function rename(id, name) {
+function beginEdit(id) {
   const node = findNode(id)
   if (!node) return
   if (node.isRoot && idOf(node) === VIRTUAL_ROOT_ID) return
-  mindMap.execCommand('SET_NODE_TEXT', node, name, false)
-  scheduleEmit()
+  mindMap.renderer.textEdit.show({ node })
+}
+
+function endEdit() {
+  const edit = mindMap?.renderer?.textEdit
+  if (edit?.isShowTextEdit()) edit.hideEditTextBox()
 }
 
 function remove(id) {
@@ -386,7 +413,8 @@ window.Daymark = {
   load,
   setColors,
   addChild,
-  rename,
+  beginEdit,
+  endEdit,
   remove,
   undo,
   redo,
