@@ -288,6 +288,26 @@ class Store {
     _tags = desired;
   }
 
+  /// Replaces the complete tag hierarchy in one atomic write. The tag map
+  /// edits a tree in memory; nothing reaches disk until the whole hierarchy
+  /// has been validated here.
+  Future<void> replaceTags(Map<String, Tag> tags) async {
+    for (final entry in tags.entries) {
+      if (entry.key != entry.value.id) {
+        throw const FormatException('标签 ID 与记录键不匹配。');
+      }
+    }
+    validateTags(tags);
+    for (final removed in _tags.keys.where((id) => !tags.containsKey(id))) {
+      if (_events.values.any((event) => event.tagId == removed)) {
+        throw FormatException('标签「${_tags[removed]!.name}」还有事件，请先给这些事件更换标签。');
+      }
+    }
+    final desired = {for (final tag in tags.values) tag.id: tag};
+    await _writeTags(desired);
+    _tags = desired;
+  }
+
   Future<void> replaceEvents(Map<String, Event> events) async {
     for (final entry in events.entries) {
       if (entry.key != entry.value.id) {

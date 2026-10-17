@@ -6,11 +6,13 @@ import 'package:window_manager/window_manager.dart';
 import '../application/journal_controller.dart';
 import '../application/ledger_controller.dart';
 import '../application/settings_controller.dart';
+import '../application/tag_map_controller.dart';
 import '../domain/appearance.dart';
 import 'palette_picker.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
 import 'settings_dialog.dart';
+import 'tag_map_screen.dart';
 import 'title_bar.dart';
 
 class AppScreen extends StatefulWidget {
@@ -37,19 +39,25 @@ class AppScreen extends StatefulWidget {
 
 class _AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
+  final _tagMapScreen = GlobalKey<TagMapScreenState>();
   final _ledgerFocus = FocusNode();
   final _journalScope = FocusScopeNode(debugLabel: 'journal-workspace');
+  late final TagMapController _tagMap = TagMapController(widget.journal);
   int _page = 0;
   bool _visitedLedger = false;
+  bool _visitedTagMap = false;
   @override
   void dispose() {
+    _tagMap.dispose();
     _ledgerFocus.dispose();
     _journalScope.dispose();
     super.dispose();
   }
 
   void _focusPage() {
-    if (_page == 1) {
+    if (_page == 2) {
+      _tagMapScreen.currentState?.focus();
+    } else if (_page == 1) {
       _ledgerFocus.requestFocus();
     } else {
       _journalScope.requestFocus();
@@ -66,9 +74,18 @@ class _AppScreenState extends State<AppScreen> {
       return;
     }
     if (!mounted) return;
+    if (page == 2) {
+      final screen = _tagMapScreen.currentState;
+      if (screen == null) {
+        _tagMap.syncFromStore();
+      } else {
+        screen.synchronize();
+      }
+    }
     setState(() {
       _page = page;
       if (page == 1) _visitedLedger = true;
+      if (page == 2) _visitedTagMap = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusPage();
@@ -160,6 +177,8 @@ class _AppScreenState extends State<AppScreen> {
                         '记账',
                         Icons.account_balance_wallet_outlined,
                       ),
+                      const SizedBox(height: 8),
+                      _mode(context, 2, '标签导图', Icons.account_tree_outlined),
                       const Spacer(),
                       _settingsButton(context),
                       const SizedBox(height: 16),
@@ -193,6 +212,17 @@ class _AppScreenState extends State<AppScreen> {
                           ? LedgerScreen(
                               ledger: widget.ledger,
                               focusNode: _ledgerFocus,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    FocusScope(
+                      canRequestFocus: _page == 2,
+                      descendantsAreFocusable: _page == 2,
+                      descendantsAreTraversable: _page == 2,
+                      child: _visitedTagMap
+                          ? TagMapScreen(
+                              key: _tagMapScreen,
+                              controller: _tagMap,
                             )
                           : const SizedBox.shrink(),
                     ),
