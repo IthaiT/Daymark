@@ -1583,7 +1583,9 @@ class _MoveTargetDialogState extends State<_MoveTargetDialog> {
         child: const Text('取消'),
       ),
       FilledButton(
-        onPressed: () => Navigator.pop(context, (true, _target)),
+        onPressed: _target == widget.initialTarget
+            ? null
+            : () => Navigator.pop(context, (true, _target)),
         child: const Text('移动'),
       ),
     ],
