@@ -7,8 +7,5 @@ if not exist "build\windows\x64\runner\Release\daymark.exe" (
     pause
     exit /b 1
 )
-if "%~1"=="" (
-    start "" "build\windows\x64\runner\Release\daymark.exe" --data-dir "%~dp0data"
-) else (
-    start "" "build\windows\x64\runner\Release\daymark.exe" %*
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start.ps1" %*
+if errorlevel 1 pause
