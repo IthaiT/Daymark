@@ -12,6 +12,7 @@ import 'palette_picker.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
 import 'settings_dialog.dart';
+import 'statistics_screen.dart';
 import 'tag_map_screen.dart';
 import 'title_bar.dart';
 
@@ -42,20 +43,25 @@ class _AppScreenState extends State<AppScreen> {
   final _tagMapScreen = GlobalKey<TagMapScreenState>();
   final _ledgerFocus = FocusNode();
   final _journalScope = FocusScopeNode(debugLabel: 'journal-workspace');
+  final _statisticsScope = FocusScopeNode(debugLabel: 'statistics-workspace');
   late final TagMapController _tagMap = TagMapController(widget.journal);
   int _page = 0;
   bool _visitedLedger = false;
   bool _visitedTagMap = false;
+  bool _visitedStatistics = false;
   @override
   void dispose() {
     _tagMap.dispose();
     _ledgerFocus.dispose();
     _journalScope.dispose();
+    _statisticsScope.dispose();
     super.dispose();
   }
 
   void _focusPage() {
-    if (_page == 2) {
+    if (_page == 3) {
+      _statisticsScope.requestFocus();
+    } else if (_page == 2) {
       _tagMapScreen.currentState?.focus();
     } else if (_page == 1) {
       _ledgerFocus.requestFocus();
@@ -86,6 +92,7 @@ class _AppScreenState extends State<AppScreen> {
       _page = page;
       if (page == 1) _visitedLedger = true;
       if (page == 2) _visitedTagMap = true;
+      if (page == 3) _visitedStatistics = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusPage();
@@ -179,6 +186,8 @@ class _AppScreenState extends State<AppScreen> {
                       ),
                       const SizedBox(height: 8),
                       _mode(context, 2, '标签导图', Icons.account_tree_outlined),
+                      const SizedBox(height: 8),
+                      _mode(context, 3, '统计', Icons.insights_outlined),
                       const Spacer(),
                       _settingsButton(context),
                       const SizedBox(height: 16),
@@ -224,6 +233,15 @@ class _AppScreenState extends State<AppScreen> {
                               key: _tagMapScreen,
                               controller: _tagMap,
                             )
+                          : const SizedBox.shrink(),
+                    ),
+                    FocusScope(
+                      node: _statisticsScope,
+                      canRequestFocus: _page == 3,
+                      descendantsAreFocusable: _page == 3,
+                      descendantsAreTraversable: _page == 3,
+                      child: _visitedStatistics
+                          ? StatisticsScreen(journal: widget.journal)
                           : const SizedBox.shrink(),
                     ),
                   ],
