@@ -68,82 +68,92 @@ class _PickerPopupState extends State<PickerPopup> {
   }
 
   @override
-  Widget build(BuildContext context) => CompositedTransformTarget(
-    key: _anchorKey,
-    link: _link,
-    child: TapRegion(
-      groupId: widget.groupId ?? _PickerGroupScope.maybeOf(context) ?? _group,
-      child: OverlayPortal(
-        controller: _portal,
-        overlayChildBuilder: (context) {
-          final screen = MediaQuery.sizeOf(context);
-          final box =
-              _anchorKey.currentContext?.findRenderObject() as RenderBox?;
-          final position = box?.localToGlobal(Offset.zero) ?? Offset.zero;
-          final height = box?.size.height ?? 36;
-          final below = screen.height - position.dy - height - 8;
-          final above = position.dy - 8;
-          final up = below < 250 && above > below;
-          final width = widget.width.clamp(0.0, screen.width - 16);
-          final left = position.dx.clamp(8.0, screen.width - width - 8);
-          return Positioned(
-            width: width,
-            child: CompositedTransformFollower(
-              link: _link,
-              showWhenUnlinked: false,
-              targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
-              followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
-              offset: Offset(left - position.dx, up ? -4 : 4),
-              child: TapRegion(
-                groupId:
-                    widget.groupId ??
-                    _PickerGroupScope.maybeOf(context) ??
-                    _group,
-                onTapOutside: (_) => widget.onClose(),
-                child: Focus(
-                  onKeyEvent: (_, event) {
-                    if (event is KeyDownEvent &&
-                        event.logicalKey == LogicalKeyboardKey.escape) {
-                      widget.onClose();
-                      return KeyEventResult.handled;
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                  child: Material(
-                    color: widget.color,
-                    elevation: 8,
-                    borderRadius: BorderRadius.circular(12),
-                    clipBehavior: Clip.antiAlias,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: (up ? above : below).clamp(
-                          80.0,
-                          screen.height * .65,
-                        ),
-                      ),
-                      child: SingleChildScrollView(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: _PickerGroupScope(
-                            group:
-                                widget.groupId ??
-                                _PickerGroupScope.maybeOf(context) ??
-                                _group,
-                            child: widget.builder(context, widget.onClose),
+  Widget build(BuildContext context) {
+    // A popup opened from another popup joins that popup's region, so a tap
+    // inside the parent keeps both open. Its own region is what a tap elsewhere
+    // - including on the parent - dismisses, so a nested picker closes alone
+    // instead of taking the whole stack with it.
+    final parentGroup = widget.groupId ?? _PickerGroupScope.maybeOf(context);
+    return CompositedTransformTarget(
+      key: _anchorKey,
+      link: _link,
+      child: TapRegion(
+        groupId: parentGroup ?? _group,
+        child: TapRegion(
+          groupId: _group,
+          child: OverlayPortal(
+            controller: _portal,
+            overlayChildBuilder: (overlayContext) {
+              final screen = MediaQuery.sizeOf(overlayContext);
+              final box =
+                  _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+              final position = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+              final height = box?.size.height ?? 36;
+              final below = screen.height - position.dy - height - 8;
+              final above = position.dy - 8;
+              final up = below < 250 && above > below;
+              final width = widget.width.clamp(0.0, screen.width - 16);
+              final left = position.dx.clamp(8.0, screen.width - width - 8);
+              return Positioned(
+                width: width,
+                child: CompositedTransformFollower(
+                  link: _link,
+                  showWhenUnlinked: false,
+                  targetAnchor: up ? Alignment.topLeft : Alignment.bottomLeft,
+                  followerAnchor: up ? Alignment.bottomLeft : Alignment.topLeft,
+                  offset: Offset(left - position.dx, up ? -4 : 4),
+                  child: TapRegion(
+                    groupId: parentGroup ?? _group,
+                    child: TapRegion(
+                      groupId: _group,
+                      onTapOutside: (_) => widget.onClose(),
+                      child: Focus(
+                        onKeyEvent: (_, event) {
+                          if (event is KeyDownEvent &&
+                              event.logicalKey == LogicalKeyboardKey.escape) {
+                            widget.onClose();
+                            return KeyEventResult.handled;
+                          }
+                          return KeyEventResult.ignored;
+                        },
+                        child: Material(
+                          color: widget.color,
+                          elevation: 8,
+                          borderRadius: BorderRadius.circular(12),
+                          clipBehavior: Clip.antiAlias,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight: (up ? above : below).clamp(
+                                80.0,
+                                screen.height * .65,
+                              ),
+                            ),
+                            child: SingleChildScrollView(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: _PickerGroupScope(
+                                  group: _group,
+                                  child: widget.builder(
+                                    overlayContext,
+                                    widget.onClose,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          );
-        },
-        child: widget.anchor,
+              );
+            },
+            child: widget.anchor,
+          ),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _PickerGroupScope extends InheritedWidget {

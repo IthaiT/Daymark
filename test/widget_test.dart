@@ -1233,6 +1233,28 @@ void main() {
     expect(journal.store.events['a']!.start, DateTime.utc(2026, 10, 7, 9, 15));
   });
 
+  testWidgets('tapping the parent popup closes only the nested time picker', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'start'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextField, '时间'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TimeChoices), findsOneWidget);
+    // The open time picker covers most of its parent, so tap the uncovered
+    // right edge of the parent's date field instead of its centre.
+    final popup = tester.getRect(find.byType(DateTimeChoices));
+    await tester.tapAt(Offset(popup.right - 20, popup.top + 20));
+    await tester.pumpAndSettle();
+    expect(find.byType(TimeChoices), findsNothing);
+    expect(find.byType(DateTimeChoices), findsOneWidget);
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    expect(input('a', 'start'), findsOneWidget);
+  });
+
   testWidgets(
     'the first overnight sleep has no undefined row or timeline block before it',
     (tester) async {
