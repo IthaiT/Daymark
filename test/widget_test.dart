@@ -1266,6 +1266,44 @@ void main() {
     expect(journal.store.events['a']!.start, DateTime.utc(2026, 10, 7, 9, 15));
   });
 
+  testWidgets('now sets the current date as well as the current time', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'end'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'end'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextField, '时间'));
+    await tester.pumpAndSettle();
+    final before = DateTime.now();
+    await tester.tap(find.text('现在'));
+    await tester.pumpAndSettle();
+    final after = DateTime.now();
+    expect(find.byType(TimeChoices), findsNothing);
+    final dateValue = tester
+        .widget<TextField>(find.widgetWithText(TextField, '日期'))
+        .controller!
+        .text;
+    final timeValue = tester
+        .widget<TextField>(find.widgetWithText(TextField, '时间'))
+        .controller!
+        .text;
+    expect(dateValue, anyOf(dateText(before), dateText(after)));
+    expect(timeValue, anyOf(clockText(before), clockText(after)));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(DateTimeChoices),
+        matching: find.text('确定'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      journal.store.events['a']!.end,
+      parseTimestamp('${dateValue}T$timeValue:00'),
+    );
+  });
+
   testWidgets('tapping the parent popup closes only the nested time picker', (
     tester,
   ) async {

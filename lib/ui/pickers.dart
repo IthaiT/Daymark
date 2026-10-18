@@ -304,14 +304,15 @@ class CalendarChoices extends StatelessWidget {
   );
 }
 
-/// Hour and minute columns with a readout of the current selection. The picked
-/// tile keeps a filled background, so a manual choice is always identifiable.
+/// Hour and minute columns. The picked tile keeps a filled background, so a
+/// manual choice is always identifiable.
 class TimeChoices extends StatefulWidget {
   const TimeChoices({
     super.key,
     required this.value,
     required this.onChoose,
     this.onChanged,
+    this.onNow,
   });
   final DateTime value;
   final ValueChanged<DateTime> onChoose;
@@ -319,6 +320,10 @@ class TimeChoices extends StatefulWidget {
   /// Reports every manual hour or minute pick, so the caller can preview the
   /// pending time while this picker stays open.
   final ValueChanged<DateTime>? onChanged;
+
+  /// Takes over the "现在" button so it can set the whole timestamp, date
+  /// included, instead of only the clock part.
+  final VoidCallback? onNow;
   @override
   State<TimeChoices> createState() => _TimeChoicesState();
 }
@@ -447,6 +452,10 @@ class _TimeChoicesState extends State<TimeChoices> {
           children: [
             TextButton(
               onPressed: () {
+                if (widget.onNow != null) {
+                  widget.onNow!();
+                  return;
+                }
                 final now = DateTime.now();
                 setState(() {
                   _hour = now.hour;
@@ -636,6 +645,17 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
           // Show the pending hour and minute in the field at once, so Enter
           // confirms exactly the time that was just picked.
           onChanged: (value) => _time.text = clockText(value),
+          // A record created while viewing an older day belongs to today once
+          // its time is set to now, so both fields follow the wall clock.
+          onNow: () {
+            final now = DateTime.now();
+            setState(() {
+              _date.text = dateText(now);
+              _time.text = clockText(now);
+              _clock = false;
+              _error = null;
+            });
+          },
           onChoose: (value) {
             _time.text = clockText(value);
             close();
