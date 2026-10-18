@@ -1155,7 +1155,7 @@ void main() {
     },
   );
 
-  testWidgets('hour-minute choices mark the picked value and read it back', (
+  testWidgets('hour-minute choices keep the picked value marked', (
     tester,
   ) async {
     DateTime? chosen;
@@ -1173,17 +1173,15 @@ void main() {
     );
     Color? tileColor(String key) =>
         tester.widget<Material>(find.byKey(ValueKey(key))).color;
-    expect(find.text('13:05'), findsOneWidget);
     expect(tileColor('time-hour-13'), isNot(Colors.transparent));
     expect(tileColor('time-hour-12'), Colors.transparent);
     await tester.tap(find.byKey(const ValueKey('time-hour-14')));
     await tester.pumpAndSettle();
-    expect(find.text('14:05'), findsOneWidget);
     expect(tileColor('time-hour-14'), isNot(Colors.transparent));
     expect(tileColor('time-hour-13'), Colors.transparent);
     await tester.tap(find.byKey(const ValueKey('time-minute-4')));
     await tester.pumpAndSettle();
-    expect(find.text('14:04'), findsOneWidget);
+    expect(tileColor('time-minute-4'), isNot(Colors.transparent));
     await tester.tap(find.text('确定'));
     await tester.pumpAndSettle();
     expect(chosen, DateTime.utc(2026, 10, 7, 14, 4));

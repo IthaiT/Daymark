@@ -412,19 +412,6 @@ class _TimeChoicesState extends State<TimeChoices> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          key: const ValueKey('time-readout'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(
-            clockText(_time),
-            style: theme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
-          ),
-        ),
-        const SizedBox(height: 10),
         Row(
           children: [
             for (final hours in [true, false])
