@@ -258,13 +258,18 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       );
   }
 
-  Future<void> _moveSelected() async {
+  Future<void> _moveSelected(_StatsNode node) async {
     if (_selectedEvents.isEmpty) return;
     final store = widget.journal.store;
     final ids = {..._selectedEvents};
+    final initial = node.isGap || node.isUnclassified ? null : node.id;
     final result = await showDialog<(bool, String?)>(
       context: context,
-      builder: (_) => _MoveTargetDialog(store: store, count: ids.length),
+      builder: (_) => _MoveTargetDialog(
+        store: store,
+        count: ids.length,
+        initialTarget: initial,
+      ),
     );
     if (result == null || !result.$1 || !mounted) return;
     try {
@@ -871,7 +876,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                     ),
                   ),
           ),
-          if (_editing) _selectionBar(context),
+          if (_editing) _selectionBar(context, node),
         ],
       ),
     );
@@ -1360,7 +1365,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
-  Widget _selectionBar(BuildContext context) {
+  Widget _selectionBar(BuildContext context, _StatsNode node) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 7, 12, 8),
@@ -1388,7 +1393,9 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             child: const Text('取消'),
           ),
           FilledButton(
-            onPressed: _selectedEvents.isEmpty ? null : _moveSelected,
+            onPressed: _selectedEvents.isEmpty
+                ? null
+                : () => _moveSelected(node),
             child: const Text('移动到标签…'),
           ),
         ],
@@ -1532,15 +1539,20 @@ class _StatsNode {
 }
 
 class _MoveTargetDialog extends StatefulWidget {
-  const _MoveTargetDialog({required this.store, required this.count});
+  const _MoveTargetDialog({
+    required this.store,
+    required this.count,
+    this.initialTarget,
+  });
   final Store store;
   final int count;
+  final String? initialTarget;
   @override
   State<_MoveTargetDialog> createState() => _MoveTargetDialogState();
 }
 
 class _MoveTargetDialogState extends State<_MoveTargetDialog> {
-  String? _target;
+  late String? _target = widget.initialTarget;
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: Text('移动 ${widget.count} 条事件'),

@@ -105,6 +105,11 @@ void main() {
     await tester.tap(find.text('移动到标签…'));
     await tester.pumpAndSettle();
     expect(find.text('移动 1 条事件'), findsOneWidget);
+    final dialog = find.byType(AlertDialog);
+    await tester.tap(find.descendant(of: dialog, matching: find.text('主业')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tag-choice-unclassified')));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('移动'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 100));
