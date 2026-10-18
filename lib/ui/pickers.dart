@@ -578,14 +578,12 @@ class DateTimeChoices extends StatefulWidget {
 }
 
 class _DateTimeChoicesState extends State<DateTimeChoices> {
-  late final _date = TextEditingController(text: dateText(widget.value));
   late final _time = TextEditingController(text: clockText(widget.value));
-  bool _dayOpen = false;
+  late DateTime _day = dayStart(widget.value);
   bool _clock = false;
   String? _error;
   @override
   void dispose() {
-    _date.dispose();
     _time.dispose();
     super.dispose();
   }
@@ -593,38 +591,47 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
   void _confirm() {
     try {
       widget.onChoose(
-        parseTimestamp('${_date.text.trim()}T${_time.text.trim()}:00'),
+        parseTimestamp('${dateText(_day)}T${_time.text.trim()}:00'),
       );
     } on FormatException catch (error) {
       setState(() => _error = error.message);
     }
   }
 
+  /// The chosen day can fall outside the three choices, for example when the
+  /// wall clock moves an old record to today, so keep it visible.
+  bool get _outsideChoices {
+    final base = dayStart(widget.day);
+    for (var offset = -1; offset <= 1; offset++) {
+      if (base.add(Duration(days: offset)) == _day) return false;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      PickerPopup(
-        open: _dayOpen,
-        width: 320,
-        onClose: () => setState(() => _dayOpen = false),
-        anchor: TextField(
-          controller: _date,
-          decoration: const InputDecoration(labelText: '日期'),
-          onSubmitted: (_) => _confirm(),
-          onTap: () => setState(() {
-            _dayOpen = true;
-            _clock = false;
-          }),
+      if (_outsideChoices)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '当前日期：${dateText(_day)}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
         ),
-        builder: (context, close) => DayChoices(
-          day: widget.day,
-          value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
-          onChoose: (value) {
-            _date.text = dateText(value);
-            close();
-          },
-        ),
+      DayChoices(
+        day: widget.day,
+        value: _day,
+        onChoose: (value) => setState(() {
+          _day = value;
+          _error = null;
+        }),
       ),
       const SizedBox(height: 12),
       PickerPopup(
@@ -635,22 +642,22 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
           controller: _time,
           decoration: const InputDecoration(labelText: '时间'),
           onSubmitted: (_) => _confirm(),
-          onTap: () => setState(() {
-            _clock = true;
-            _dayOpen = false;
-          }),
+          onTap: () => setState(() => _clock = true),
         ),
         builder: (context, close) => TimeChoices(
-          value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
+          value: pickerInitialTime(
+            '${dateText(_day)} ${_time.text}',
+            widget.value,
+          ),
           // Show the pending hour and minute in the field at once, so Enter
           // confirms exactly the time that was just picked.
           onChanged: (value) => _time.text = clockText(value),
           // A record created while viewing an older day belongs to today once
-          // its time is set to now, so both fields follow the wall clock.
+          // its time is set to now, so the day follows the wall clock too.
           onNow: () {
             final now = DateTime.now();
             setState(() {
-              _date.text = dateText(now);
+              _day = dayStart(now);
               _time.text = clockText(now);
               _clock = false;
               _error = null;

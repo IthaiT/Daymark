@@ -1080,15 +1080,14 @@ void main() {
   );
 
   testWidgets(
-    'nested date and hour-minute picker stays open, confirms complete timestamp',
+    'inline day choices and the hour-minute picker confirm one timestamp',
     (tester) async {
       await open(tester);
       await tester.tap(cell('a', 'start'));
       await tester.pumpAndSettle();
       await tester.tap(cell('a', 'start'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextField, '日期'));
-      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, '日期'), findsNothing);
       expect(find.byType(DayChoices), findsOneWidget);
       Color? dayColor(String date) => tester
           .widget<Material>(find.byKey(ValueKey('day-choice-$date')))
@@ -1100,13 +1099,8 @@ void main() {
       expect(dayColor('2026-10-06'), isNot(highlighted));
       await tester.tap(find.byKey(const ValueKey('day-choice-2026-10-06')));
       await tester.pumpAndSettle();
-      expect(find.byType(DateTimeChoices), findsOneWidget);
-      await tester.tap(find.widgetWithText(TextField, '日期'));
-      await tester.pumpAndSettle();
       expect(dayColor('2026-10-06'), highlighted);
       expect(dayColor('2026-10-07'), isNot(highlighted));
-      await tester.tap(find.byKey(const ValueKey('day-choice-2026-10-06')));
-      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextField, '时间'));
       await tester.pumpAndSettle();
       expect(find.byType(TimeChoices), findsOneWidget);
@@ -1281,16 +1275,15 @@ void main() {
     await tester.pumpAndSettle();
     final after = DateTime.now();
     expect(find.byType(TimeChoices), findsNothing);
-    final dateValue = tester
-        .widget<TextField>(find.widgetWithText(TextField, '日期'))
-        .controller!
-        .text;
     final timeValue = tester
         .widget<TextField>(find.widgetWithText(TextField, '时间'))
         .controller!
         .text;
-    expect(dateValue, anyOf(dateText(before), dateText(after)));
     expect(timeValue, anyOf(clockText(before), clockText(after)));
+    final today = dayStart(before) == dayStart(after)
+        ? dateText(before)
+        : dateText(after);
+    expect(find.text('当前日期：$today'), findsOneWidget);
     await tester.tap(
       find.descendant(
         of: find.byType(DateTimeChoices),
@@ -1300,7 +1293,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
       journal.store.events['a']!.end,
-      parseTimestamp('${dateValue}T$timeValue:00'),
+      parseTimestamp('${today}T$timeValue:00'),
     );
   });
 
@@ -1316,14 +1309,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(TimeChoices), findsOneWidget);
     // The open time picker covers most of its parent, so tap the uncovered
-    // right edge of the parent's date field instead of its centre.
-    final popup = tester.getRect(find.byType(DateTimeChoices));
-    await tester.tapAt(Offset(popup.right - 20, popup.top + 20));
+    // right edge of the last day choice instead of its centre.
+    final days = tester.getRect(find.byType(DayChoices));
+    await tester.tapAt(Offset(days.right - 16, days.center.dy));
     await tester.pumpAndSettle();
     expect(find.byType(TimeChoices), findsNothing);
     expect(find.byType(DateTimeChoices), findsOneWidget);
     expect(find.byType(DayChoices), findsOneWidget);
     expect(input('a', 'start'), findsOneWidget);
+    expect(
+      tester
+          .widget<Material>(find.byKey(const ValueKey('day-choice-2026-10-08')))
+          .color,
+      Theme.of(
+        tester.element(find.byType(DayChoices)),
+      ).colorScheme.secondaryContainer,
+    );
   });
 
   testWidgets(
