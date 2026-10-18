@@ -345,6 +345,32 @@ class JournalController extends ChangeNotifier {
     }
     await _apply(events, drafts);
   });
+
+  /// Moves regular events to [tagId] in one transaction: a single atomic
+  /// write and a single undo entry. Undefined gap rows cannot carry a tag and
+  /// are skipped, as are ids that are not stored events.
+  Future<void> setEventTag(Iterable<String> ids, String? tagId) =>
+      _run(() async {
+        if (tagId != null && !store.tags.containsKey(tagId)) {
+          throw const FormatException('目标标签不存在。');
+        }
+        final wanted = ids.toSet();
+        if (wanted.isEmpty) return;
+        final events = {...store.events};
+        var changed = false;
+        for (final id in wanted) {
+          final event = events[id];
+          if (event == null || event.isUndefined || event.tagId == tagId) {
+            continue;
+          }
+          final next = event.copyWith(tagId: tagId, clearTag: tagId == null);
+          store.validateEvent(next, allowIncomplete: event.end == null);
+          events[id] = next;
+          changed = true;
+        }
+        if (changed) await _apply(events, _drafts);
+      });
+
   Future<void> deleteSelected() => _run(() async {
     final ids = {..._selected};
     final events = {...store.events}
