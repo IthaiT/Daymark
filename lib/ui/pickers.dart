@@ -470,14 +470,98 @@ class _TimeChoicesState extends State<TimeChoices> {
   }
 }
 
+/// The day before, the viewed day itself and the day after. Records never
+/// realistically start further away, so three choices beat a full calendar.
+class DayChoices extends StatelessWidget {
+  const DayChoices({
+    super.key,
+    required this.day,
+    required this.value,
+    required this.onChoose,
+  });
+
+  /// The viewed day; the choices follow it instead of the wall clock.
+  final DateTime day;
+  final DateTime value;
+  final ValueChanged<DateTime> onChoose;
+
+  static const _labels = ['昨天', '今天', '明天'];
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      for (var index = 0; index < _labels.length; index++)
+        Expanded(child: _choice(context, index)),
+    ],
+  );
+
+  Widget _choice(BuildContext context, int index) {
+    final theme = Theme.of(context).textTheme;
+    final scheme = Theme.of(context).colorScheme;
+    final date = dayStart(day).add(Duration(days: index - 1));
+    final selected = dayStart(value) == date;
+    final foreground = selected
+        ? scheme.onSecondaryContainer
+        : scheme.onSurface;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Material(
+        key: ValueKey('day-choice-${dateText(date)}'),
+        color: selected
+            ? scheme.secondaryContainer
+            : scheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: selected ? Colors.transparent : scheme.outlineVariant,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => onChoose(date),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _labels[index],
+                  style: theme.labelMedium?.copyWith(
+                    color: selected
+                        ? scheme.onSecondaryContainer
+                        : scheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${date.month.toString().padLeft(2, '0')}-'
+                  '${date.day.toString().padLeft(2, '0')}',
+                  style: theme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: foreground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class DateTimeChoices extends StatefulWidget {
   const DateTimeChoices({
     super.key,
     required this.value,
+    required this.day,
     required this.onChoose,
     required this.onCancel,
   });
   final DateTime value;
+
+  /// The viewed day that the date choices are relative to.
+  final DateTime day;
   final ValueChanged<DateTime> onChoose;
   final VoidCallback onCancel;
   @override
@@ -487,7 +571,7 @@ class DateTimeChoices extends StatefulWidget {
 class _DateTimeChoicesState extends State<DateTimeChoices> {
   late final _date = TextEditingController(text: dateText(widget.value));
   late final _time = TextEditingController(text: clockText(widget.value));
-  bool _calendar = false;
+  bool _dayOpen = false;
   bool _clock = false;
   String? _error;
   @override
@@ -512,19 +596,20 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
     mainAxisSize: MainAxisSize.min,
     children: [
       PickerPopup(
-        open: _calendar,
+        open: _dayOpen,
         width: 320,
-        onClose: () => setState(() => _calendar = false),
+        onClose: () => setState(() => _dayOpen = false),
         anchor: TextField(
           controller: _date,
           decoration: const InputDecoration(labelText: '日期'),
           onSubmitted: (_) => _confirm(),
           onTap: () => setState(() {
-            _calendar = true;
+            _dayOpen = true;
             _clock = false;
           }),
         ),
-        builder: (context, close) => CalendarChoices(
+        builder: (context, close) => DayChoices(
+          day: widget.day,
           value: pickerInitialTime('${_date.text} ${_time.text}', widget.value),
           onChoose: (value) {
             _date.text = dateText(value);
@@ -543,7 +628,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
           onSubmitted: (_) => _confirm(),
           onTap: () => setState(() {
             _clock = true;
-            _calendar = false;
+            _dayOpen = false;
           }),
         ),
         builder: (context, close) => TimeChoices(

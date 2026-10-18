@@ -316,6 +316,7 @@ class _EventEditorState extends State<_EventEditor> {
                       (start ? widget.event.start : widget.event.end) ??
                           widget.event.start.add(const Duration(hours: 1)),
                     ),
+                    day: widget.journal.day,
                     onCancel: close,
                     onChoose: (value) {
                       (start ? _start : _end).text =

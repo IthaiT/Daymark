@@ -281,6 +281,7 @@ class JournalScreenState extends State<JournalScreen> {
           key: ObjectKey(_edit),
           session: _edit!,
           store: widget.journal.store,
+          day: widget.journal.day,
           onCommit: commit,
           onCancel: () => unawaited(_cancelEdit()),
           onNext: (backwards) => unawaited(_next(backwards)),

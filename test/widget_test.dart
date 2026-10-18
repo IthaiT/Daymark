@@ -1089,31 +1089,23 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextField, '日期'));
       await tester.pumpAndSettle();
-      expect(find.byType(CalendarDatePicker), findsOneWidget);
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(CalendarDatePicker),
-              matching: find.text('6'),
-            )
-            .first,
-      );
+      expect(find.byType(DayChoices), findsOneWidget);
+      Color? dayColor(String date) => tester
+          .widget<Material>(find.byKey(ValueKey('day-choice-$date')))
+          .color;
+      final highlighted = Theme.of(
+        tester.element(find.byType(DayChoices)),
+      ).colorScheme.secondaryContainer;
+      expect(dayColor('2026-10-07'), highlighted);
+      expect(dayColor('2026-10-06'), isNot(highlighted));
+      await tester.tap(find.byKey(const ValueKey('day-choice-2026-10-06')));
       await tester.pumpAndSettle();
       expect(find.byType(DateTimeChoices), findsOneWidget);
       await tester.tap(find.widgetWithText(TextField, '日期'));
       await tester.pumpAndSettle();
-      expect(
-        tester.widget<CalendarChoices>(find.byType(CalendarChoices)).value.day,
-        6,
-      );
-      await tester.tap(
-        find
-            .descendant(
-              of: find.byType(CalendarDatePicker),
-              matching: find.text('6'),
-            )
-            .first,
-      );
+      expect(dayColor('2026-10-06'), highlighted);
+      expect(dayColor('2026-10-07'), isNot(highlighted));
+      await tester.tap(find.byKey(const ValueKey('day-choice-2026-10-06')));
       await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(TextField, '时间'));
       await tester.pumpAndSettle();
@@ -1154,6 +1146,49 @@ void main() {
       expect(journal.store.events['a']!.start, DateTime.utc(2026, 10, 6, 14));
     },
   );
+
+  testWidgets('day choices follow the viewed day instead of the wall clock', (
+    tester,
+  ) async {
+    DateTime? chosen;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: DayChoices(
+              day: DateTime.utc(2026, 10, 16),
+              value: DateTime.utc(2026, 10, 16, 8),
+              onChoose: (value) => chosen = value,
+            ),
+          ),
+        ),
+      ),
+    );
+    for (final date in ['2026-10-15', '2026-10-16', '2026-10-17']) {
+      expect(find.byKey(ValueKey('day-choice-$date')), findsOneWidget);
+    }
+    for (final label in ['昨天', '今天', '明天']) {
+      expect(find.text(label), findsOneWidget);
+    }
+    final highlighted = Theme.of(
+      tester.element(find.byType(DayChoices)),
+    ).colorScheme.secondaryContainer;
+    expect(
+      tester
+          .widget<Material>(find.byKey(const ValueKey('day-choice-2026-10-16')))
+          .color,
+      highlighted,
+    );
+    expect(
+      tester
+          .widget<Material>(find.byKey(const ValueKey('day-choice-2026-10-15')))
+          .color,
+      isNot(highlighted),
+    );
+    await tester.tap(find.byKey(const ValueKey('day-choice-2026-10-15')));
+    await tester.pumpAndSettle();
+    expect(chosen, DateTime.utc(2026, 10, 15));
+  });
 
   testWidgets('hour-minute choices keep the picked value marked', (
     tester,
@@ -1249,7 +1284,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(TimeChoices), findsNothing);
     expect(find.byType(DateTimeChoices), findsOneWidget);
-    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    expect(find.byType(DayChoices), findsOneWidget);
     expect(input('a', 'start'), findsOneWidget);
   });
 

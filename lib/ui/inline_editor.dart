@@ -51,12 +51,14 @@ class InlineEditor extends StatefulWidget {
     super.key,
     required this.session,
     required this.store,
+    required this.day,
     required this.onCommit,
     required this.onCancel,
     required this.onNext,
   });
   final EditSession session;
   final Store store;
+  final DateTime day;
   final Future<bool> Function() onCommit;
   final VoidCallback onCancel;
   final void Function(bool backwards) onNext;
@@ -175,6 +177,7 @@ class _InlineEditorState extends State<InlineEditor> {
                           : session.event.end) ??
                       session.event.start.add(const Duration(hours: 1)),
                 ),
+                day: widget.day,
                 onCancel: close,
                 onChoose: (value) {
                   session.text.text = '${dateText(value)} ${clockText(value)}';
