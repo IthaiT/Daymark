@@ -109,6 +109,12 @@ void main() {
       .widget<ChoiceChip>(find.byKey(ValueKey('granularity-$minutes')))
       .selected;
 
+  bool splitOverlapSwitch(WidgetTester tester) => tester
+      .widget<SwitchListTile>(
+        find.byKey(const ValueKey('setting-split-overlap')),
+      )
+      .value;
+
   testWidgets('dialog shows defaults and cancel changes nothing', (
     tester,
   ) async {
@@ -147,6 +153,7 @@ void main() {
       'version': 1,
       'auto_undefined': false,
       'drag_minutes': 15,
+      'split_overlap': false,
     });
 
     await tester.tap(find.byKey(const ValueKey('settings')));
@@ -214,6 +221,27 @@ void main() {
       'version': 1,
       'auto_undefined': false,
       'drag_minutes': 30,
+      'split_overlap': false,
+    });
+  });
+
+  testWidgets('split overlap switch saves the statistics policy', (
+    tester,
+  ) async {
+    await openSettings(tester);
+    expect(splitOverlapSwitch(tester), isFalse);
+    await tester.tap(find.byKey(const ValueKey('setting-split-overlap')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('save-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('设置'), findsNothing);
+    expect(journal.splitOverlap, isTrue);
+    expect(jsonDecode(savedSettings!), {
+      'version': 1,
+      'auto_undefined': true,
+      'drag_minutes': 1,
+      'split_overlap': true,
     });
   });
 }

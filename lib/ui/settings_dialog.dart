@@ -23,6 +23,7 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> {
   late bool _autoUndefined = widget.settings.autoUndefined;
   late int _dragMinutes = widget.settings.dragMinutes;
+  late bool _splitOverlap = widget.settings.splitOverlap;
   bool _saving = false;
   String? _error;
 
@@ -34,7 +35,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     });
     try {
       await widget.onSave(
-        AppSettings(autoUndefined: _autoUndefined, dragMinutes: _dragMinutes),
+        AppSettings(
+          autoUndefined: _autoUndefined,
+          dragMinutes: _dragMinutes,
+          splitOverlap: _splitOverlap,
+        ),
       );
       if (mounted) Navigator.pop(context);
     } catch (error) {
@@ -91,6 +96,21 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                           : (_) => setState(() => _dragMinutes = minutes),
                     ),
                 ],
+              ),
+              const Divider(height: 24),
+              Text('统计口径', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SwitchListTile(
+                key: const ValueKey('setting-split-overlap'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('并行时段平均分摊'),
+                subtitle: const Text(
+                  '同时进行的多个事件平均分配重叠的时间：8:00–12:00 内 4 件并行事件各计 1 小时。关闭后每个标签仍按整段时间完整计入。',
+                ),
+                value: _splitOverlap,
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() => _splitOverlap = value),
               ),
               if (_error != null)
                 Padding(

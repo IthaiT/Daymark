@@ -43,6 +43,7 @@ void main() {
       'version': 1,
       'auto_undefined': false,
       'drag_minutes': 15,
+      'split_overlap': false,
     });
     expect(
       (await directory.list().toList()).map(
@@ -50,6 +51,16 @@ void main() {
       ),
       ['settings.json'],
     );
+  });
+
+  test('split overlap preference survives a reopen', () async {
+    final store = await SettingsStore.open(directory);
+    final controller = SettingsController(store);
+    addTearDown(controller.dispose);
+    await controller.update(const AppSettings(splitOverlap: true));
+    final reopened = await SettingsStore.open(directory);
+    expect(reopened.state.splitOverlap, isTrue);
+    expect(reopened.state, const AppSettings(splitOverlap: true));
   });
 
   test('unknown or missing values fall back to the defaults', () async {

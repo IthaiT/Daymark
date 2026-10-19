@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/settings.dart';
 import 'package:daymark/ui/statistics_screen.dart';
 import 'package:daymark/ui/theme.dart';
 import 'package:flutter/material.dart';
@@ -117,6 +118,52 @@ void main() {
 
     expect(journal.store.events['work']!.tagId, isNull);
     expect(find.textContaining('已移动 1 条事件'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('split overlap setting shares parallel time between tags', (
+    tester,
+  ) async {
+    final store = journal.store;
+    journal.dispose();
+    await store.replaceEvents({});
+    await store.replaceTags({
+      for (var index = 0; index < 4; index++)
+        'parallel-$index': Tag('parallel-$index', '并行 $index'),
+    });
+    await store.replaceEvents({
+      for (var index = 0; index < 4; index++)
+        'p-$index': Event(
+          'p-$index',
+          '并行事件 $index',
+          'parallel-$index',
+          monday.add(const Duration(hours: 8)),
+          monday.add(const Duration(hours: 12)),
+        ),
+    });
+    journal = JournalController(
+      store,
+      day: monday,
+      clock: () => monday.add(const Duration(days: 6, hours: 20)),
+    );
+    await journal.initialize();
+    tester.view.physicalSize = const Size(1360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: daymarkTheme(),
+        home: Scaffold(body: StatisticsScreen(journal: journal)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('4h'), findsWidgets);
+
+    await journal.applySettings(const AppSettings(splitOverlap: true));
+    await tester.pumpAndSettle();
+    expect(find.text('4h'), findsNothing);
+    expect(find.text('1h'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 }

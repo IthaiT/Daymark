@@ -124,6 +124,98 @@ void main() {
     expect(totals.take(6), everyElement(Duration.zero));
   });
 
+  test(
+    'shared accounting divides an overlapped span between parallel events',
+    () {
+      final events = [
+        for (var index = 0; index < 4; index++)
+          event(
+            'parallel-$index',
+            DateTime.utc(2026, 10, 12, 8),
+            DateTime.utc(2026, 10, 12, 12),
+            tag: 'tag-$index',
+          ),
+      ];
+      for (final single in events) {
+        expect(
+          durationIn(week, [single]),
+          const Duration(hours: 4),
+          reason: 'the default accounting counts the whole span per tag',
+        );
+      }
+      final profile = ConcurrencyProfile.of(week, events);
+      expect(profile.hasOverlap, isTrue);
+      expect(profile.durationOf(events), const Duration(hours: 4));
+      for (final single in events) {
+        expect(profile.durationOf([single]), const Duration(hours: 1));
+      }
+    },
+  );
+
+  test('shared accounting only divides the actually overlapped part', () {
+    final morning = event(
+      'morning',
+      DateTime.utc(2026, 10, 12, 8),
+      DateTime.utc(2026, 10, 12, 12),
+    );
+    final noon = event(
+      'noon',
+      DateTime.utc(2026, 10, 12, 10),
+      DateTime.utc(2026, 10, 12, 14),
+    );
+    final evening = event(
+      'evening',
+      DateTime.utc(2026, 10, 12, 15),
+      DateTime.utc(2026, 10, 12, 16),
+    );
+    final profile = ConcurrencyProfile.of(week, [morning, noon, evening]);
+    expect(profile.durationOf([morning]), const Duration(hours: 3));
+    expect(profile.durationOf([noon]), const Duration(hours: 3));
+    expect(profile.durationOf([evening]), const Duration(hours: 1));
+    expect(
+      profile.durationOf([morning, noon, evening]),
+      const Duration(hours: 7),
+    );
+  });
+
+  test('shared heat grid scales every hour by the parallel count', () {
+    final events = [
+      for (var index = 0; index < 4; index++)
+        event(
+          'parallel-$index',
+          DateTime.utc(2026, 10, 12, 8),
+          DateTime.utc(2026, 10, 12, 12),
+        ),
+    ];
+    final profile = ConcurrencyProfile.of(week, events);
+    final single = profile.heatOf([events.first]);
+    for (var hour = 8; hour < 12; hour++) {
+      expect(single[0][hour], const Duration(minutes: 15));
+    }
+    expect(single[0][7], Duration.zero);
+    expect(single[0][12], Duration.zero);
+    // The whole group still covers the real wall-clock hour once.
+    final all = profile.heatOf(events);
+    for (var hour = 8; hour < 12; hour++) {
+      expect(all[0][hour], const Duration(hours: 1));
+    }
+  });
+
+  test('shared weekly totals split the same way', () {
+    final events = [
+      for (var index = 0; index < 2; index++)
+        event(
+          'parallel-$index',
+          DateTime.utc(2026, 10, 12, 9),
+          DateTime.utc(2026, 10, 12, 10),
+        ),
+    ];
+    final totals = splitWeeklyTotals(week, events, [events.first]);
+    expect(totals.length, 8);
+    expect(totals.last, const Duration(minutes: 30));
+    expect(totals[6], Duration.zero);
+  });
+
   test('event list includes overlaps and sorts newest first', () {
     final events = [
       event(

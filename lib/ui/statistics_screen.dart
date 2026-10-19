@@ -872,7 +872,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
                       padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
                       itemCount: events.length,
                       itemBuilder: (context, index) =>
-                          _eventRow(context, events[index]),
+                          _eventRow(context, model, events[index]),
                     ),
                   ),
           ),
@@ -901,7 +901,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         : '占${_hidden.isEmpty ? _periodWord : '当前视图'} $share%';
     final direct = kids.isEmpty
         ? Duration.zero
-        : durationIn(model.window, node.directEvents);
+        : model.durationOf(node.directEvents);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1089,7 +1089,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         const SizedBox(height: 14),
         Text('时段分布', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: 6),
-        _heatmap(context, model.window, node),
+        _heatmap(context, model, node),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -1104,7 +1104,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           ],
         ),
         const SizedBox(height: 6),
-        _trend(context, model.window, node),
+        _trend(context, model, node),
       ],
     );
   }
@@ -1122,9 +1122,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     return names.reversed.join(' › ');
   }
 
-  Widget _heatmap(BuildContext context, StatsWindow window, _StatsNode node) {
+  Widget _heatmap(BuildContext context, _StatsModel model, _StatsNode node) {
     final scheme = Theme.of(context).colorScheme;
-    final grid = heatGrid(window, node.events);
+    final grid = model.splitOverlap
+        ? model.profile.heatOf(node.events)
+        : heatGrid(model.window, node.events);
     var maxMinutes = 0;
     for (final row in grid) {
       for (final value in row) {
@@ -1198,15 +1200,17 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
-  Widget _trend(BuildContext context, StatsWindow window, _StatsNode node) {
+  Widget _trend(BuildContext context, _StatsModel model, _StatsNode node) {
     final scheme = Theme.of(context).colorScheme;
-    final totals = weeklyTotals(window, node.events);
+    final totals = model.splitOverlap
+        ? splitWeeklyTotals(model.window, model.allEvents, node.events)
+        : weeklyTotals(model.window, node.events);
     final max = totals.fold(
       Duration.zero,
       (value, item) => item > value ? item : value,
     );
     final lastDay = dayStart(
-      window.toExclusive.subtract(const Duration(days: 1)),
+      model.window.toExclusive.subtract(const Duration(days: 1)),
     );
     final lastMonday = lastDay.subtract(Duration(days: lastDay.weekday - 1));
     return Row(
@@ -1270,9 +1274,16 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
   }
 
-  Widget _eventRow(BuildContext context, Event event) {
+  Widget _eventRow(BuildContext context, _StatsModel model, Event event) {
     final scheme = Theme.of(context).colorScheme;
     final selected = _selectedEvents.contains(event.id);
+    // Under shared accounting the row shows what the event actually owns, so
+    // the listed durations add up to the same total as the tag rows.
+    final duration = model.splitOverlap
+        ? model.profile.durationOf([event])
+        : event.end == null
+        ? Duration.zero
+        : event.end!.difference(event.start);
     return Material(
       color: selected
           ? scheme.primary.withValues(alpha: .08)
@@ -1346,11 +1357,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               SizedBox(
                 width: 42,
                 child: Text(
-                  _compact(
-                    event.end == null
-                        ? Duration.zero
-                        : event.end!.difference(event.start),
-                  ),
+                  _compact(duration),
                   textAlign: TextAlign.right,
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     fontSize: 10,
@@ -1406,6 +1413,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   _StatsModel _buildModel(BuildContext context) {
     final store = widget.journal.store;
     final window = StatsWindow.days(_from, _to);
+    final splitOverlap = widget.journal.settings.splitOverlap;
+    // Every event decides how much of an instant each tag may own, so the
+    // profile is built once from the whole store and shared by all nodes.
+    final allEvents = store.events.values.toList();
+    final profile = ConcurrencyProfile.of(window, allEvents);
+    final previousProfile = ConcurrencyProfile.of(window.previous, allEvents);
     final nodes = <String, _StatsNode>{};
     final byTag = <String, List<Event>>{};
     for (final event in store.events.values) {
@@ -1427,8 +1440,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         name: tag.name,
         parentId: tag.parentId,
         color: tagDot(context, store, tag.id),
-        duration: durationIn(window, events),
-        previous: durationIn(window.previous, events),
+        duration: splitOverlap
+            ? profile.durationOf(events)
+            : durationIn(window, events),
+        previous: splitOverlap
+            ? previousProfile.durationOf(events)
+            : durationIn(window.previous, events),
         children: children,
         events: events,
         directEvents: direct,
@@ -1457,8 +1474,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       name: '未分类',
       parentId: null,
       color: Colors.blueGrey.shade400,
-      duration: durationIn(window, unclassifiedEvents),
-      previous: durationIn(window.previous, unclassifiedEvents),
+      duration: splitOverlap
+          ? profile.durationOf(unclassifiedEvents)
+          : durationIn(window, unclassifiedEvents),
+      previous: splitOverlap
+          ? previousProfile.durationOf(unclassifiedEvents)
+          : durationIn(window.previous, unclassifiedEvents),
       children: const [],
       events: unclassifiedEvents,
       directEvents: unclassifiedEvents,
@@ -1470,8 +1491,12 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       name: '未定义',
       parentId: null,
       color: Colors.grey.shade500,
-      duration: durationIn(window, undefinedEvents),
-      previous: durationIn(window.previous, undefinedEvents),
+      duration: splitOverlap
+          ? profile.durationOf(undefinedEvents)
+          : durationIn(window, undefinedEvents),
+      previous: splitOverlap
+          ? previousProfile.durationOf(undefinedEvents)
+          : durationIn(window.previous, undefinedEvents),
       children: const [],
       events: undefinedEvents,
       directEvents: undefinedEvents,
@@ -1493,6 +1518,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       roots: roots,
       visibleTotal: visibleTotal,
       window: window,
+      splitOverlap: splitOverlap,
+      profile: profile,
+      previousProfile: previousProfile,
+      allEvents: allEvents,
     );
   }
 }
@@ -1503,11 +1532,27 @@ class _StatsModel {
     required this.roots,
     required this.visibleTotal,
     required this.window,
+    required this.splitOverlap,
+    required this.profile,
+    required this.previousProfile,
+    required this.allEvents,
   });
   final Map<String, _StatsNode> nodes;
   final List<_StatsNode> roots;
   final Duration visibleTotal;
   final StatsWindow window;
+  final bool splitOverlap;
+  final ConcurrencyProfile profile;
+  final ConcurrencyProfile previousProfile;
+  final List<Event> allEvents;
+
+  /// Window duration of [events] under the configured accounting.
+  Duration durationOf(Iterable<Event> events) =>
+      splitOverlap ? profile.durationOf(events) : durationIn(window, events);
+
+  Duration previousOf(Iterable<Event> events) => splitOverlap
+      ? previousProfile.durationOf(events)
+      : durationIn(window.previous, events);
 }
 
 class _StatsNode {

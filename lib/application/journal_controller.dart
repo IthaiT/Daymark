@@ -43,6 +43,7 @@ class JournalController extends ChangeNotifier {
   AppSettings get settings => _settings;
   bool get autoUndefined => _settings.autoUndefined;
   int get dragMinutes => _settings.dragMinutes;
+  bool get splitOverlap => _settings.splitOverlap;
   DateTime _day;
   DateTime get day => _day;
   Map<String, Event> _drafts = {};
