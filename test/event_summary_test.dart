@@ -1,3 +1,4 @@
+import 'package:daymark/domain/event_stats.dart';
 import 'package:daymark/domain/event_summary.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,6 +97,31 @@ void main() {
       );
     },
   );
+
+  test('shared accounting divides parallel tags inside one day', () {
+    final events = [
+      for (var index = 0; index < 4; index++)
+        event('parallel-$index', '并行 $index', 'tag-$index', 480, 720),
+    ];
+    final profile = ConcurrencyProfile.of(StatsWindow.days(day, day), events);
+    final groups = eventGroups(events, day, profile: profile);
+    expect(groups.length, 4);
+    for (final group in groups) {
+      expect(group.duration, const Duration(hours: 1));
+    }
+    expect(
+      groups.fold(Duration.zero, (sum, group) => sum + group.duration),
+      const Duration(hours: 4),
+    );
+    expect(
+      eventGroups(
+        events,
+        day,
+      ).every((group) => group.duration == const Duration(hours: 4)),
+      isTrue,
+      reason: 'without a profile each tag still claims the whole span',
+    );
+  });
 
   test(
     'drafts stay separate and unfinished records contribute no invented time',

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
+import '../domain/event_stats.dart';
 import '../domain/event_summary.dart';
 import '../domain/model.dart';
 import 'theme.dart';
@@ -58,11 +59,36 @@ class EventTableState extends State<EventTable> {
     null,
   ];
 
+  /// Day-wide concurrency profile, built only when shared accounting is on.
+  /// It covers every row of the day, so a tag sees the other tags that run
+  /// in parallel with it instead of claiming the whole span.
+  ConcurrencyProfile? get _profile {
+    if (!widget.journal.splitOverlap) return null;
+    final day = widget.journal.day;
+    return ConcurrencyProfile.of(
+      StatsWindow.days(day, day),
+      widget.journal.rows,
+    );
+  }
+
   List<EventGroup> get _groups => eventGroups(
     widget.journal.rows,
     widget.journal.day,
     draftIds: widget.journal.drafts.keys.toSet(),
+    profile: _profile,
   );
+
+  /// Duration shown on one row under the summary grouping, or null when the
+  /// row keeps its own clock time (chronological mode or shared accounting
+  /// disabled).
+  Duration? _sharedDuration(Event event) {
+    if (_mode != EventTableMode.summary) return null;
+    final profile = _profile;
+    if (profile == null) return null;
+    if (event.intervalOn(widget.journal.day) == null) return null;
+    return profile.durationOf([event]);
+  }
+
   List<_TableEntry> get _entries {
     if (_mode == EventTableMode.chronological) {
       return [
@@ -221,12 +247,17 @@ class EventTableState extends State<EventTable> {
 
   Widget _eventRow(Event event, List<double> widths, {required bool nested}) {
     final interval = event.intervalOn(widget.journal.day);
+    final shared = _sharedDuration(event);
     final labels = [
       event.title.isEmpty ? '填写事件名称…' : event.title,
       _clock(event.start),
       event.end == null ? '待补全' : _clock(event.end!),
       widget.journal.store.tagName(event.tagId),
-      interval == null ? '—' : durationText(interval.duration),
+      shared != null
+          ? durationText(shared)
+          : interval == null
+          ? '—'
+          : durationText(interval.duration),
     ];
     final selected = widget.journal.selected.contains(event.id);
     return GestureDetector(
@@ -376,7 +407,9 @@ class EventTableState extends State<EventTable> {
               SizedBox(
                 width: widths[4],
                 child: Tooltip(
-                  message: group.hasOverlap
+                  message: widget.journal.splitOverlap
+                      ? '并行时段按同时进行的事件数平均分摊。'
+                      : group.hasOverlap
                       ? '仅累计当天用时，重叠时段只计一次。'
                       : '累计每段在当天的用时。',
                   child: Text(

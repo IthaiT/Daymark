@@ -1,10 +1,18 @@
+import 'event_stats.dart';
 import 'model.dart';
 
 typedef EventGroupKey = ({String? tagId, String? draftId});
 
 class EventGroup {
-  EventGroup(this.key, Iterable<Event> events, DateTime day)
-    : events = List.unmodifiable(events) {
+  /// [profile] decides how overlapped time is counted. Without it the group
+  /// counts every covered instant once; with it, parallel events share the
+  /// instant the same way the statistics workspace does.
+  EventGroup(
+    this.key,
+    Iterable<Event> events,
+    DateTime day, {
+    ConcurrencyProfile? profile,
+  }) : events = List.unmodifiable(events) {
     final intervals =
         this.events.map((event) => event.intervalOn(day)).nonNulls.toList()
           ..sort((a, b) => a.start.compareTo(b.start));
@@ -23,8 +31,8 @@ class EventGroup {
       }
     }
     if (end != null) total += end.difference(start!);
-    duration = total;
-    hasOverlap = sum > total;
+    duration = profile == null ? total : profile.durationOf(this.events);
+    hasOverlap = sum > duration;
   }
 
   final EventGroupKey key;
@@ -38,10 +46,14 @@ class EventGroup {
 }
 
 /// Group stable tag identities while preserving each record's original name.
+///
+/// [profile] must be built from the same events, otherwise a group cannot see
+/// the other tags running in parallel with it. It is usually the whole day.
 List<EventGroup> eventGroups(
   Iterable<Event> events,
   DateTime day, {
   Set<String> draftIds = const {},
+  ConcurrencyProfile? profile,
 }) {
   final buckets = <EventGroupKey, List<Event>>{};
   final ordered =
@@ -64,7 +76,7 @@ List<EventGroup> eventGroups(
   }
   return [
     for (final entry in buckets.entries)
-      EventGroup(entry.key, entry.value, day),
+      EventGroup(entry.key, entry.value, day, profile: profile),
   ]..sort((a, b) {
     if (a.isDraft != b.isDraft) return a.isDraft ? -1 : 1;
     if (a.isUnclassified != b.isUnclassified) return a.isUnclassified ? 1 : -1;

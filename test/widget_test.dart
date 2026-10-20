@@ -11,6 +11,7 @@ import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/event_summary.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/settings.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/event_table.dart';
 import 'package:daymark/ui/pickers.dart';
@@ -1781,4 +1782,38 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('summary rows follow the shared overlap setting', (tester) async {
+    final store = journal.store;
+    await store.replaceEvents({});
+    await store.replaceTags({
+      for (var index = 0; index < 4; index++)
+        'parallel-$index': Tag('parallel-$index', '并行 $index'),
+    });
+    await store.replaceEvents({
+      for (var index = 0; index < 4; index++)
+        for (final suffix in ['a', 'b'])
+          'p-$index-$suffix': Event(
+            'p-$index-$suffix',
+            '并行 $index',
+            'parallel-$index',
+            day.add(const Duration(hours: 8)),
+            day.add(const Duration(hours: 12)),
+          ),
+    });
+    await open(tester, grouped: true);
+    expect(find.text('4 小时 00 分'), findsNWidgets(4));
+
+    await journal.applySettings(const AppSettings(splitOverlap: true));
+    await tester.pumpAndSettle();
+    expect(find.text('4 小时 00 分'), findsNothing);
+    expect(find.text('1 小时 00 分'), findsNWidgets(4));
+
+    await tester.tap(group('parallel-0'));
+    await tester.pumpAndSettle();
+    expect(find.text('4 小时 00 分'), findsNothing);
+    expect(find.text('1 小时 00 分'), findsNWidgets(4));
+    expect(find.text('30 分钟'), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+  });
 }
