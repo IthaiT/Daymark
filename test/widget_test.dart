@@ -1,5 +1,6 @@
 import 'support/screenshot_fonts.dart';
 import 'package:daymark/ui/workspace_style.dart';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -28,6 +29,7 @@ void main() {
   late Directory directory;
   late JournalController journal;
   var failWrites = false;
+  Completer<void>? writeGate;
   final day = DateTime.utc(2026, 10, 7);
   setUp(() async {
     directory = await (await Directory(
@@ -35,10 +37,12 @@ void main() {
     ).create()).createTemp('widgets-');
     var initializing = true;
     failWrites = false;
+    writeGate = null;
     final store = await Store.open(
       directory,
       writer: (file, bytes) async {
         if (failWrites) throw const FileSystemException('模拟写入失败');
+        if (writeGate != null) await writeGate!.future;
         // UI interaction tests use immediate writes; real IO is covered by store tests.
         if (initializing) await AtomicFile.write(file, bytes);
       },
@@ -750,10 +754,6 @@ void main() {
       await tester.enterText(input('a', 'tag'), '主业 / 重复');
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, tag.id);
-      await key(tester, LogicalKeyboardKey.enter);
-      await key(tester, LogicalKeyboardKey.tab);
-      await key(tester, LogicalKeyboardKey.tab);
-      await key(tester, LogicalKeyboardKey.tab);
       await tester.enterText(input('a', 'tag'), '未分类');
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, isNull);
@@ -854,6 +854,220 @@ void main() {
   );
 
   testWidgets(
+    'tag Enter completion keeps the tag field focused for continued editing',
+    (tester) async {
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      for (final enter in [
+        LogicalKeyboardKey.enter,
+        LogicalKeyboardKey.numpadEnter,
+      ]) {
+        await tester.enterText(input('a', 'tag'), '主业');
+        await tester.pumpAndSettle();
+        await key(tester, LogicalKeyboardKey.arrowDown);
+        await tester.sendKeyEvent(enter);
+        await tester.pumpAndSettle();
+        expect(journal.event('a')!.tagId, 'embedded');
+        final field = tester.widget<TextField>(input('a', 'tag'));
+        expect(field.focusNode!.hasPrimaryFocus, isTrue);
+        expect(field.controller!.text, '嵌入式');
+        expect(field.controller!.selection, TextSelection.collapsed(offset: 3));
+        expect(find.byType(TagChoices), findsNothing);
+      }
+    },
+  );
+
+  testWidgets(
+    'selected event Tab cycles through cells instead of toolbar controls',
+    (tester) async {
+      await open(tester);
+      await tester.tap(cell('a', 'title'));
+      await tester.pumpAndSettle();
+      for (var index = 0; index < 12; index++) {
+        await key(tester, LogicalKeyboardKey.tab);
+        final column = ['title', 'start', 'end', 'tag'][index % 4];
+        expect(
+          tester
+              .widget<TextField>(input('a', column))
+              .focusNode!
+              .hasPrimaryFocus,
+          isTrue,
+        );
+        expect(journal.selected, {'a'});
+      }
+      for (final column in ['end', 'start', 'title', 'tag']) {
+        await key(tester, LogicalKeyboardKey.tab, shift: true);
+        expect(
+          tester
+              .widget<TextField>(input('a', column))
+              .focusNode!
+              .hasPrimaryFocus,
+          isTrue,
+        );
+      }
+    },
+  );
+
+  testWidgets('held Tab repeats stay within the selected event', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.tab);
+    await tester.pumpAndSettle();
+    for (final column in ['start', 'end', 'tag', 'title']) {
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(input('a', column)).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.tab);
+  });
+
+  testWidgets('rapid Tab commands advance in order after a pending save', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.enterText(input('a', 'title'), '连续切换');
+    final gate = Completer<void>();
+    writeGate = gate;
+    for (var index = 0; index < 3; index++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+    }
+    expect(journal.event('a')!.title, '做饭');
+    writeGate = null;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(journal.event('a')!.title, '连续切换');
+    expect(
+      tester.widget<TextField>(input('a', 'tag')).focusNode!.hasPrimaryFocus,
+      isTrue,
+    );
+  });
+
+  testWidgets(
+    'failed tag completion preserves the query and can retry without a click',
+    (tester) async {
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input('a', 'tag'), '主');
+      failWrites = true;
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(journal.event('a')!.tagId, 'life');
+      expect(tester.widget<TextField>(input('a', 'tag')).controller!.text, '主');
+      expect(
+        tester.widget<TextField>(input('a', 'tag')).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+      failWrites = false;
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(journal.event('a')!.tagId, 'work');
+      expect(
+        tester.widget<TextField>(input('a', 'tag')).controller!.text,
+        '主业',
+      );
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input('a', 'title'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'gap Tab skips derived times and completion retains the promoted row editor',
+    (tester) async {
+      await journal.store.saveEvent(
+        Event(
+          'later',
+          '晚间',
+          'work',
+          day.add(const Duration(hours: 18)),
+          day.add(const Duration(hours: 19)),
+        ),
+      );
+      await open(tester);
+      final gap = journal.rows.singleWhere((event) => event.isUndefined);
+      journal.select(gap.id);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(gap.id, 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(gap.id, 'tag'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(gap.id, 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab, shift: true);
+      await tester.enterText(input(gap.id, 'tag'), '主业');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      final id = journal.selected.single;
+      expect(id, isNot(gap.id));
+      expect(
+        tester.widget<TextField>(input(id, 'tag')).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(id, 'title'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.escape);
+      await key(tester, LogicalKeyboardKey.tab, shift: true);
+      expect(input(id, 'tag'), findsOneWidget);
+    },
+  );
+
+  testWidgets('date input keeps normal Tab navigation with a selected event', (
+    tester,
+  ) async {
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('day-input')));
+    await tester.pumpAndSettle();
+    await key(tester, LogicalKeyboardKey.tab);
+    expect(input('a', 'title'), findsNothing);
+    expect(input('a', 'tag'), findsNothing);
+  });
+
+  testWidgets(
+    'Tab edits a timeline-selected record and Escape restores arrow selection',
+    (tester) async {
+      await open(tester);
+      final rectangle = tester.getRect(find.byType(Timeline));
+      await tester.tapAt(
+        Offset(
+          rectangle.left + 24 + (rectangle.width - 50) * 14.5 / 24,
+          rectangle.top + 80,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(journal.selected, {'a'});
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(
+        tester
+            .widget<TextField>(input('a', 'title'))
+            .focusNode!
+            .hasPrimaryFocus,
+        isTrue,
+      );
+      await key(tester, LogicalKeyboardKey.escape);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(journal.selected, {'b'});
+    },
+  );
+
+  testWidgets(
     'Tab saves and opens next cell, picker Escape returns typing focus',
     (tester) async {
       await open(tester);
@@ -889,6 +1103,8 @@ void main() {
       expect(input('a', 'start'), findsOneWidget);
       expect(journal.selected, {'a'});
       expect(journal.store.events['a']!.start.hour, 13);
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input('a', 'start'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.enter);
       expect(
         tester
@@ -986,7 +1202,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagId, 'work');
     expect(find.byType(TagChoices), findsNothing);
-    await tester.tap(cell('a', 'tag'));
+    await tester.tap(input('a', 'tag'));
     await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(of: find.byType(TagChoices), matching: find.text('未分类')),
@@ -1096,6 +1312,7 @@ void main() {
     expect(journal.store.events[id]!.title, '主业');
     expect(journal.store.events[id]!.tagId, 'work');
     expect(journal.drafts, isEmpty);
+    await key(tester, LogicalKeyboardKey.escape);
     await key(tester, LogicalKeyboardKey.keyZ, control: true);
     expect(journal.drafts[id]!.title, '');
   });

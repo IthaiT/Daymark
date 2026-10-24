@@ -40,6 +40,7 @@ class JournalScreenState extends State<JournalScreen> {
   late final _date = TextEditingController(text: dateText(widget.journal.day));
   EditSession? _edit;
   Future<bool>? _committing;
+  Future<void> _keyboardTail = Future.value();
   bool _calendarOpen = false;
   EventTableMode _tableMode = EventTableMode.chronological;
   @override
@@ -133,6 +134,8 @@ class JournalScreenState extends State<JournalScreen> {
     String id,
     EventColumn column, {
     bool timeline = false,
+    bool? pickerOpen,
+    bool selectAll = true,
   }) async {
     if (!await commit() || !mounted) return;
     final event = widget.journal.event(id);
@@ -144,12 +147,13 @@ class JournalScreenState extends State<JournalScreen> {
     }
     widget.journal.select(id);
     final session = EditSession(event, column, inTimeline: timeline);
+    if (pickerOpen != null) session.pickerOpen = pickerOpen;
     setState(() => _edit = session);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && identical(_edit, session) && !session.closed) {
         session.focus.requestFocus();
         session.text.selection = TextSelection(
-          baseOffset: 0,
+          baseOffset: selectAll ? 0 : session.text.text.length,
           extentOffset: session.text.text.length,
         );
       }
@@ -183,10 +187,10 @@ class JournalScreenState extends State<JournalScreen> {
     try {
       final id = await widget.journal.addDraft(start: start);
       if (!mounted) return;
+      await _startEdit(id, EventColumn.title);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _table.currentState?.reveal(id);
-          unawaited(_startEdit(id, EventColumn.title));
         }
       });
     } catch (error) {
@@ -263,11 +267,22 @@ class JournalScreenState extends State<JournalScreen> {
     if (focused?.widget is EditableText ||
         focused?.findAncestorStateOfType<EditableTextState>() != null ||
         (event is! KeyDownEvent && event is! KeyRepeatEvent) ||
-        HardwareKeyboard.instance.isShiftPressed ||
         HardwareKeyboard.instance.isAltPressed ||
         HardwareKeyboard.instance.isMetaPressed) {
       return KeyEventResult.ignored;
     }
+    final recordFocus =
+        node.hasPrimaryFocus ||
+        focused?.findAncestorStateOfType<TimelineState>() != null;
+    if (!recordFocus) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.tab &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        widget.journal.selected.length == 1) {
+      final backwards = HardwareKeyboard.instance.isShiftPressed;
+      _queueKeyboard(() => _next(backwards));
+      return KeyEventResult.handled;
+    }
+    if (HardwareKeyboard.instance.isShiftPressed) return KeyEventResult.ignored;
     if (!HardwareKeyboard.instance.isControlPressed) {
       if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
           event.logicalKey == LogicalKeyboardKey.arrowDown) {
@@ -279,11 +294,10 @@ class JournalScreenState extends State<JournalScreen> {
         return KeyEventResult.handled;
       }
       if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.enter &&
+          (event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
           widget.journal.selected.length == 1) {
-        unawaited(
-          _startEdit(widget.journal.selected.single, EventColumn.title),
-        );
+        _queueKeyboard(() => _next(false));
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
@@ -302,15 +316,55 @@ class JournalScreenState extends State<JournalScreen> {
 
   Future<void> _next(bool backwards) async {
     final session = _edit;
-    if (session == null || !await commit()) return;
-    final index =
-        EventColumn.values.indexOf(session.column) + (backwards ? -1 : 1);
-    if (index >= 0 && index < EventColumn.values.length) {
-      await _startEdit(
-        session.committedId ?? session.event.id,
-        EventColumn.values[index],
-      );
+    var id =
+        session?.event.id ??
+        (widget.journal.selected.length == 1
+            ? widget.journal.selected.single
+            : null);
+    if (id == null || !await commit() || !mounted) return;
+    id = session?.committedId ?? id;
+    final event = widget.journal.event(id);
+    if (event == null) return;
+    final columns = [
+      for (final column in EventColumn.values)
+        if (!event.isUndefined ||
+            column == EventColumn.title ||
+            column == EventColumn.tag)
+          column,
+    ];
+    final index = session == null
+        ? (backwards ? columns.length - 1 : 0)
+        : (columns.indexOf(session.column) + (backwards ? -1 : 1)) %
+              columns.length;
+    await _startEdit(id, columns[index]);
+  }
+
+  // Evaluate each command after the preceding save/focus transition finishes.
+  // Rapid or repeated Tab events must advance from the latest editor.
+  void _queueKeyboard(Future<void> Function() action) {
+    _keyboardTail = _keyboardTail
+        .then((_) async {
+          if (mounted) await action();
+        })
+        .catchError((Object error, StackTrace stack) {
+          _showError(error);
+        });
+  }
+
+  Future<void> _completeTag() async {
+    final session = _edit;
+    if (session == null ||
+        session.column != EventColumn.tag ||
+        !await commit() ||
+        !mounted) {
+      return;
     }
+    await _startEdit(
+      session.committedId ?? session.event.id,
+      EventColumn.tag,
+      pickerOpen: false,
+      selectAll: false,
+    );
   }
 
   Widget? _editor() => _edit == null
@@ -321,8 +375,9 @@ class JournalScreenState extends State<JournalScreen> {
           store: widget.journal.store,
           day: widget.journal.day,
           onCommit: commit,
+          onCompleteTag: () => _queueKeyboard(_completeTag),
           onCancel: () => unawaited(_cancelEdit()),
-          onNext: (backwards) => unawaited(_next(backwards)),
+          onNext: (backwards) => _queueKeyboard(() => _next(backwards)),
         );
 
   Future<void> _context(Offset position, String? id, {DateTime? start}) async {
@@ -381,8 +436,12 @@ class JournalScreenState extends State<JournalScreen> {
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
-      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
-          unawaited(_add()),
+      const SingleActivator(
+        LogicalKeyboardKey.keyN,
+        control: true,
+        includeRepeats: false,
+      ): () =>
+          _queueKeyboard(_add),
       const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true): () =>
           unawaited(_action(() => widget.journal.shiftDay(-1), clear: true)),
       const SingleActivator(LogicalKeyboardKey.arrowRight, control: true): () =>

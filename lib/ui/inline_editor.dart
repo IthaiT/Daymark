@@ -58,6 +58,7 @@ class InlineEditor extends StatefulWidget {
     required this.store,
     required this.day,
     required this.onCommit,
+    required this.onCompleteTag,
     required this.onCancel,
     required this.onNext,
   });
@@ -65,6 +66,7 @@ class InlineEditor extends StatefulWidget {
   final Store store;
   final DateTime day;
   final Future<bool> Function() onCommit;
+  final VoidCallback onCompleteTag;
   final VoidCallback onCancel;
   final void Function(bool backwards) onNext;
   @override
@@ -80,7 +82,12 @@ class _InlineEditorState extends State<InlineEditor> {
   }
 
   void _submit() {
-    if (!_composing) widget.onCommit();
+    if (_composing) return;
+    if (widget.session.column == EventColumn.tag && widget.session.pickerOpen) {
+      widget.onCompleteTag();
+    } else {
+      widget.onCommit();
+    }
   }
 
   @override
@@ -98,9 +105,14 @@ class _InlineEditorState extends State<InlineEditor> {
     }
     if (_composing) return KeyEventResult.ignored;
     final session = widget.session;
+    final keyboard = HardwareKeyboard.instance;
+    final commandModifier =
+        keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed;
     if (session.column == EventColumn.tag &&
-        !HardwareKeyboard.instance.isControlPressed &&
-        !HardwareKeyboard.instance.isAltPressed &&
+        !commandModifier &&
+        !keyboard.isShiftPressed &&
         (event.logicalKey == LogicalKeyboardKey.arrowUp ||
             event.logicalKey == LogicalKeyboardKey.arrowDown)) {
       final options =
@@ -122,6 +134,10 @@ class _InlineEditorState extends State<InlineEditor> {
       }
       return KeyEventResult.handled;
     }
+    if (event.logicalKey == LogicalKeyboardKey.tab && !commandModifier) {
+      widget.onNext(keyboard.isShiftPressed);
+      return KeyEventResult.handled;
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (session.pickerOpen) {
@@ -131,13 +147,10 @@ class _InlineEditorState extends State<InlineEditor> {
       }
       return KeyEventResult.handled;
     }
-    if (event.logicalKey == LogicalKeyboardKey.tab) {
-      widget.onNext(HardwareKeyboard.instance.isShiftPressed);
-      return KeyEventResult.handled;
-    }
-    if (event.logicalKey == LogicalKeyboardKey.enter &&
+    if ((event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
         session.column == EventColumn.tag) {
-      widget.onCommit();
+      _submit();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -156,7 +169,8 @@ class _InlineEditorState extends State<InlineEditor> {
       onFocusChange: (focused) {
         if (!focused && !session.pickerOpen && !session.closed) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!session.closed &&
+            if (mounted &&
+                !session.closed &&
                 !session.focus.hasFocus &&
                 !session.pickerOpen) {
               widget.onCommit();
@@ -229,7 +243,7 @@ class _InlineEditorState extends State<InlineEditor> {
                   session.tagInputValid = true;
                   session.text.text = widget.store.tagName(value);
                   close();
-                  widget.onCommit();
+                  widget.onCompleteTag();
                 },
               )
             : DateTimeChoices(
