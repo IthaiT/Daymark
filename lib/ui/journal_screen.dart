@@ -81,7 +81,7 @@ class JournalScreenState extends State<JournalScreen> {
 
   Future<bool> _commitSession(EditSession session) async {
     try {
-      await widget.journal.editCell(
+      session.committedId = await widget.journal.editCell(
         session.event.id,
         session.column,
         session.value,
@@ -186,7 +186,7 @@ class JournalScreenState extends State<JournalScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _table.currentState?.reveal(id);
-          unawaited(_startEdit(id, EventColumn.title));
+          unawaited(_startEdit(id, EventColumn.tag));
         }
       });
     } catch (error) {
@@ -197,8 +197,7 @@ class JournalScreenState extends State<JournalScreen> {
   Future<void> _cancelEdit() async {
     final session = _edit;
     if (session == null || _committing != null) return;
-    if (session.column == EventColumn.title &&
-        widget.journal.drafts.containsKey(session.event.id)) {
+    if (widget.journal.drafts.containsKey(session.event.id)) {
       try {
         await widget.journal.discardDraft(session.event.id);
       } catch (error) {
@@ -243,17 +242,51 @@ class JournalScreenState extends State<JournalScreen> {
     }
   }
 
-  KeyEventResult _clipboardKey(FocusNode node, KeyEvent event) {
+  Future<void> _moveSelection(int direction) async {
+    if (_edit != null) return;
+    final order = _table.currentState?.selectionOrder.toList() ?? <String>[];
+    if (order.isEmpty) return;
+    final selected = widget.journal.selected;
+    final index = direction > 0
+        ? order.lastIndexWhere(selected.contains)
+        : order.indexWhere(selected.contains);
+    final next = index < 0
+        ? (direction > 0 ? 0 : order.length - 1)
+        : (index + direction).clamp(0, order.length - 1);
+    widget.journal.select(order[next]);
+    _table.currentState?.reveal(order[next]);
+    _focus.requestFocus();
+  }
+
+  KeyEventResult _tableKey(FocusNode node, KeyEvent event) {
     final focused = FocusManager.instance.primaryFocus?.context;
     if (focused?.widget is EditableText ||
         focused?.findAncestorStateOfType<EditableTextState>() != null ||
-        event is! KeyDownEvent ||
-        !HardwareKeyboard.instance.isControlPressed ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent) ||
         HardwareKeyboard.instance.isShiftPressed ||
         HardwareKeyboard.instance.isAltPressed ||
         HardwareKeyboard.instance.isMetaPressed) {
       return KeyEventResult.ignored;
     }
+    if (!HardwareKeyboard.instance.isControlPressed) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+          event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        unawaited(
+          _moveSelection(
+            event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1,
+          ),
+        );
+        return KeyEventResult.handled;
+      }
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.enter &&
+          widget.journal.selected.length == 1) {
+        unawaited(_startEdit(widget.journal.selected.single, EventColumn.tag));
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.keyC) {
       unawaited(_copy());
       return KeyEventResult.handled;
@@ -271,7 +304,10 @@ class JournalScreenState extends State<JournalScreen> {
     final index =
         EventColumn.values.indexOf(session.column) + (backwards ? -1 : 1);
     if (index >= 0 && index < EventColumn.values.length) {
-      await _startEdit(session.event.id, EventColumn.values[index]);
+      await _startEdit(
+        session.committedId ?? session.event.id,
+        EventColumn.values[index],
+      );
     }
   }
 
@@ -377,7 +413,7 @@ class JournalScreenState extends State<JournalScreen> {
     child: Focus(
       focusNode: _focus,
       autofocus: true,
-      onKeyEvent: _clipboardKey,
+      onKeyEvent: _tableKey,
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => unawaited(_clear()),

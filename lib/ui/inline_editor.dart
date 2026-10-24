@@ -25,13 +25,18 @@ class EditSession {
   final bool inTimeline;
   final TextEditingController text;
   final focus = FocusNode();
+  String? committedId;
   String? tagId;
+  bool tagInputValid = true;
   bool pickerOpen;
   bool closed = false;
   String? error;
   Object? get value => switch (column) {
     EventColumn.title => text.text,
-    EventColumn.tag => tagId,
+    EventColumn.tag =>
+      tagInputValid
+          ? tagId
+          : throw const FormatException('没有匹配的标签，请修改搜索内容或选择已有标签。'),
     EventColumn.start => parseEditorTime(text.text, event.start),
     EventColumn.end => parseEditorTime(
       text.text,
@@ -67,15 +72,47 @@ class InlineEditor extends StatefulWidget {
 }
 
 class _InlineEditorState extends State<InlineEditor> {
+  final _tagChoices = GlobalKey<TagChoicesState>();
+  String _tagQuery = '';
   @override
   void initState() {
     super.initState();
     widget.session.focus.onKeyEvent = _handleKey;
+    if (widget.session.column == EventColumn.tag) {
+      widget.session.text.text = widget.store.tagName(widget.session.tagId);
+    }
   }
 
   KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
     final session = widget.session;
+    if (session.column == EventColumn.tag &&
+        !HardwareKeyboard.instance.isControlPressed &&
+        !HardwareKeyboard.instance.isAltPressed &&
+        (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+      final options =
+          _tagChoices.currentState?.visibleIds ??
+          matchingTagIds(widget.store, _tagQuery);
+      if (options.isNotEmpty) {
+        final index = options.indexOf(session.tagId);
+        final next = index < 0
+            ? 0
+            : (index +
+                      (event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1))
+                  .clamp(0, options.length - 1);
+        setState(() {
+          session.tagId = options[next];
+          session.tagInputValid = true;
+          session.error = null;
+          session.pickerOpen = true;
+        });
+      }
+      return KeyEventResult.handled;
+    }
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       if (session.pickerOpen) {
         _closePicker();
@@ -128,14 +165,11 @@ class _InlineEditorState extends State<InlineEditor> {
         anchor: TextField(
           key: ValueKey('input-${session.event.id}-${session.column.name}'),
           groupId: session,
-          controller: session.column == EventColumn.tag ? null : session.text,
+          controller: session.text,
           focusNode: session.focus,
           autofocus: true,
-          readOnly: session.column == EventColumn.tag,
           decoration: InputDecoration(
-            hintText: session.column == EventColumn.tag
-                ? widget.store.tagName(session.tagId)
-                : null,
+            hintText: session.column == EventColumn.tag ? '输入标签名称搜索' : null,
             focusedBorder: session.error == null
                 ? null
                 : OutlineInputBorder(
@@ -151,6 +185,17 @@ class _InlineEditorState extends State<InlineEditor> {
               vertical: 6,
             ),
           ),
+          onChanged: (text) => setState(() {
+            session.error = null;
+            if (session.column == EventColumn.tag) {
+              _tagQuery = text;
+              final options = matchingTagIds(widget.store, text);
+              session.tagInputValid = options.isNotEmpty;
+              if (options.isNotEmpty) session.tagId = options.first;
+              session.pickerOpen = true;
+            }
+          }),
+          onEditingComplete: () {},
           onSubmitted: (_) => widget.onCommit(),
           onTap: session.column == EventColumn.title
               ? null
@@ -161,10 +206,14 @@ class _InlineEditorState extends State<InlineEditor> {
         ),
         builder: (context, close) => session.column == EventColumn.tag
             ? TagChoices(
+                key: _tagChoices,
                 store: widget.store,
                 selected: session.tagId,
+                query: _tagQuery,
                 onChoose: (value) {
                   session.tagId = value;
+                  session.tagInputValid = true;
+                  session.text.text = widget.store.tagName(value);
                   close();
                   widget.onCommit();
                 },

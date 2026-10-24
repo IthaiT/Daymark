@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../data/store.dart';
 import '../domain/model.dart';
+import '../domain/unicode.dart';
 import 'tag_tree_tile.dart';
 
 /// Open a picker at the current input without replacing invalid typed text.
@@ -166,6 +167,25 @@ class _PickerGroupScope extends InheritedWidget {
       group != oldWidget.group;
 }
 
+/// Search full tag paths, keeping stable IDs even when names are repeated.
+List<String?> matchingTagIds(
+  Store store,
+  String query, {
+  Set<String> excluded = const {},
+  String emptyLabel = '未分类',
+}) {
+  final needle = caseFold(query.trim());
+  return [
+    if (caseFold(emptyLabel).contains(needle)) null,
+    for (final tag in store.orderedTags())
+      if (!excluded.contains(tag.id) &&
+          caseFold(
+            store.ancestors(tag.id).map((tag) => tag.name).join(' / '),
+          ).contains(needle))
+        tag.id,
+  ];
+}
+
 class TagChoices extends StatefulWidget {
   const TagChoices({
     super.key,
@@ -174,53 +194,95 @@ class TagChoices extends StatefulWidget {
     this.selected,
     this.excluded = const {},
     this.emptyLabel = '未分类',
+    this.query = '',
   });
   final Store store;
   final ValueChanged<String?> onChoose;
   final String? selected;
   final Set<String> excluded;
   final String emptyLabel;
+  final String query;
   @override
-  State<TagChoices> createState() => _TagChoicesState();
+  State<TagChoices> createState() => TagChoicesState();
 }
 
-class _TagChoicesState extends State<TagChoices> {
+class TagChoicesState extends State<TagChoices> {
   final _collapsed = <String>{};
+  final _highlight = GlobalKey();
+
+  List<String?> get visibleIds =>
+      matchingTagIds(
+            widget.store,
+            widget.query,
+            excluded: widget.excluded,
+            emptyLabel: widget.emptyLabel,
+          )
+          .where(
+            (id) =>
+                id == null ||
+                widget.query.trim().isNotEmpty ||
+                !widget.store
+                    .ancestors(id)
+                    .take(widget.store.ancestors(id).length - 1)
+                    .any((parent) => _collapsed.contains(parent.id)),
+          )
+          .toList();
+
+  @override
+  void didUpdateWidget(TagChoices oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected ||
+        oldWidget.query != widget.query) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = _highlight.currentContext;
+        if (mounted && target != null) {
+          Scrollable.ensureVisible(target, duration: Duration.zero);
+        }
+      });
+    }
+  }
+
+  Widget _tile(String? id) => KeyedSubtree(
+    key: id == widget.selected ? _highlight : ValueKey(('tag-option', id)),
+    child: id == null
+        ? TagTreeTile(
+            key: const ValueKey('tag-choice-unclassified'),
+            store: widget.store,
+            selected: widget.selected == null,
+            label: widget.emptyLabel,
+            onTap: () => widget.onChoose(null),
+          )
+        : TagTreeTile(
+            key: ValueKey('tag-choice-$id'),
+            store: widget.store,
+            tagId: id,
+            label: widget.query.trim().isEmpty
+                ? widget.store.tagName(id)
+                : widget.store.ancestors(id).map((tag) => tag.name).join(' / '),
+            depth: widget.query.trim().isEmpty
+                ? widget.store.ancestors(id).length - 1
+                : 0,
+            selected: widget.selected == id,
+            collapsed: _collapsed.contains(id),
+            onToggle:
+                widget.query.trim().isEmpty &&
+                    widget.store.tags.values.any(
+                      (child) => child.parentId == id,
+                    )
+                ? () => setState(() {
+                    if (!_collapsed.add(id)) _collapsed.remove(id);
+                  })
+                : null,
+            onTap: () => widget.onChoose(id),
+          ),
+  );
+
   @override
   Widget build(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      TagTreeTile(
-        key: const ValueKey('tag-choice-unclassified'),
-        store: widget.store,
-        selected: widget.selected == null,
-        label: widget.emptyLabel,
-        onTap: () => widget.onChoose(null),
-      ),
-      for (final tag in widget.store.orderedTags())
-        if (!widget.excluded.contains(tag.id) &&
-            !widget.store
-                .ancestors(tag.id)
-                .take(widget.store.ancestors(tag.id).length - 1)
-                .any((parent) => _collapsed.contains(parent.id)))
-          TagTreeTile(
-            key: ValueKey('tag-choice-${tag.id}'),
-            store: widget.store,
-            tagId: tag.id,
-            label: tag.name,
-            depth: widget.store.ancestors(tag.id).length - 1,
-            selected: widget.selected == tag.id,
-            collapsed: _collapsed.contains(tag.id),
-            onToggle:
-                widget.store.tags.values.any(
-                  (child) => child.parentId == tag.id,
-                )
-                ? () => setState(() {
-                    if (!_collapsed.add(tag.id)) _collapsed.remove(tag.id);
-                  })
-                : null,
-            onTap: () => widget.onChoose(tag.id),
-          ),
+      if (visibleIds.isEmpty) const Text('没有匹配的标签'),
+      for (final id in visibleIds) _tile(id),
     ],
   );
 }

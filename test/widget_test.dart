@@ -396,11 +396,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('add-event')));
       await tester.pumpAndSettle();
       final first = journal.drafts.keys.single;
-      expect(input(first, 'title'), findsOneWidget);
+      expect(input(first, 'tag'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       final second = journal.drafts.keys.last;
       expect(journal.drafts.length, 2);
-      expect(input(second, 'title'), findsOneWidget);
+      expect(input(second, 'tag'), findsOneWidget);
       expect(cell(first, 'title'), findsOneWidget);
     },
   );
@@ -686,7 +686,8 @@ void main() {
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       expect(journal.drafts.length, 2);
       final second = journal.drafts.keys.last;
-      expect(input(second, 'title'), findsOneWidget);
+      expect(input(second, 'tag'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.escape);
       await key(tester, LogicalKeyboardKey.escape);
       expect(journal.drafts.keys, [first]);
       await tester.tap(cell(first, 'title'));
@@ -697,6 +698,101 @@ void main() {
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.drafts, isEmpty);
       expect(journal.store.events[first]!.title, '保存草稿');
+    },
+  );
+
+  testWidgets(
+    'Ctrl+N searches tags and Tab follows tag title start end without a mouse',
+    (tester) async {
+      await open(tester);
+      await key(tester, LogicalKeyboardKey.keyN, control: true);
+      final id = journal.drafts.keys.single;
+      expect(
+        tester.widget<TextField>(input(id, 'tag')).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+      await tester.enterText(input(id, 'tag'), '主业');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tag-choice-life')), findsNothing);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(journal.selected, {id});
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(journal.event(id)!.tagId, 'embedded');
+      expect(input(id, 'title'), findsOneWidget);
+      await tester.enterText(input(id, 'title'), '键盘记录');
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(id, 'start'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(id, 'end'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab, shift: true);
+      expect(input(id, 'start'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'tag search retains unmatched input and resolves duplicate paths',
+    (tester) async {
+      final tag = await journal.store.saveTag('重复', 'work');
+      await journal.store.saveTag('重复', 'life');
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input('a', 'tag'), '不存在的标签');
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input('a', 'tag'), findsOneWidget);
+      expect(journal.event('a')!.tagId, 'life');
+      expect(
+        tester.widget<TextField>(input('a', 'tag')).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+      await tester.enterText(input('a', 'tag'), '主业 / 重复');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.event('a')!.tagId, tag.id);
+      await key(tester, LogicalKeyboardKey.enter);
+      await tester.enterText(input('a', 'tag'), '未分类');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.event('a')!.tagId, isNull);
+    },
+  );
+
+  testWidgets(
+    'arrow keys select displayed rows, clamp and reveal offscreen events',
+    (tester) async {
+      await journal.store.replaceEvents({
+        for (var index = 0; index < 18; index++)
+          '$index': Event(
+            '$index',
+            '记录 $index',
+            'work',
+            day.add(Duration(hours: index)),
+            day.add(Duration(hours: index + 1)),
+          ),
+        'loose': Event(
+          'loose',
+          '未分类',
+          null,
+          day,
+          day.add(const Duration(minutes: 5)),
+        ),
+      });
+      await open(tester);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(journal.selected, {'0'});
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(journal.selected, {'0'});
+      for (var index = 1; index <= 18; index++) {
+        await key(tester, LogicalKeyboardKey.arrowDown);
+      }
+      expect(journal.selected, {'loose'});
+      expect(cell('loose', 'title').hitTestable(), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(journal.selected, {'loose'});
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(journal.selected, {'17'});
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(input('17', 'tag'), findsOneWidget);
     },
   );
 
@@ -856,7 +952,6 @@ void main() {
     final id = journal.drafts.keys.single;
     expect(journal.event(id)!.start, day.add(const Duration(hours: 15)));
     expect(journal.event(id)!.end, day.add(const Duration(hours: 16)));
-    await key(tester, LogicalKeyboardKey.tab, shift: true);
     expect(find.byType(TagChoices), findsOneWidget);
     failWrites = true;
     await tester.tap(
