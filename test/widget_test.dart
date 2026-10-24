@@ -832,14 +832,87 @@ void main() {
       expect(input('a', 'start'), findsOneWidget);
       expect(journal.selected, {'a'});
       expect(journal.store.events['a']!.start.hour, 13);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(
+        tester
+            .widget<TextField>(input('a', 'start'))
+            .focusNode!
+            .hasPrimaryFocus,
+        isTrue,
+      );
       await tester.enterText(input('a', 'start'), '12:00');
       failWrites = true;
       await key(tester, LogicalKeyboardKey.enter);
       expect(input('a', 'start'), findsOneWidget);
       expect(journal.store.events['a']!.start.hour, 13);
+      expect(
+        tester
+            .widget<TextField>(input('a', 'start'))
+            .focusNode!
+            .hasPrimaryFocus,
+        isTrue,
+      );
       failWrites = false;
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.store.events['a']!.start.hour, 12);
+    },
+  );
+
+  testWidgets(
+    'compact times and suggested end allow uninterrupted new event entry',
+    (tester) async {
+      await open(tester);
+      await key(tester, LogicalKeyboardKey.keyN, control: true);
+      final id = journal.drafts.keys.single;
+      await tester.enterText(input(id, 'tag'), 'Linux');
+      await key(tester, LogicalKeyboardKey.tab);
+      await tester.enterText(input(id, 'title'), '晚间记录');
+      await key(tester, LogicalKeyboardKey.tab);
+      await tester.enterText(input(id, 'start'), '2021');
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(
+        journal.event(id)!.start,
+        day.add(const Duration(hours: 20, minutes: 21)),
+      );
+      expect(
+        journal.event(id)!.end,
+        day.add(const Duration(hours: 21, minutes: 21)),
+      );
+      expect(
+        tester.widget<TextField>(input(id, 'end')).focusNode!.hasPrimaryFocus,
+        isTrue,
+      );
+      await tester.enterText(input(id, 'end'), '2235');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(
+        journal.event(id)!.end,
+        day.add(const Duration(hours: 22, minutes: 35)),
+      );
+      expect(input(id, 'end'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'date time popup accepts compact clocks and can correct invalid input',
+    (tester) async {
+      await open(tester);
+      await tester.tap(cell('a', 'start'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'start'));
+      await tester.pumpAndSettle();
+      final clock = find.descendant(
+        of: find.byType(DateTimeChoices),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(clock, '2460');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(find.byType(DateTimeChoices), findsOneWidget);
+      await tester.enterText(clock, '1425');
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(
+        journal.event('a')!.start,
+        day.add(const Duration(hours: 14, minutes: 25)),
+      );
     },
   );
 

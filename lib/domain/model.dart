@@ -69,6 +69,14 @@ DateTime parseDate(String text) =>
     dayStart(parseTimestamp('${text.trim()}T00:00:00'));
 DateTime parseEditorTime(String text, DateTime original) {
   text = text.trim();
+  final compact = RegExp(
+    r'^(?:(\d{4}-\d{2}-\d{2})[T ])?(\d{2})(\d{2})$',
+  ).firstMatch(text);
+  if (compact != null) {
+    text =
+        '${compact.group(1) ?? dateText(original)} '
+        '${compact.group(2)}:${compact.group(3)}';
+  }
   if (RegExp(r'^\d{2}:\d{2}$').hasMatch(text)) {
     text = '${dateText(original)} $text';
   }

@@ -10,20 +10,27 @@ import '../domain/settings.dart';
 enum EventColumn { tag, title, start, end }
 
 class JournalSnapshot {
-  JournalSnapshot(Map<String, Event> events, Map<String, Event> drafts)
-    : events = Map.unmodifiable(events),
-      drafts = Map.unmodifiable(drafts);
+  JournalSnapshot(
+    Map<String, Event> events,
+    Map<String, Event> drafts, {
+    Set<String> suggestedEndIds = const {},
+  }) : events = Map.unmodifiable(events),
+       drafts = Map.unmodifiable(drafts),
+       suggestedEndIds = Set.unmodifiable(suggestedEndIds);
   final Map<String, Event> events;
   final Map<String, Event> drafts;
+  final Set<String> suggestedEndIds;
   @override
   bool operator ==(Object other) =>
       other is JournalSnapshot &&
       mapEquals(events, other.events) &&
-      mapEquals(drafts, other.drafts);
+      mapEquals(drafts, other.drafts) &&
+      setEquals(suggestedEndIds, other.suggestedEndIds);
   @override
   int get hashCode => Object.hash(
     Object.hashAllUnordered(events.values),
     Object.hashAllUnordered(drafts.values),
+    Object.hashAllUnordered(suggestedEndIds),
   );
 }
 
@@ -47,6 +54,9 @@ class JournalController extends ChangeNotifier {
   DateTime _day;
   DateTime get day => _day;
   Map<String, Event> _drafts = {};
+  // Only fresh, automatically assigned ends follow edits to the start time.
+  // This input state stays in memory and participates in undo/redo.
+  Set<String> _suggestedEndIds = {};
   Map<String, Event> get drafts => Map.unmodifiable(_drafts);
   Set<String> _selected = {};
   Set<String> get selected => Set.unmodifiable(_selected);
@@ -80,7 +90,8 @@ class JournalController extends ChangeNotifier {
       ...store.eventsOn(day).where((event) => event.isUndefined),
   ]..sort(compareEvents);
 
-  JournalSnapshot _capture() => JournalSnapshot(store.events, _drafts);
+  JournalSnapshot _capture() =>
+      JournalSnapshot(store.events, _drafts, suggestedEndIds: _suggestedEndIds);
   Map<String, Event> _reconcile(
     Map<String, Event> events,
     Map<String, Event> drafts,
@@ -128,12 +139,17 @@ class JournalController extends ChangeNotifier {
     Map<String, Event> drafts, {
     DateTime? day,
     bool record = true,
+    Set<String>? suggestedEndIds,
   }) async {
     final before = _capture();
     final desiredDay = day ?? _day;
     final desired = _reconcile(events, drafts);
     if (!mapEquals(desired, store.events)) await store.replaceEvents(desired);
     _drafts = Map.of(drafts);
+    _suggestedEndIds = {
+      for (final id in suggestedEndIds ?? _suggestedEndIds)
+        if (events.containsKey(id) || drafts.containsKey(id)) id,
+    };
     _day = desiredDay;
     _selected = _selected
         .where((id) => rows.any((row) => row.id == id))
@@ -168,7 +184,13 @@ class JournalController extends ChangeNotifier {
     if (value.year < 1 || value.year > 9999) {
       throw const FormatException('已经到达日期范围边界。');
     }
-    await _apply(store.events, {}, day: dayStart(value), record: false);
+    await _apply(
+      store.events,
+      {},
+      day: dayStart(value),
+      record: false,
+      suggestedEndIds: {},
+    );
     clearSelection();
   });
   Future<void> shiftDay(int amount) => setDay(day.add(Duration(days: amount)));
@@ -224,7 +246,11 @@ class JournalController extends ChangeNotifier {
     );
     final id = const Uuid().v4().replaceAll('-', '');
     final draft = Event(id, '', null, interval.start, interval.end);
-    await _apply(store.events, {..._drafts, id: draft});
+    await _apply(
+      store.events,
+      {..._drafts, id: draft},
+      suggestedEndIds: {..._suggestedEndIds, id},
+    );
     select(id);
     return id;
   });
@@ -288,6 +314,13 @@ class JournalController extends ChangeNotifier {
       EventColumn.start => current.copyWith(start: value! as DateTime),
       EventColumn.end => current.copyWith(end: value! as DateTime),
     };
+    if (column == EventColumn.start &&
+        _suggestedEndIds.contains(id) &&
+        current.end != null) {
+      changed = changed.copyWith(
+        end: changed.start.add(current.end!.difference(current.start)),
+      );
+    }
     if (changed.tagId != null &&
         (changed.title.trim().isEmpty ||
             current.isUndefined && current.title == '未定义')) {
@@ -322,7 +355,13 @@ class JournalController extends ChangeNotifier {
       );
       events[id] = changed;
     }
-    await _apply(events, drafts);
+    await _apply(
+      events,
+      drafts,
+      suggestedEndIds: column == EventColumn.end
+          ? ({..._suggestedEndIds}..remove(id))
+          : null,
+    );
     select(changed.id);
     return changed.id;
   });
@@ -344,7 +383,11 @@ class JournalController extends ChangeNotifier {
       store.validateEvent(changed);
       events[changed.id] = changed;
     }
-    await _apply(events, drafts);
+    await _apply(
+      events,
+      drafts,
+      suggestedEndIds: {..._suggestedEndIds}..remove(changed.id),
+    );
   });
 
   /// Moves regular events to [tagId] in one transaction: a single atomic
@@ -390,6 +433,7 @@ class JournalController extends ChangeNotifier {
       {for (final item in snapshot.events.values) item.id: normalize(item)},
       {for (final item in snapshot.drafts.values) item.id: normalize(item)},
       record: false,
+      suggestedEndIds: snapshot.suggestedEndIds,
     );
   }
 

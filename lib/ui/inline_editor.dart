@@ -169,7 +169,11 @@ class _InlineEditorState extends State<InlineEditor> {
           focusNode: session.focus,
           autofocus: true,
           decoration: InputDecoration(
-            hintText: session.column == EventColumn.tag ? '输入标签名称搜索' : null,
+            hintText: switch (session.column) {
+              EventColumn.tag => '输入标签名称搜索',
+              EventColumn.start || EventColumn.end => '例如 2021 或 20:21',
+              EventColumn.title => null,
+            },
             focusedBorder: session.error == null
                 ? null
                 : OutlineInputBorder(

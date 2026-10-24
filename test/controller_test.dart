@@ -270,6 +270,125 @@ void main() {
     },
   );
 
+  test(
+    'suggested end follows start after naming, including midnight and undo',
+    () async {
+      final id = await controller.addDraft();
+      await controller.editCell(id, EventColumn.tag, 'work');
+      final beforeWrites = writes;
+      await controller.editCell(
+        id,
+        EventColumn.start,
+        day.add(const Duration(hours: 23, minutes: 45)),
+      );
+      expect(
+        controller.event(id)!.end,
+        day.add(const Duration(days: 1, minutes: 45)),
+      );
+      expect(writes, beforeWrites + 1);
+      await controller.undo();
+      expect(controller.event(id)!.start.hour, 12);
+      await controller.redo();
+      expect(controller.event(id)!.start.hour, 23);
+      await controller.editCell(
+        id,
+        EventColumn.end,
+        day.add(const Duration(days: 1, hours: 1)),
+      );
+      await expectLater(
+        controller.editCell(
+          id,
+          EventColumn.start,
+          day.add(const Duration(days: 1, hours: 2)),
+        ),
+        throwsFormatException,
+      );
+      await controller.undo();
+      await controller.editCell(
+        id,
+        EventColumn.start,
+        day.add(const Duration(hours: 20)),
+      );
+      expect(controller.event(id)!.end, day.add(const Duration(hours: 21)));
+    },
+  );
+
+  test(
+    'failed time write retains suggested end and explicit confirmation for retry',
+    () async {
+      final id = await controller.addDraft();
+      await controller.editCell(id, EventColumn.title, '新事件');
+      final before = await store.eventsFile.readAsBytes();
+      final original = controller.event(id)!;
+      failWrites = true;
+      await expectLater(
+        controller.editCell(
+          id,
+          EventColumn.end,
+          day.add(const Duration(hours: 14)),
+        ),
+        throwsFileSystemException,
+      );
+      await expectLater(
+        controller.editCell(
+          id,
+          EventColumn.start,
+          day.add(const Duration(hours: 20)),
+        ),
+        throwsFileSystemException,
+      );
+      expect(controller.event(id), original);
+      expect(await store.eventsFile.readAsBytes(), before);
+      failWrites = false;
+      await controller.editCell(
+        id,
+        EventColumn.start,
+        day.add(const Duration(hours: 20)),
+      );
+      expect(controller.event(id)!.end!.hour, 21);
+      await controller.editCell(
+        id,
+        EventColumn.end,
+        day.add(const Duration(hours: 22)),
+      );
+      await expectLater(
+        controller.editCell(
+          id,
+          EventColumn.start,
+          day.add(const Duration(hours: 23)),
+        ),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test(
+    'existing records and deliberately moved drafts keep their chosen end',
+    () async {
+      await store.replaceEvents({'a': item('a', 9, 10)});
+      await expectLater(
+        controller.editCell(
+          'a',
+          EventColumn.start,
+          day.add(const Duration(hours: 11)),
+        ),
+        throwsFormatException,
+      );
+      final id = await controller.addDraft();
+      await controller.updateEvent(
+        moveEventOnDay(controller.event(id)!, day, 60),
+      );
+      await expectLater(
+        controller.editCell(
+          id,
+          EventColumn.start,
+          day.add(const Duration(hours: 13)),
+        ),
+        throwsFormatException,
+      );
+    },
+  );
+
   test('tag names a generic gap but keeps a renamed gap title', () async {
     await store.replaceEvents({'a': item('a', 9, 10), 'b': item('b', 12, 13)});
     await controller.initialize();

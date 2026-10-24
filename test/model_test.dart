@@ -106,6 +106,35 @@ void main() {
   });
 
   test(
+    'editor accepts compact clock input without relaxing timestamp storage',
+    () {
+      final original = parseTimestamp('2026-10-07T20:21:35.123456');
+      for (final text in ['2021', '2026-10-07 2021', '2026-10-07T2021']) {
+        expect(parseEditorTime(text, original), original);
+      }
+      expect(parseEditorTime('0000', original), day);
+      expect(
+        parseEditorTime('2359', original),
+        day.add(const Duration(hours: 23, minutes: 59)),
+      );
+      expect(
+        parseEditorTime('2026-10-08 0905', original),
+        DateTime.utc(2026, 10, 8, 9, 5),
+      );
+      for (final invalid in [
+        '2400',
+        '2360',
+        '202',
+        '20211',
+        '2026-02-30 2021',
+      ]) {
+        expect(() => parseEditorTime(invalid, original), throwsFormatException);
+      }
+      expect(() => parseTimestamp('2026-10-07T2021:00'), throwsFormatException);
+    },
+  );
+
+  test(
     'overnight clips each day, excludes unfinished records and end at midnight',
     () {
       final night = Event(

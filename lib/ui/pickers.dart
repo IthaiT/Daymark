@@ -653,7 +653,7 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
   void _confirm() {
     try {
       widget.onChoose(
-        parseTimestamp('${dateText(_day)}T${_time.text.trim()}:00'),
+        parseEditorTime('${dateText(_day)} ${_time.text}', widget.value),
       );
     } on FormatException catch (error) {
       setState(() => _error = error.message);
@@ -702,7 +702,12 @@ class _DateTimeChoicesState extends State<DateTimeChoices> {
         onClose: () => setState(() => _clock = false),
         anchor: TextField(
           controller: _time,
-          decoration: const InputDecoration(labelText: '时间'),
+          decoration: const InputDecoration(
+            labelText: '时间',
+            hintText: '例如 2021 或 20:21',
+          ),
+          onChanged: (_) => setState(() => _error = null),
+          onEditingComplete: () {},
           onSubmitted: (_) => _confirm(),
           onTap: () => setState(() => _clock = true),
         ),
