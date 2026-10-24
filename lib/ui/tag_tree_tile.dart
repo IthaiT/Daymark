@@ -33,7 +33,8 @@ class TagTreeTile extends StatelessWidget {
     minLeadingWidth: WorkspaceStyle.tagSize,
     horizontalTitleGap: 8,
     selected: selected,
-    selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+    selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
+    selectedColor: Theme.of(context).colorScheme.onSecondaryContainer,
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
     contentPadding: EdgeInsets.only(
       left: 4 + depth * WorkspaceStyle.tagIndent,

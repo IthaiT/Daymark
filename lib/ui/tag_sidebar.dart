@@ -16,12 +16,16 @@ class TagSidebar extends StatefulWidget {
     required this.onError,
     this.tagColors = const {},
     this.onTagColorChanged,
+    this.activityTagId,
+    this.onActivityTagSelected,
   });
   final JournalController journal;
   final Future<bool> Function() beforeAction;
   final ValueChanged<Object> onError;
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
+  final String? activityTagId;
+  final ValueChanged<String>? onActivityTagSelected;
   @override
   State<TagSidebar> createState() => _TagSidebarState();
 }
@@ -168,7 +172,9 @@ class _TagSidebarState extends State<TagSidebar> {
                                 tagId: tag.id,
                                 label: tag.name,
                                 depth: store.ancestors(tag.id).length - 1,
-                                selected: _selected == tag.id,
+                                selected: widget.onActivityTagSelected == null
+                                    ? _selected == tag.id
+                                    : widget.activityTagId == tag.id,
                                 collapsed: _collapsed.contains(tag.id),
                                 onToggle: _hasChildren(store, tag)
                                     ? () => setState(() => _toggle(tag.id))
@@ -176,6 +182,13 @@ class _TagSidebarState extends State<TagSidebar> {
                                 // Tapping a parent row folds or unfolds its
                                 // subtree; leaf rows keep the selection.
                                 onTap: () async {
+                                  if (widget.onActivityTagSelected != null) {
+                                    if (await widget.beforeAction() &&
+                                        mounted) {
+                                      widget.onActivityTagSelected!(tag.id);
+                                    }
+                                    return;
+                                  }
                                   if (_hasChildren(store, tag)) {
                                     setState(() => _toggle(tag.id));
                                     return;

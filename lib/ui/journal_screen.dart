@@ -7,6 +7,7 @@ import '../application/journal_controller.dart';
 import '../domain/appearance.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/model.dart';
+import 'calendar_heatmap.dart';
 import 'dialogs.dart';
 import 'event_table.dart';
 import 'inline_editor.dart';
@@ -16,6 +17,8 @@ import 'tag_sidebar.dart';
 import 'timeline.dart';
 import 'title_bar.dart';
 import 'workspace_style.dart';
+
+enum JournalChartMode { timeline, activity }
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({
@@ -43,6 +46,26 @@ class JournalScreenState extends State<JournalScreen> {
   Future<void> _keyboardTail = Future.value();
   bool _calendarOpen = false;
   EventTableMode _tableMode = EventTableMode.chronological;
+  JournalChartMode _chartMode = JournalChartMode.timeline;
+  ActivityTag _activityTag = allActivityTags;
+
+  ActivityTag get _validActivityTag =>
+      _activityTag.id != null &&
+          !widget.journal.store.tags.containsKey(_activityTag.id)
+      ? allActivityTags
+      : _activityTag;
+
+  Future<void> _setChartMode(JournalChartMode mode) async {
+    if (_chartMode == mode || !await commit() || !mounted) return;
+    _timeline.currentState?.cancelDrag();
+    setState(() => _chartMode = mode);
+  }
+
+  Future<void> _setActivityTag(ActivityTag value) async {
+    if (!await commit() || !mounted) return;
+    setState(() => _activityTag = value);
+  }
+
   @override
   void dispose() {
     _edit?.dispose();
@@ -489,6 +512,13 @@ class JournalScreenState extends State<JournalScreen> {
                     child: WorkspaceLayout(
                       sidebar: TagSidebar(
                         journal: widget.journal,
+                        activityTagId: _validActivityTag.id,
+                        onActivityTagSelected:
+                            _chartMode == JournalChartMode.activity
+                            ? (id) => unawaited(
+                                _setActivityTag((id: id, unclassified: false)),
+                              )
+                            : null,
                         beforeAction: _beforeAction,
                         onError: _showError,
                         tagColors: widget.tagColors,
@@ -576,32 +606,68 @@ class JournalScreenState extends State<JournalScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
+                          AppSegmentedButton<JournalChartMode>(
+                            segments: const [
+                              ButtonSegment(
+                                value: JournalChartMode.timeline,
+                                label: Text('时间轴'),
+                                icon: Icon(Icons.schedule),
+                              ),
+                              ButtonSegment(
+                                value: JournalChartMode.activity,
+                                label: Text('活动热力图'),
+                                icon: Icon(Icons.calendar_view_month),
+                              ),
+                            ],
+                            selected: {_chartMode},
+                            onSelectionChanged: (values) =>
+                                unawaited(_setChartMode(values.single)),
+                          ),
+                          const SizedBox(height: 12),
                           Expanded(
                             child: WorkspacePanel(
                               child: Padding(
                                 padding: const EdgeInsets.all(10),
-                                child: Timeline(
-                                  key: _timeline,
-                                  journal: widget.journal,
-                                  beforeAction: commit,
-                                  onRename: (id) => unawaited(
-                                    _startEdit(
-                                      id,
-                                      EventColumn.title,
-                                      timeline: true,
-                                    ),
-                                  ),
-                                  onContext: (position, id, start) => unawaited(
-                                    _context(position, id, start: start),
-                                  ),
-                                  onError: _showError,
-                                  editorEventId: _edit?.inTimeline == true
-                                      ? _edit?.event.id
-                                      : null,
-                                  titleEditor: _edit?.inTimeline == true
-                                      ? _editor()
-                                      : null,
-                                ),
+                                child: _chartMode == JournalChartMode.activity
+                                    ? CalendarHeatmap(
+                                        journal: widget.journal,
+                                        selection: _validActivityTag,
+                                        onSelectionChanged: (value) =>
+                                            unawaited(_setActivityTag(value)),
+                                        onDaySelected: (day) => unawaited(
+                                          _action(
+                                            () => widget.journal.setDay(day),
+                                            clear: true,
+                                          ),
+                                        ),
+                                      )
+                                    : Timeline(
+                                        key: _timeline,
+                                        journal: widget.journal,
+                                        beforeAction: commit,
+                                        onRename: (id) => unawaited(
+                                          _startEdit(
+                                            id,
+                                            EventColumn.title,
+                                            timeline: true,
+                                          ),
+                                        ),
+                                        onContext: (position, id, start) =>
+                                            unawaited(
+                                              _context(
+                                                position,
+                                                id,
+                                                start: start,
+                                              ),
+                                            ),
+                                        onError: _showError,
+                                        editorEventId: _edit?.inTimeline == true
+                                            ? _edit?.event.id
+                                            : null,
+                                        titleEditor: _edit?.inTimeline == true
+                                            ? _editor()
+                                            : null,
+                                      ),
                               ),
                             ),
                           ),
