@@ -186,7 +186,7 @@ class JournalScreenState extends State<JournalScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _table.currentState?.reveal(id);
-          unawaited(_startEdit(id, EventColumn.tag));
+          unawaited(_startEdit(id, EventColumn.title));
         }
       });
     } catch (error) {
@@ -281,7 +281,9 @@ class JournalScreenState extends State<JournalScreen> {
       if (event is KeyDownEvent &&
           event.logicalKey == LogicalKeyboardKey.enter &&
           widget.journal.selected.length == 1) {
-        unawaited(_startEdit(widget.journal.selected.single, EventColumn.tag));
+        unawaited(
+          _startEdit(widget.journal.selected.single, EventColumn.title),
+        );
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;

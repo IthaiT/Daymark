@@ -118,7 +118,7 @@ void main() {
     expect(order.take(2), ['a', 'b']);
     expect(order.skip(2), contains('early'));
     expect(journal.rows.first.id, 'early');
-    final columns = ['tag', 'title', 'start', 'end'];
+    final columns = ['title', 'start', 'end', 'tag'];
     for (var index = 1; index < columns.length; index++) {
       expect(
         tester.getTopLeft(cell('a', columns[index])).dx,
@@ -396,11 +396,11 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('add-event')));
       await tester.pumpAndSettle();
       final first = journal.drafts.keys.single;
-      expect(input(first, 'tag'), findsOneWidget);
+      expect(input(first, 'title'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       final second = journal.drafts.keys.last;
       expect(journal.drafts.length, 2);
-      expect(input(second, 'tag'), findsOneWidget);
+      expect(input(second, 'title'), findsOneWidget);
       expect(cell(first, 'title'), findsOneWidget);
     },
   );
@@ -686,8 +686,7 @@ void main() {
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       expect(journal.drafts.length, 2);
       final second = journal.drafts.keys.last;
-      expect(input(second, 'tag'), findsOneWidget);
-      await key(tester, LogicalKeyboardKey.escape);
+      expect(input(second, 'title'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.escape);
       expect(journal.drafts.keys, [first]);
       await tester.tap(cell(first, 'title'));
@@ -702,27 +701,28 @@ void main() {
   );
 
   testWidgets(
-    'Ctrl+N searches tags and Tab follows tag title start end without a mouse',
+    'Ctrl+N follows title start end tag in the restored column order',
     (tester) async {
       await open(tester);
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       final id = journal.drafts.keys.single;
       expect(
-        tester.widget<TextField>(input(id, 'tag')).focusNode!.hasPrimaryFocus,
+        tester.widget<TextField>(input(id, 'title')).focusNode!.hasPrimaryFocus,
         isTrue,
       );
+      await tester.enterText(input(id, 'title'), '键盘记录');
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(id, 'start'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(input(id, 'end'), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.tab);
       await tester.enterText(input(id, 'tag'), '主业');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('tag-choice-life')), findsNothing);
       await key(tester, LogicalKeyboardKey.arrowDown);
       expect(journal.selected, {id});
-      await key(tester, LogicalKeyboardKey.tab);
+      await key(tester, LogicalKeyboardKey.tab, shift: true);
       expect(journal.event(id)!.tagId, 'embedded');
-      expect(input(id, 'title'), findsOneWidget);
-      await tester.enterText(input(id, 'title'), '键盘记录');
-      await key(tester, LogicalKeyboardKey.tab);
-      expect(input(id, 'start'), findsOneWidget);
-      await key(tester, LogicalKeyboardKey.tab);
       expect(input(id, 'end'), findsOneWidget);
       await key(tester, LogicalKeyboardKey.tab, shift: true);
       expect(input(id, 'start'), findsOneWidget);
@@ -751,6 +751,9 @@ void main() {
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, tag.id);
       await key(tester, LogicalKeyboardKey.enter);
+      await key(tester, LogicalKeyboardKey.tab);
+      await key(tester, LogicalKeyboardKey.tab);
+      await key(tester, LogicalKeyboardKey.tab);
       await tester.enterText(input('a', 'tag'), '未分类');
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, isNull);
@@ -792,7 +795,7 @@ void main() {
       await key(tester, LogicalKeyboardKey.arrowUp);
       expect(journal.selected, {'17'});
       await key(tester, LogicalKeyboardKey.enter);
-      expect(input('17', 'tag'), findsOneWidget);
+      expect(input('17', 'title'), findsOneWidget);
     },
   );
 
@@ -823,31 +826,32 @@ void main() {
     },
   );
 
-  testWidgets('Tab after assigning a gap tag follows the promoted event ID', (
-    tester,
-  ) async {
-    await journal.store.saveEvent(
-      Event(
-        'later',
-        '晚间',
-        'work',
-        day.add(const Duration(hours: 18)),
-        day.add(const Duration(hours: 19)),
-      ),
-    );
-    await open(tester);
-    final gap = journal.rows.singleWhere((event) => event.isUndefined);
-    journal.select(gap.id);
-    await tester.pumpAndSettle();
-    await tester.tap(cell(gap.id, 'tag'));
-    await tester.pumpAndSettle();
-    await tester.enterText(input(gap.id, 'tag'), '主业');
-    await key(tester, LogicalKeyboardKey.tab);
-    final id = journal.selected.single;
-    expect(id, isNot(gap.id));
-    expect(journal.event(id)!.tagId, 'work');
-    expect(input(id, 'title'), findsOneWidget);
-  });
+  testWidgets(
+    'Shift+Tab after assigning a gap tag follows the promoted event ID',
+    (tester) async {
+      await journal.store.saveEvent(
+        Event(
+          'later',
+          '晚间',
+          'work',
+          day.add(const Duration(hours: 18)),
+          day.add(const Duration(hours: 19)),
+        ),
+      );
+      await open(tester);
+      final gap = journal.rows.singleWhere((event) => event.isUndefined);
+      journal.select(gap.id);
+      await tester.pumpAndSettle();
+      await tester.tap(cell(gap.id, 'tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input(gap.id, 'tag'), '主业');
+      await key(tester, LogicalKeyboardKey.tab, shift: true);
+      final id = journal.selected.single;
+      expect(id, isNot(gap.id));
+      expect(journal.event(id)!.tagId, 'work');
+      expect(input(id, 'end'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'Tab saves and opens next cell, picker Escape returns typing focus',
@@ -917,8 +921,6 @@ void main() {
       await open(tester);
       await key(tester, LogicalKeyboardKey.keyN, control: true);
       final id = journal.drafts.keys.single;
-      await tester.enterText(input(id, 'tag'), 'Linux');
-      await key(tester, LogicalKeyboardKey.tab);
       await tester.enterText(input(id, 'title'), '晚间记录');
       await key(tester, LogicalKeyboardKey.tab);
       await tester.enterText(input(id, 'start'), '2021');
@@ -1078,6 +1080,9 @@ void main() {
     final id = journal.drafts.keys.single;
     expect(journal.event(id)!.start, day.add(const Duration(hours: 15)));
     expect(journal.event(id)!.end, day.add(const Duration(hours: 16)));
+    await key(tester, LogicalKeyboardKey.tab);
+    await key(tester, LogicalKeyboardKey.tab);
+    await key(tester, LogicalKeyboardKey.tab);
     expect(find.byType(TagChoices), findsOneWidget);
     failWrites = true;
     await tester.tap(

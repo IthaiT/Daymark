@@ -52,10 +52,10 @@ class EventTableState extends State<EventTable> {
   late DateTime _day = widget.journal.day;
   static const _rowHeight = 40.0;
   static const _columns = <EventColumn?>[
-    EventColumn.tag,
     EventColumn.title,
     EventColumn.start,
     EventColumn.end,
+    EventColumn.tag,
     null,
   ];
 
@@ -255,10 +255,10 @@ class EventTableState extends State<EventTable> {
     final interval = event.intervalOn(widget.journal.day);
     final shared = _sharedDuration(event);
     final labels = [
-      widget.journal.store.tagName(event.tagId),
       event.title.isEmpty ? '填写事件名称…' : event.title,
       _clock(event.start),
       event.end == null ? '待补全' : _clock(event.end!),
+      widget.journal.store.tagName(event.tagId),
       shared != null
           ? durationText(shared)
           : interval == null
@@ -346,7 +346,7 @@ class EventTableState extends State<EventTable> {
           child: Row(
             children: [
               SizedBox(
-                width: widths[0] + widths[1],
+                width: widths[0],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
@@ -377,7 +377,7 @@ class EventTableState extends State<EventTable> {
                 ),
               ),
               SizedBox(
-                width: widths[2],
+                width: widths[1],
                 child: Text(
                   expanded ? '分段明细' : '展开查看',
                   style: TextStyle(
@@ -387,7 +387,7 @@ class EventTableState extends State<EventTable> {
                 ),
               ),
               SizedBox(
-                width: widths[3],
+                width: widths[2],
                 child: Text(
                   selected > 0
                       ? '已选 $selected 条'
@@ -397,6 +397,16 @@ class EventTableState extends State<EventTable> {
                   style: TextStyle(
                     color: scheme.onSurfaceVariant,
                     fontSize: 12,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: widths[3],
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: _tagCell(group.events.first),
                   ),
                 ),
               ),
@@ -426,7 +436,7 @@ class EventTableState extends State<EventTable> {
     builder: (context, constraints) {
       final width = math.max(770.0, constraints.maxWidth);
       final extra = (width - 770) / 2;
-      final widths = [180 + extra, 240 + extra, 110.0, 110.0, 130.0];
+      final widths = [240 + extra, 110.0, 110.0, 180 + extra, 130.0];
       final entries = _entries;
       return Listener(
         onPointerSignal: _wheel,

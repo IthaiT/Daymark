@@ -7,7 +7,7 @@ import '../domain/history.dart';
 import '../domain/model.dart';
 import '../domain/settings.dart';
 
-enum EventColumn { tag, title, start, end }
+enum EventColumn { title, start, end, tag }
 
 class JournalSnapshot {
   JournalSnapshot(
