@@ -74,6 +74,15 @@ class InlineEditor extends StatefulWidget {
 class _InlineEditorState extends State<InlineEditor> {
   final _tagChoices = GlobalKey<TagChoicesState>();
   String _tagQuery = '';
+  bool get _composing {
+    final range = widget.session.text.value.composing;
+    return range.isValid && !range.isCollapsed;
+  }
+
+  void _submit() {
+    if (!_composing) widget.onCommit();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -87,6 +96,7 @@ class _InlineEditorState extends State<InlineEditor> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
+    if (_composing) return KeyEventResult.ignored;
     final session = widget.session;
     if (session.column == EventColumn.tag &&
         !HardwareKeyboard.instance.isControlPressed &&
@@ -200,7 +210,7 @@ class _InlineEditorState extends State<InlineEditor> {
             }
           }),
           onEditingComplete: () {},
-          onSubmitted: (_) => widget.onCommit(),
+          onSubmitted: (_) => _submit(),
           onTap: session.column == EventColumn.title
               ? null
               : () => setState(() => session.pickerOpen = true),

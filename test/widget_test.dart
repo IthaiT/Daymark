@@ -797,6 +797,59 @@ void main() {
   );
 
   testWidgets(
+    'tag completion leaves Enter and arrow keys to Chinese IME composition',
+    (tester) async {
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      const composing = TextEditingValue(
+        text: '主业',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      );
+      tester.testTextInput.updateEditingValue(composing);
+      await tester.pumpAndSettle();
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(input('a', 'tag'), findsOneWidget);
+      expect(journal.event('a')!.tagId, 'life');
+      tester.testTextInput.updateEditingValue(
+        composing.copyWith(composing: TextRange.empty),
+      );
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.event('a')!.tagId, 'work');
+    },
+  );
+
+  testWidgets('Tab after assigning a gap tag follows the promoted event ID', (
+    tester,
+  ) async {
+    await journal.store.saveEvent(
+      Event(
+        'later',
+        '晚间',
+        'work',
+        day.add(const Duration(hours: 18)),
+        day.add(const Duration(hours: 19)),
+      ),
+    );
+    await open(tester);
+    final gap = journal.rows.singleWhere((event) => event.isUndefined);
+    journal.select(gap.id);
+    await tester.pumpAndSettle();
+    await tester.tap(cell(gap.id, 'tag'));
+    await tester.pumpAndSettle();
+    await tester.enterText(input(gap.id, 'tag'), '主业');
+    await key(tester, LogicalKeyboardKey.tab);
+    final id = journal.selected.single;
+    expect(id, isNot(gap.id));
+    expect(journal.event(id)!.tagId, 'work');
+    expect(input(id, 'title'), findsOneWidget);
+  });
+
+  testWidgets(
     'Tab saves and opens next cell, picker Escape returns typing focus',
     (tester) async {
       await open(tester);
@@ -1953,6 +2006,20 @@ void main() {
         ).writeAsBytes(pickerBytes!.buffer.asUint8List()),
       );
       pickerImage.dispose();
+      await tester.enterText(input('b', 'tag'), 'linux');
+      await tester.pumpAndSettle();
+      final searchImage = (await tester.runAsync(
+        () => boundary.toImage(pixelRatio: 1),
+      ))!;
+      final searchBytes = await tester.runAsync(
+        () => searchImage.toByteData(format: ui.ImageByteFormat.png),
+      );
+      await tester.runAsync(
+        () => File(
+          '.test-artifacts/flutter-tag-search.png',
+        ).writeAsBytes(searchBytes!.buffer.asUint8List()),
+      );
+      searchImage.dispose();
       await key(tester, LogicalKeyboardKey.escape);
       await key(tester, LogicalKeyboardKey.escape);
       final summaryTag = await seedSummary();
