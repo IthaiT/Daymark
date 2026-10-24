@@ -97,6 +97,42 @@ void main() {
       find.byKey(ValueKey('cell-$id-$column'));
   Finder input(String id, String column) =>
       find.byKey(ValueKey('input-$id-$column'));
+
+  testWidgets('table puts unclassified rows last and orders editable columns', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({
+      'early': Event(
+        'early',
+        '未分类记录',
+        null,
+        day,
+        day.add(const Duration(hours: 1)),
+      ),
+      'a': journal.event('a')!,
+      'b': journal.event('b')!,
+    });
+    await open(tester);
+    final table = tester.state<EventTableState>(find.byType(EventTable));
+    final order = table.selectionOrder.toList();
+    expect(order.take(2), ['a', 'b']);
+    expect(order.skip(2), contains('early'));
+    expect(journal.rows.first.id, 'early');
+    final columns = ['tag', 'title', 'start', 'end'];
+    for (var index = 1; index < columns.length; index++) {
+      expect(
+        tester.getTopLeft(cell('a', columns[index])).dx,
+        greaterThan(tester.getTopLeft(cell('a', columns[index - 1])).dx),
+      );
+    }
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tap(cell('early', 'title'));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pumpAndSettle();
+    expect(journal.selected, order.take(order.indexOf('early') + 1).toSet());
+  });
   Future<void> key(
     WidgetTester tester,
     LogicalKeyboardKey value, {
@@ -820,9 +856,7 @@ void main() {
     final id = journal.drafts.keys.single;
     expect(journal.event(id)!.start, day.add(const Duration(hours: 15)));
     expect(journal.event(id)!.end, day.add(const Duration(hours: 16)));
-    await key(tester, LogicalKeyboardKey.tab);
-    await key(tester, LogicalKeyboardKey.tab);
-    await key(tester, LogicalKeyboardKey.tab);
+    await key(tester, LogicalKeyboardKey.tab, shift: true);
     expect(find.byType(TagChoices), findsOneWidget);
     failWrites = true;
     await tester.tap(
