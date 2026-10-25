@@ -79,11 +79,11 @@ void main() {
       expect(reopened.state.tagColors, {'sleep': TagColor.purple});
       expect(reopened.state.journalView, view);
       expect(reopened.state.palette, AppPalette.rose);
-      expect((await directory.list().toList()).length, 1);
       await controller.setTagStyle('sleep', null, null);
       expect(controller.state.tagDisplays, isEmpty);
       expect(controller.state.tagColors, isEmpty);
       expect(controller.state.journalView, view);
+      expect((await directory.list().toList()).length, 1);
     },
   );
 
