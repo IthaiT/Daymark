@@ -102,7 +102,7 @@ void main() {
   Finder input(String id, String column) =>
       find.byKey(ValueKey('input-$id-$column'));
 
-  testWidgets('table puts unclassified rows last and orders editable columns', (
+  testWidgets('table interleaves gaps and unclassified rows chronologically', (
     tester,
   ) async {
     await journal.store.replaceEvents({
@@ -119,8 +119,14 @@ void main() {
     await open(tester);
     final table = tester.state<EventTableState>(find.byType(EventTable));
     final order = table.selectionOrder.toList();
-    expect(order.take(2), ['a', 'b']);
-    expect(order.skip(2), contains('early'));
+    final gap = journal.rows.singleWhere((event) => event.isUndefined);
+    expect(order, ['early', gap.id, 'a', 'b']);
+    for (var index = 1; index < order.length; index++) {
+      expect(
+        tester.getTopLeft(cell(order[index], 'title')).dy,
+        greaterThan(tester.getTopLeft(cell(order[index - 1], 'title')).dy),
+      );
+    }
     expect(journal.rows.first.id, 'early');
     final columns = ['title', 'start', 'end', 'tag'];
     for (var index = 1; index < columns.length; index++) {
@@ -129,13 +135,13 @@ void main() {
         greaterThan(tester.getTopLeft(cell('a', columns[index - 1])).dx),
       );
     }
-    await tester.tap(cell('a', 'title'));
+    await tester.tap(cell('early', 'title'));
     await tester.pumpAndSettle();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.tap(cell('early', 'title'));
+    await tester.tap(cell('a', 'title'));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
-    expect(journal.selected, order.take(order.indexOf('early') + 1).toSet());
+    expect(journal.selected, {'early', gap.id, 'a'});
   });
   Future<void> key(
     WidgetTester tester,
@@ -785,17 +791,20 @@ void main() {
       expect(journal.selected, {'0'});
       await key(tester, LogicalKeyboardKey.arrowUp);
       expect(journal.selected, {'0'});
-      for (var index = 1; index <= 18; index++) {
-        await key(tester, LogicalKeyboardKey.arrowDown);
-      }
-      expect(journal.selected, {'loose'});
-      expect(cell('loose', 'title').hitTestable(), findsOneWidget);
       await key(tester, LogicalKeyboardKey.arrowDown);
       expect(journal.selected, {'loose'});
       await key(tester, LogicalKeyboardKey.arrowUp);
+      for (var index = 1; index <= 18; index++) {
+        await key(tester, LogicalKeyboardKey.arrowDown);
+      }
       expect(journal.selected, {'17'});
+      expect(cell('17', 'title').hitTestable(), findsOneWidget);
+      await key(tester, LogicalKeyboardKey.arrowDown);
+      expect(journal.selected, {'17'});
+      await key(tester, LogicalKeyboardKey.arrowUp);
+      expect(journal.selected, {'16'});
       await key(tester, LogicalKeyboardKey.enter);
-      expect(input('17', 'title'), findsOneWidget);
+      expect(input('16', 'title'), findsOneWidget);
     },
   );
 

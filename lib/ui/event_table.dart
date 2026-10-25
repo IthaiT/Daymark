@@ -91,15 +91,9 @@ class EventTableState extends State<EventTable> {
 
   List<_TableEntry> get _entries {
     if (_mode == EventTableMode.chronological) {
-      final rows = widget.journal.rows.toList()
-        ..sort((a, b) {
-          final aUnclassified = a.isUndefined || a.tagId == null;
-          final bUnclassified = b.isUndefined || b.tagId == null;
-          if (aUnclassified != bUnclassified) return aUnclassified ? 1 : -1;
-          return compareEvents(a, b);
-        });
       return [
-        for (final event in rows) (event: event, group: null, nested: false),
+        for (final event in widget.journal.rows)
+          (event: event, group: null, nested: false),
       ];
     }
     return [
