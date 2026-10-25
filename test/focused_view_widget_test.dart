@@ -10,7 +10,9 @@ import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/event_table.dart';
 import 'package:daymark/ui/timeline.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -83,6 +85,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('journal-display')));
     await tester.pumpAndSettle();
   }
+
+  Offset point(WidgetTester tester, TimelineState state, int minute) =>
+      tester.getTopLeft(find.byType(Timeline)) +
+      Offset(24 + state.axis.x(at(minute)) - state.horizontal.offset, 100);
 
   testWidgets(
     'one display menu filters both surfaces without changing records',
@@ -161,5 +167,146 @@ void main() {
       findsOneWidget,
     );
     expect(find.byType(EventTable), findsOneWidget);
+  });
+
+  testWidgets('folds recover space without hiding overlapping visible time', (
+    tester,
+  ) async {
+    await open(tester);
+    final state = tester.state<TimelineState>(find.byType(Timeline));
+    expect(state.axis.isFolded, isTrue);
+    expect(state.axis.visibleDuration, const Duration(minutes: 150));
+    expect(
+      state.axis.pixelsPerMinute * 150 / state.axis.width,
+      greaterThan(.79),
+    );
+    expect(state.axis.foldAt(state.axis.x(at(630))), isNull);
+    final fold = state.axis.folds.firstWhere((span) => span.start == at(660));
+    final origin = tester.getTopLeft(find.byType(Timeline));
+    await tester.tapAt(origin + Offset(24 + fold.left + fold.width / 2, 100));
+    await tester.pumpAndSettle();
+    expect(find.text('折叠的时段'), findsOneWidget);
+    expect(find.textContaining('11:00 — 13:00'), findsOneWidget);
+    await tester.tap(find.text('显示完整一天'));
+    await tester.pumpAndSettle();
+    expect(state.axis.isFolded, isFalse);
+    expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+  });
+
+  testWidgets(
+    'focused drag expands temporarily and preserves minute precision',
+    (tester) async {
+      await open(tester);
+      final state = tester.state<TimelineState>(find.byType(Timeline));
+      final scale = state.axis.pixelsPerMinute;
+      final start = point(tester, state, 630);
+      final drag = await tester.startGesture(
+        start,
+        kind: PointerDeviceKind.mouse,
+      );
+      await tester.pumpAndSettle();
+      await drag.moveTo(start + Offset(7 * scale, 0));
+      await tester.pumpAndSettle();
+      expect(state.axis.isFolded, isFalse);
+      await drag.moveTo(start + Offset(12 * scale, 0));
+      await tester.pumpAndSettle();
+      await drag.up();
+      await tester.pumpAndSettle();
+      expect(state.axis.isFolded, isTrue);
+      expect(journal.event('a')!.start, at(612));
+      expect(journal.event('a')!.end, at(672));
+      expect(state.horizontal.offset, 0);
+    },
+  );
+
+  testWidgets('focused resize can enter folded time without jumping', (
+    tester,
+  ) async {
+    await open(tester);
+    final state = tester.state<TimelineState>(find.byType(Timeline));
+    final scale = state.axis.pixelsPerMinute;
+    final start = point(tester, state, 660);
+    final drag = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pumpAndSettle();
+    await drag.moveTo(start + Offset(7 * scale, 0));
+    await tester.pumpAndSettle();
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(journal.event('a')!.start, at(600));
+    expect(journal.event('a')!.end, at(667));
+  });
+
+  testWidgets('zoom and context creation use the folded time coordinates', (
+    tester,
+  ) async {
+    await open(tester);
+    final state = tester.state<TimelineState>(find.byType(Timeline));
+    final anchor = point(tester, state, 630);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendEventToBinding(
+      PointerScrollEvent(position: anchor, scrollDelta: const Offset(0, -120)),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    expect((point(tester, state, 630).dx - anchor.dx).abs(), lessThan(1));
+    final mouse = await tester.startGesture(
+      point(tester, state, 630),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    await mouse.up();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('在此新增事件'));
+    await tester.pumpAndSettle();
+    expect(journal.drafts.values.single.start, at(630));
+  });
+
+  testWidgets('shift selection excludes folded records', (tester) async {
+    await open(tester);
+    final state = tester.state<TimelineState>(find.byType(Timeline));
+    await tester.tapAt(point(tester, state, 630));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tapAt(point(tester, state, 810));
+    await tester.pumpAndSettle();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(journal.selected, {'a', 'b'});
+  });
+
+  testWidgets('escape restores a folded drag without saving', (tester) async {
+    await open(tester);
+    final before = Map.of(journal.store.events);
+    final state = tester.state<TimelineState>(find.byType(Timeline));
+    final start = point(tester, state, 630);
+    final drag = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pumpAndSettle();
+    await drag.moveBy(const Offset(35, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('拖动时临时展开 · 松手后恢复折叠'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(state.axis.isFolded, isTrue);
+    expect(state.horizontal.offset, 0);
+    expect(journal.store.events, before);
+  });
+
+  testWidgets('all hidden records have a clear empty state and recovery', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({'sleep': journal.event('sleep')!});
+    await open(tester);
+    expect(find.text('当前没有关注事项，已隐藏 1 条记录。'), findsOneWidget);
+    await tester.tap(find.text('显示完整一天'));
+    await tester.pumpAndSettle();
+    expect(find.text('显示：完整一天'), findsOneWidget);
+    expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
   });
 }

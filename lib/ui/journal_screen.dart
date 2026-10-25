@@ -24,7 +24,7 @@ import 'theme.dart';
 
 enum JournalChartMode { timeline, activity }
 
-enum _DisplayAction { focused, fullDay, routine, undefined }
+enum _DisplayAction { focused, fullDay, routine, undefined, folds }
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({
@@ -83,6 +83,10 @@ class JournalScreenState extends State<JournalScreen> {
   }
 
   Future<void> _setDisplay(_DisplayAction action) async {
+    if (action == _DisplayAction.folds) {
+      await _timeline.currentState?.showFoldedPeriods();
+      return;
+    }
     if (_savingView || !await commit() || !mounted) return;
     final desired = switch (action) {
       _DisplayAction.focused => JournalViewPreferences.focused,
@@ -91,6 +95,7 @@ class JournalScreenState extends State<JournalScreen> {
       _DisplayAction.undefined => _view.copyWith(
         showUndefined: !_view.showUndefined,
       ),
+      _DisplayAction.folds => _view,
     };
     _timeline.currentState?.cancelDrag();
     setState(() => _savingView = true);
@@ -152,6 +157,12 @@ class JournalScreenState extends State<JournalScreen> {
                 const Text('自动生成已关闭', style: TextStyle(fontSize: 12)),
             ],
           ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          key: ValueKey('view-folded-periods'),
+          value: _DisplayAction.folds,
+          child: Text('查看折叠内容…'),
         ),
       ],
       child: Padding(
@@ -265,6 +276,7 @@ class JournalScreenState extends State<JournalScreen> {
     bool clear = false,
   }) async {
     if (!await commit() || !mounted) return;
+    _timeline.currentState?.cancelDrag();
     try {
       await action();
       if (clear) widget.journal.clearSelection();
@@ -787,6 +799,8 @@ class JournalScreenState extends State<JournalScreen> {
                                         key: _timeline,
                                         journal: widget.journal,
                                         presentation: _presentation,
+                                        onShowFullDay: () =>
+                                            _setDisplay(_DisplayAction.fullDay),
                                         beforeAction: commit,
                                         onRename: (id) => unawaited(
                                           _startEdit(

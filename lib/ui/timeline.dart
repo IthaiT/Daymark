@@ -11,6 +11,7 @@ import '../domain/journal_presentation.dart';
 import '../domain/journal_view_preferences.dart';
 import '../domain/model.dart';
 import '../domain/timeline_interaction.dart';
+import '../domain/timeline_axis.dart';
 import 'theme.dart';
 
 class Timeline extends StatefulWidget {
@@ -24,6 +25,7 @@ class Timeline extends StatefulWidget {
     this.editorEventId,
     this.titleEditor,
     this.presentation,
+    this.onShowFullDay,
   });
   final JournalController journal;
   final Future<bool> Function() beforeAction;
@@ -33,6 +35,7 @@ class Timeline extends StatefulWidget {
   final String? editorEventId;
   final Widget? titleEditor;
   final JournalPresentation? presentation;
+  final Future<void> Function()? onShowFullDay;
   @override
   State<Timeline> createState() => TimelineState();
 }
@@ -54,6 +57,11 @@ class TimelineState extends State<Timeline> {
   Event? _preview;
   DragEdge? _edge;
   double _anchorX = 0;
+  double _anchorScroll = 0;
+  double _scrollCompensation = 0;
+  double _dragScale = 1;
+  DateTime? _dragAnchorTime;
+  bool _expandedDrag = false;
   bool _moved = false;
   int? _pointer;
   int? _pendingPointer;
@@ -62,6 +70,34 @@ class TimelineState extends State<Timeline> {
   Offset? _hoverPosition;
   MouseCursor _cursor = SystemMouseCursors.basic;
   Map<String, List<Rect>> _pieces = {};
+  late TimelineAxis _layoutAxis = TimelineAxis(
+    day: widget.journal.day,
+    width: _dayWidth,
+    events: const [],
+  );
+  TimelineAxis? _dragAxis;
+  TimelineAxis get axis => _dragAxis ?? _layoutAxis;
+  DateTime? _hoverFoldStart;
+  bool _foldDialogOpen = false;
+  late DateTime _axisDay = widget.journal.day;
+
+  @override
+  void didUpdateWidget(covariant Timeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_axisDay != widget.journal.day) {
+      _axisDay = widget.journal.day;
+      _original = null;
+      _preview = null;
+      _pointer = null;
+      _pendingPointer = null;
+      _dragAxis = null;
+      _expandedDrag = false;
+      _snap = null;
+      _hoverId = null;
+      _hoverFoldStart = null;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -101,18 +137,94 @@ class TimelineState extends State<Timeline> {
         ),
   ];
   List<Event> get _displayEvents =>
-      _allDisplayEvents.where(_presentation.includes).toList();
-  double _x(DateTime value) =>
-      24 +
-      value.difference(widget.journal.day).inMicroseconds /
-          const Duration(days: 1).inMicroseconds *
-          _dayWidth;
+      _allDisplayEvents.where(_presentation.includes).toList()
+        ..sort(compareEvents);
+  double _x(DateTime value) => 24 + axis.x(value);
   Offset _content(Offset point) =>
       point +
       Offset(
         horizontal.hasClients ? horizontal.offset : 0,
         vertical.hasClients ? vertical.offset : 0,
       );
+  TimelineAxisSpan? _foldHit(Offset point) =>
+      point.dy >= 32 && point.dy <= _height - 26
+      ? axis.foldAt(point.dx - 24)
+      : null;
+
+  String _clock(DateTime value) =>
+      value == dayEnd(widget.journal.day) ? '24:00' : clockText(value);
+
+  String _foldDescription(TimelineAxisSpan span) {
+    final hidden = _allDisplayEvents.where(
+      (event) =>
+          !_presentation.includes(event) &&
+          event.intervalOn(widget.journal.day) != null &&
+          event.start.isBefore(span.end) &&
+          event.end!.isAfter(span.start),
+    );
+    final names = hidden
+        .map((event) => event.title.trim().isEmpty ? '未定义' : event.title)
+        .toSet();
+    return '${_clock(span.start)} — ${_clock(span.end)} · ${durationText(span.duration)}\n'
+        '${names.isEmpty ? '未记录的时段' : names.join('、')}';
+  }
+
+  Future<void> showFoldedPeriods() async {
+    if (!await widget.beforeAction() || !mounted) return;
+    final current = TimelineAxis(
+      day: widget.journal.day,
+      width: _dayWidth,
+      events: _displayEvents,
+      foldEmptyTime: _presentation.foldsEmptyTime,
+    );
+    await _showFoldDetails(current.folds.toList());
+  }
+
+  Future<void> _showFoldDetails(List<TimelineAxisSpan> spans) async {
+    if (_foldDialogOpen || !mounted) return;
+    _foldDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('折叠的时段'),
+          scrollable: true,
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (spans.isEmpty) const Text('当前没有折叠的时段。'),
+                for (final span in spans)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: Text(_foldDescription(span)),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            if (widget.onShowFullDay != null)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                  unawaited(widget.onShowFullDay!());
+                },
+                child: const Text('显示完整一天'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('关闭'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _foldDialogOpen = false;
+    }
+  }
+
   Event? _hit(Offset content) {
     // Narrow gaps must win exact hits before a neighbor's edge tolerance.
     for (final tolerance in [0.0, 2.0]) {
@@ -167,6 +279,13 @@ class TimelineState extends State<Timeline> {
     _pendingPointer = pointer.pointer;
     final content = _content(pointer.localPosition);
     final handle = _handle(content);
+    final fold = _foldHit(content);
+    if (fold != null && handle == null) {
+      if (!await widget.beforeAction() || !mounted) return;
+      widget.journal.clearSelection();
+      await _showFoldDetails([fold]);
+      return;
+    }
     final hit = handle?.$1 ?? _hit(content);
     if (widget.editorEventId != null &&
         handle == null &&
@@ -191,10 +310,16 @@ class TimelineState extends State<Timeline> {
     _focus.requestFocus();
     if (hit.isUndefined || widget.editorEventId == hit.id) return;
     setState(() {
+      _dragAxis = axis;
+      _dragScale = axis.pixelsPerMinute;
+      _dragAnchorTime = axis.timeAt(content.dx - 24, snapFold: false);
+      _anchorScroll = horizontal.hasClients ? horizontal.offset : 0;
+      _scrollCompensation = 0;
+      _expandedDrag = false;
       _original = widget.journal.event(hit.id);
       _preview = _original;
       _edge = handle?.$2 ?? DragEdge.move;
-      _anchorX = content.dx;
+      _anchorX = pointer.localPosition.dx;
       _pointer = pointer.pointer;
       _moved = false;
       _hoverId = null;
@@ -203,10 +328,37 @@ class TimelineState extends State<Timeline> {
 
   void _move(PointerMoveEvent pointer) {
     if (_original == null || _pointer != pointer.pointer) return;
-    final content = _content(pointer.localPosition);
-    if (!_moved &&
-        (content.dx - _anchorX).abs() < (_edge == DragEdge.move ? 4 : 2)) {
+    double dragPixels() =>
+        pointer.localPosition.dx -
+        _anchorX +
+        (horizontal.hasClients ? horizontal.offset : 0) -
+        _anchorScroll -
+        _scrollCompensation;
+    if (!_moved && dragPixels().abs() < (_edge == DragEdge.move ? 4 : 2)) {
       return;
+    }
+    if (!_moved && axis.isFolded) {
+      // Preserve visible precision while editing, including newly exposed time.
+      _dragAxis = TimelineAxis(
+        day: widget.journal.day,
+        width: _dragScale * 1440,
+        events: const [],
+      );
+      _expandedDrag = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _original == null ||
+            !_expandedDrag ||
+            !horizontal.hasClients) {
+          return;
+        }
+        final target = (_x(_dragAnchorTime!) - _anchorX).clamp(
+          0.0,
+          horizontal.position.maxScrollExtent,
+        );
+        _scrollCompensation += target - horizontal.offset;
+        horizontal.jumpTo(target);
+      });
     }
     if (horizontal.hasClients) {
       if (pointer.localPosition.dx < 16) {
@@ -221,9 +373,8 @@ class TimelineState extends State<Timeline> {
       original: _original!,
       day: widget.journal.day,
       edge: _edge!,
-      deltaMinutes:
-          (_content(pointer.localPosition).dx - _anchorX) / _dayWidth * 1440,
-      dayWidth: _dayWidth,
+      deltaMinutes: dragPixels() / _dragScale,
+      dayWidth: _dragScale * 1440,
       events: _events,
       alt: HardwareKeyboard.instance.isAltPressed,
       granularity: widget.journal.dragMinutes,
@@ -241,13 +392,17 @@ class TimelineState extends State<Timeline> {
     final preview = _preview;
     final original = _original;
     final moved = _moved;
+    final restoreScroll = _expandedDrag ? _anchorScroll : null;
     setState(() {
       _original = null;
       _preview = null;
       _pointer = null;
       _snap = null;
       _moved = false;
+      _dragAxis = null;
+      _expandedDrag = false;
     });
+    _restoreScroll(restoreScroll);
     if (moved && preview != null && preview != original) {
       try {
         await widget.journal.updateEvent(preview);
@@ -260,6 +415,7 @@ class TimelineState extends State<Timeline> {
 
   void cancelDrag() {
     final active = _original != null;
+    final restoreScroll = _expandedDrag ? _anchorScroll : null;
     setState(() {
       _original = null;
       _preview = null;
@@ -267,21 +423,39 @@ class TimelineState extends State<Timeline> {
       _pendingPointer = null;
       _snap = null;
       _moved = false;
+      _dragAxis = null;
+      _expandedDrag = false;
     });
+    _restoreScroll(restoreScroll);
     if (active) widget.journal.clearSelection();
+  }
+
+  void _restoreScroll(double? offset) {
+    if (offset == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && horizontal.hasClients && _original == null) {
+        horizontal.jumpTo(
+          offset.clamp(0.0, horizontal.position.maxScrollExtent),
+        );
+      }
+    });
   }
 
   void _hover(PointerHoverEvent pointer) {
     if (_original != null) return;
     final content = _content(pointer.localPosition);
     final handle = _handle(content);
+    final fold = handle == null ? _foldHit(content) : null;
     setState(() {
-      _cursor = handle != null
+      _cursor = fold != null
+          ? SystemMouseCursors.click
+          : handle != null
           ? SystemMouseCursors.resizeLeftRight
           : _hit(content)?.isUndefined == false
           ? SystemMouseCursors.move
           : SystemMouseCursors.basic;
       _hoverId = handle == null ? _hit(content)?.id : null;
+      _hoverFoldStart = fold?.start;
       _hoverPosition = pointer.localPosition;
     });
   }
@@ -295,7 +469,10 @@ class TimelineState extends State<Timeline> {
           1.0,
           4.0,
         );
-        final fraction = (_content(event.localPosition).dx - 24) / _dayWidth;
+        final anchor = axis.timeAt(
+          _content(event.localPosition).dx - 24,
+          snapFold: false,
+        );
         setState(() {
           zoom = next;
           _hoverId = null;
@@ -303,7 +480,7 @@ class TimelineState extends State<Timeline> {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && horizontal.hasClients) {
             horizontal.jumpTo(
-              (24 + fraction * _dayWidth - event.localPosition.dx).clamp(
+              (_x(anchor) - event.localPosition.dx).clamp(
                 0.0,
                 horizontal.position.maxScrollExtent,
               ),
@@ -329,9 +506,26 @@ class TimelineState extends State<Timeline> {
 
   void _context(TapDownDetails pointer) {
     final point = _content(pointer.localPosition);
+    final fold = _foldHit(point);
+    if (fold != null) {
+      unawaited(() async {
+        if (await widget.beforeAction() && mounted) {
+          await _showFoldDetails([fold]);
+        }
+      }());
+      return;
+    }
     final step = snapInterval(zoom);
-    final minute = (((point.dx - 24) / _dayWidth * 1440 / step).round() * step)
-        .clamp(0, 1439);
+    final minute =
+        ((axis
+                            .timeAt(point.dx - 24)
+                            .difference(widget.journal.day)
+                            .inMicroseconds /
+                        Duration.microsecondsPerMinute /
+                        step)
+                    .round() *
+                step)
+            .clamp(0, 1439);
     widget.onContext(
       pointer.globalPosition,
       _hit(point)?.id,
@@ -354,9 +548,19 @@ class TimelineState extends State<Timeline> {
     child: LayoutBuilder(
       builder: (context, constraints) {
         _viewportWidth = constraints.maxWidth;
-        _dayWidth = math.max(650, constraints.maxWidth - 50) * zoom;
+        _dayWidth =
+            _dragAxis?.width ?? math.max(650, constraints.maxWidth - 50) * zoom;
         _height = math.max(140, constraints.maxHeight - 14);
         final events = _displayEvents;
+        final hiddenCount = _allDisplayEvents
+            .where((event) => !_presentation.includes(event))
+            .length;
+        _layoutAxis = TimelineAxis(
+          day: widget.journal.day,
+          width: _dayWidth,
+          events: events,
+          foldEmptyTime: _presentation.foldsEmptyTime,
+        );
         final segments = timelineSegments(events, widget.journal.day);
         _pieces = {};
         for (final segment in segments) {
@@ -373,6 +577,17 @@ class TimelineState extends State<Timeline> {
           );
         }
         final hover = events.where((event) => event.id == _hoverId).firstOrNull;
+        final hoverFold = axis.folds
+            .where((span) => span.start == _hoverFoldStart)
+            .firstOrNull;
+        final hoverText = hover != null
+            ? '${hover.title}\n${widget.journal.store.tagOutline(hover.tagId)}\n'
+                  '${_clock(hover.intervalOn(widget.journal.day)!.start)} — '
+                  '${_clock(hover.intervalOn(widget.journal.day)!.end)} · '
+                  '${durationText(hover.intervalOn(widget.journal.day)!.duration)}'
+            : hoverFold == null
+            ? null
+            : _foldDescription(hoverFold);
         final editorPieces = _pieces[widget.editorEventId];
         Rect? editorRect;
         if (editorPieces != null) {
@@ -410,7 +625,10 @@ class TimelineState extends State<Timeline> {
         return MouseRegion(
           cursor: _cursor,
           onHover: _hover,
-          onExit: (_) => setState(() => _hoverId = null),
+          onExit: (_) => setState(() {
+            _hoverId = null;
+            _hoverFoldStart = null;
+          }),
           child: Listener(
             onPointerDown: _down,
             onPointerMove: _move,
@@ -423,14 +641,16 @@ class TimelineState extends State<Timeline> {
               // so it cannot clear selection in the screen's blank-area handler.
               onTap: () {},
               onSecondaryTapDown: _context,
-              onDoubleTapDown: (pointer) {
-                final hit = _hit(_content(pointer.localPosition));
-                if (hit != null) {
-                  cancelDrag();
-                  widget.onRename(hit.id);
-                }
-              },
-              onDoubleTap: () {},
+              onDoubleTapDown: _pieces.isEmpty
+                  ? null
+                  : (pointer) {
+                      final hit = _hit(_content(pointer.localPosition));
+                      if (hit != null) {
+                        cancelDrag();
+                        widget.onRename(hit.id);
+                      }
+                    },
+              onDoubleTap: _pieces.isEmpty ? null : () {},
               child: Stack(
                 children: [
                   Scrollbar(
@@ -459,11 +679,11 @@ class TimelineState extends State<Timeline> {
                                     journal: widget.journal,
                                     events: events,
                                     pieces: _pieces,
-                                    dayWidth: _dayWidth,
                                     zoom: zoom,
                                     scheme: Theme.of(context).colorScheme,
                                     tagColors: tagColorOverrides(context),
                                     tagDisplays: tagDisplayOverrides(context),
+                                    axis: axis,
                                     textStyle: Theme.of(
                                       context,
                                     ).textTheme.bodySmall!,
@@ -484,7 +704,33 @@ class TimelineState extends State<Timeline> {
                       ),
                     ),
                   ),
-                  if (hover != null && _hoverPosition != null)
+                  if (_pieces.isEmpty)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            hiddenCount > 0
+                                ? '当前没有关注事项，已隐藏 $hiddenCount 条记录。'
+                                : events.isEmpty
+                                ? '这一天还没有记录。'
+                                : '补齐结束时间后，记录会显示在时间轴上。',
+                          ),
+                          if (hiddenCount > 0 && widget.onShowFullDay != null)
+                            TextButton(
+                              onPressed: widget.onShowFullDay,
+                              child: const Text('显示完整一天'),
+                            ),
+                        ],
+                      ),
+                    ),
+                  if (_expandedDrag)
+                    const Positioned(
+                      left: 24,
+                      bottom: 14,
+                      child: IgnorePointer(child: Text('拖动时临时展开 · 松手后恢复折叠')),
+                    ),
+                  if (hoverText != null && _hoverPosition != null)
                     Positioned(
                       left: _hoverPosition!.dx.clamp(
                         0,
@@ -503,8 +749,9 @@ class TimelineState extends State<Timeline> {
                             child: SizedBox(
                               width: 285,
                               child: Text(
-                                '${hover.title}\n${widget.journal.store.tagOutline(hover.tagId)}\n${clockText(hover.intervalOn(widget.journal.day)!.start)} — '
-                                '${hover.intervalOn(widget.journal.day)!.end == dayEnd(widget.journal.day) ? '24:00' : clockText(hover.intervalOn(widget.journal.day)!.end)} · ${durationText(hover.intervalOn(widget.journal.day)!.duration)}',
+                                hoverText,
+                                maxLines: 6,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ),
@@ -526,11 +773,11 @@ class _TimelinePainter extends CustomPainter {
     required this.journal,
     required this.events,
     required this.pieces,
-    required this.dayWidth,
     required this.zoom,
     required this.scheme,
     required this.tagColors,
     required this.tagDisplays,
+    required this.axis,
     required this.textStyle,
     this.preview,
     this.snap,
@@ -538,19 +785,15 @@ class _TimelinePainter extends CustomPainter {
   final JournalController journal;
   final List<Event> events;
   final Map<String, List<Rect>> pieces;
-  final double dayWidth;
   final double zoom;
   final ColorScheme scheme;
   final Map<String, TagColor> tagColors;
   final Map<String, TagDisplay> tagDisplays;
+  final TimelineAxis axis;
   final TextStyle textStyle;
   final Event? preview;
   final DateTime? snap;
-  double _x(DateTime value) =>
-      24 +
-      value.difference(journal.day).inMicroseconds /
-          const Duration(days: 1).inMicroseconds *
-          dayWidth;
+  double _x(DateTime value) => 24 + axis.x(value);
   void _text(
     Canvas canvas,
     String text,
@@ -588,8 +831,15 @@ class _TimelinePainter extends CustomPainter {
         : zoom < 3
         ? 30
         : 15;
-    while (dayWidth * major / 1440 < 56) {
-      major *= 2;
+    if (axis.isFolded) {
+      major = const [1, 5, 10, 15, 30, 60, 120, 240, 480].firstWhere(
+        (step) => axis.pixelsPerMinute * step >= 64,
+        orElse: () => 1440,
+      );
+    } else {
+      while (axis.pixelsPerMinute * major < 56) {
+        major *= 2;
+      }
     }
     var minor = major >= 120
         ? 60
@@ -598,21 +848,82 @@ class _TimelinePainter extends CustomPainter {
         : major == 30
         ? 10
         : 5;
+    minor = math.min(minor, major);
     if (preview != null) minor = math.min(minor, snapInterval(zoom));
+    bool visibleTime(DateTime value) =>
+        !axis.isFolded ||
+        axis.spans.any(
+          (span) =>
+              !span.folded &&
+              !value.isBefore(span.start) &&
+              !value.isAfter(span.end),
+        );
+    final labels = <DateTime>{};
     for (var minute = 0; minute <= 1440; minute += minor) {
-      final x = 24 + minute / 1440 * dayWidth;
+      final time = journal.day.add(Duration(minutes: minute));
+      if (!visibleTime(time)) continue;
+      final x = _x(time);
       canvas.drawLine(
         Offset(x, 43),
         Offset(x, minute % major == 0 || preview != null ? bottom : 49),
         border,
       );
       if (minute % major == 0) {
-        _text(
-          canvas,
-          '${(minute ~/ 60).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}',
-          Offset(x - 18, 16),
+        labels.add(time);
+      }
+    }
+    if (axis.isFolded) {
+      for (final span in axis.spans.where((span) => !span.folded)) {
+        labels.addAll([span.start, span.end]);
+      }
+    }
+    final orderedLabels = labels.toList()..sort();
+    final positions = <(double, String)>[];
+    for (final (index, time) in orderedLabels.indexed) {
+      final left = (_x(time) - 18)
+          .clamp(4.0, math.max(4.0, size.width - 43))
+          .toDouble();
+      if (index == orderedLabels.length - 1) {
+        while (positions.length > 1 && left < positions.last.$1 + 44) {
+          positions.removeLast();
+        }
+      }
+      if (positions.isEmpty || left >= positions.last.$1 + 44) {
+        positions.add((
+          left,
+          time == dayEnd(journal.day) ? '24:00' : clockText(time),
+        ));
+      }
+    }
+    for (final (left, text) in positions) {
+      _text(canvas, text, Offset(left, 16));
+    }
+    for (final span in axis.folds) {
+      final rect = Rect.fromLTRB(
+        24 + span.left + 1,
+        50,
+        24 + span.right - 1,
+        bottom,
+      );
+      if (rect.width > 0) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+          Paint()..color = scheme.surfaceContainerLow,
         );
       }
+      final center = 24 + span.left + span.width / 2;
+      canvas.save();
+      canvas.clipRect(
+        Rect.fromLTRB(24 + span.left, 30, 24 + span.right, bottom),
+      );
+      _text(canvas, '//', Offset(center - 6, 31), color: scheme.outline);
+      _text(
+        canvas,
+        '⋯',
+        Offset(center - 6, (50 + bottom) / 2 - 8),
+        color: scheme.outline,
+      );
+      canvas.restore();
     }
     for (final event in events) {
       final rectangles = pieces[event.id];
@@ -639,44 +950,79 @@ class _TimelinePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..color = selected ? scheme.onSurface : scheme.outline
         ..strokeWidth = selected ? 2 : 1;
-      if (event.tagId == null) {
-        for (final metric in path.computeMetrics()) {
-          for (double distance = 0; distance < metric.length; distance += 7) {
-            canvas.drawPath(
-              metric.extractPath(
-                distance,
-                math.min(metric.length, distance + 4),
-              ),
-              outline,
-            );
-          }
-        }
-      } else {
+      if (selected) {
         canvas.drawPath(path, outline);
       }
       final largest = rectangles.reduce(
         (a, b) => a.width * a.height >= b.width * b.height ? a : b,
       );
       if (largest.width >= 32 && largest.height >= 18) {
-        _text(
-          canvas,
-          event.title.isEmpty ? '新事件' : event.title,
-          Offset(largest.left + 8, largest.center.dy - 7),
-          width: largest.width - 14,
-          color: foreground,
-          bold: selected,
-        );
+        final title = event.title.isEmpty ? '新事件' : event.title;
+        if (axis.isFolded && largest.height >= 90) {
+          final interval = event.intervalOn(journal.day)!;
+          final primary = event.tagId == null
+              ? title
+              : journal.store.tagName(event.tagId);
+          _text(
+            canvas,
+            primary,
+            Offset(largest.left + 8, largest.center.dy - 35),
+            width: largest.width - 14,
+            color: foreground,
+            bold: true,
+          );
+          if (primary != title) {
+            _text(
+              canvas,
+              title,
+              Offset(largest.left + 8, largest.center.dy - 15),
+              width: largest.width - 14,
+              color: foreground,
+            );
+          }
+          if (largest.width >= 85) {
+            _text(
+              canvas,
+              '${clockText(interval.start)}–${interval.end == dayEnd(journal.day) ? '24:00' : clockText(interval.end)}',
+              Offset(largest.left + 8, largest.center.dy + 5),
+              width: largest.width - 14,
+              color: foreground,
+            );
+          }
+          _text(
+            canvas,
+            durationText(interval.duration),
+            Offset(largest.left + 8, largest.center.dy + 25),
+            width: largest.width - 14,
+            color: foreground,
+          );
+        } else {
+          _text(
+            canvas,
+            title,
+            Offset(largest.left + 8, largest.center.dy - 7),
+            width: largest.width - 14,
+            color: foreground,
+            bold: selected,
+          );
+        }
       }
     }
-    if (pieces.isEmpty) {
-      _text(canvas, '这一天还没有记录。', Offset(size.width / 2 - 65, size.height / 2));
-    }
     final now = civilTime(journal.clock());
-    if (dayStart(now) == journal.day) {
+    if (dayStart(now) == journal.day && axis.foldAt(axis.x(now)) == null) {
       final paint = Paint()
         ..color = scheme.tertiary
         ..strokeWidth = 2;
       canvas.drawLine(Offset(_x(now), 42), Offset(_x(now), bottom), paint);
+    }
+    if (axis.isFolded) {
+      _text(
+        canvas,
+        '已折叠 ${axis.folds.length} 段 · 可见覆盖 ${durationText(axis.visibleDuration)} · // 为折叠时段',
+        Offset(24, size.height - 21),
+        width: size.width - 48,
+        color: scheme.onSurfaceVariant,
+      );
     }
     if (preview != null) {
       final interval = preview!.intervalOn(journal.day)!;
