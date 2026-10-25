@@ -297,6 +297,7 @@ class JournalScreenState extends State<JournalScreen> {
     if (!await commit() || !mounted) return;
     final event = widget.journal.event(id);
     if (event == null ||
+        !widget.journal.canEditCell(event, column) ||
         event.isUndefined &&
             column != EventColumn.title &&
             column != EventColumn.tag) {
@@ -340,6 +341,7 @@ class JournalScreenState extends State<JournalScreen> {
   }
 
   Future<void> _add([DateTime? start]) async {
+    if (!widget.journal.canEditDay(start ?? widget.journal.day)) return;
     if (!await commit() || !mounted) return;
     try {
       final id = await widget.journal.addDraft(start: start);
@@ -484,9 +486,10 @@ class JournalScreenState extends State<JournalScreen> {
     if (event == null) return;
     final columns = [
       for (final column in EventColumn.values)
-        if (!event.isUndefined ||
-            column == EventColumn.title ||
-            column == EventColumn.tag)
+        if (widget.journal.canEditCell(event, column) &&
+            (!event.isUndefined ||
+                column == EventColumn.title ||
+                column == EventColumn.tag))
           column,
     ];
     final index = session == null
@@ -537,6 +540,13 @@ class JournalScreenState extends State<JournalScreen> {
           onNext: (backwards) => _queueKeyboard(() => _next(backwards)),
         );
 
+  bool get _canDeleteSelection => widget.journal.selected.every((id) {
+    final event = widget.journal.event(id);
+    return event == null ||
+        event.isUndefined ||
+        widget.journal.canEditEvent(event);
+  });
+
   Future<void> _context(Offset position, String? id, {DateTime? start}) async {
     if (!await commit() || !mounted) return;
     _timeline.currentState?.cancelDrag();
@@ -554,13 +564,25 @@ class JournalScreenState extends State<JournalScreen> {
       ),
       items: [
         if (start != null)
-          const PopupMenuItem(value: 'add', child: Text('在此新增事件')),
+          PopupMenuItem(
+            value: 'add',
+            enabled: widget.journal.canEditDay(start),
+            child: const Text('在此新增事件'),
+          ),
         if (event?.isUndefined == true)
           const PopupMenuItem(value: 'tag', child: Text('设置标签')),
         if (event != null && !event.isUndefined) ...[
-          const PopupMenuItem(value: 'delete', child: Text('删除')),
+          PopupMenuItem(
+            value: 'delete',
+            enabled: _canDeleteSelection,
+            child: const Text('删除'),
+          ),
           if (!widget.journal.drafts.containsKey(id))
-            const PopupMenuItem(value: 'details', child: Text('编辑详情')),
+            PopupMenuItem(
+              value: 'details',
+              enabled: widget.journal.canEditEvent(event),
+              child: const Text('编辑详情'),
+            ),
         ],
       ],
     );
@@ -625,7 +647,9 @@ class JournalScreenState extends State<JournalScreen> {
         }),
       ),
       const SingleActivator(LogicalKeyboardKey.delete): () {
-        if (_edit == null) unawaited(_action(widget.journal.deleteSelected));
+        if (_edit == null && _canDeleteSelection) {
+          unawaited(_action(widget.journal.deleteSelected));
+        }
       },
     },
     child: Focus(
@@ -738,6 +762,26 @@ class JournalScreenState extends State<JournalScreen> {
                               Text(
                                 '星期${'一二三四五六日'[widget.journal.day.weekday - 1]}',
                               ),
+                              if (widget.journal.allowHistoryEditing ||
+                                  !widget.journal.canEditDay(
+                                    widget.journal.day,
+                                  ))
+                                Expanded(
+                                  child: Align(
+                                    alignment: Alignment.centerRight,
+                                    child: Text(
+                                      widget.journal.allowHistoryEditing
+                                          ? '历史编辑已开启'
+                                          : '已归档 · 仅可修改标签',
+                                      key: const ValueKey('archive-status'),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall,
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -849,7 +893,12 @@ class JournalScreenState extends State<JournalScreen> {
                                 ),
                               FilledButton.icon(
                                 key: const ValueKey('add-event'),
-                                onPressed: () => unawaited(_add()),
+                                onPressed:
+                                    widget.journal.canEditDay(
+                                      widget.journal.day,
+                                    )
+                                    ? () => unawaited(_add())
+                                    : null,
                                 icon: const Icon(Icons.add),
                                 label: const Text('新增事件'),
                               ),

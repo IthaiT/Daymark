@@ -42,10 +42,10 @@ class AppScreen extends StatefulWidget {
   final JournalViewPreferences journalView;
   final Future<void> Function(JournalViewPreferences)? onJournalViewChanged;
   @override
-  State<AppScreen> createState() => _AppScreenState();
+  State<AppScreen> createState() => AppScreenState();
 }
 
-class _AppScreenState extends State<AppScreen> {
+class AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
   final _tagMapScreen = GlobalKey<TagMapScreenState>();
   final _ledgerFocus = FocusNode();
@@ -56,6 +56,8 @@ class _AppScreenState extends State<AppScreen> {
   bool _visitedLedger = false;
   bool _visitedTagMap = false;
   bool _visitedStatistics = false;
+  Future<bool> commit() =>
+      _journal.currentState?.commit() ?? Future.value(true);
   @override
   void dispose() {
     _tagMap.dispose();
@@ -116,6 +118,8 @@ class _AppScreenState extends State<AppScreen> {
     await showSettingsDialog(
       context,
       settings: widget.journal.settings,
+      allowHistoryEditing: widget.journal.allowHistoryEditing,
+      onHistoryEditingChanged: widget.journal.setAllowHistoryEditing,
       onSave: (value) async {
         await widget.journal.applySettings(value);
         await widget.settings.update(value);

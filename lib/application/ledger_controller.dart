@@ -33,6 +33,7 @@ class LedgerController extends ChangeNotifier {
   Future<void> _tail = Future.value();
   bool _busy = false;
   bool get busy => _busy;
+  Future<void> waitForWrites() => _tail;
   String _id() => const Uuid().v4();
 
   Future<T> _run<T>(Future<T> Function() action) {

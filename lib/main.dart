@@ -11,6 +11,7 @@ import 'application/ledger_controller.dart';
 import 'application/appearance_controller.dart';
 import 'application/settings_controller.dart';
 import 'data/appearance_store.dart';
+import 'data/archive_store.dart';
 import 'domain/appearance.dart';
 import 'domain/journal_view_preferences.dart';
 import 'data/instance_lock.dart';
@@ -84,9 +85,15 @@ Future<void> main(List<String> arguments) async {
     final ledgerStore = await LedgerStore.open(directory);
     final store = await Store.open(directory);
     final settingsStore = await SettingsStore.open(directory);
-    final journal = JournalController(store, settings: settingsStore.state);
+    final archive = await ArchiveStore.open(directory);
+    final journal = JournalController(
+      store,
+      archive: archive,
+      settings: settingsStore.state,
+    );
     await journal.initialize();
     final appearanceStore = await AppearanceStore.open(directory);
+    await windowManager.setPreventClose(true);
     runApp(
       DaymarkApp(
         journal: journal,
@@ -141,17 +148,21 @@ class DaymarkApp extends StatefulWidget {
   State<DaymarkApp> createState() => _DaymarkAppState();
 }
 
-class _DaymarkAppState extends State<DaymarkApp> {
+class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
   late AppearanceController _appearance;
   late bool _ownsAppearance;
   late SettingsController _settings;
   late bool _ownsSettings;
   final _messenger = GlobalKey<ScaffoldMessengerState>();
   Set<String>? _colorRootIds;
+  final _app = GlobalKey<AppScreenState>();
+  final _journal = GlobalKey<JournalScreenState>();
+  bool _closing = false;
 
   @override
   void initState() {
     super.initState();
+    windowManager.addListener(this);
     _ownsAppearance = widget.appearance == null;
     _appearance = widget.appearance ?? AppearanceController();
     _ownsSettings = widget.settings == null;
@@ -253,8 +264,33 @@ class _DaymarkAppState extends State<DaymarkApp> {
       _appearance.setJournalView(value);
 
   @override
+  void onWindowClose() => unawaited(_close());
+
+  Future<void> _close() async {
+    if (_closing) return;
+    _closing = true;
+    try {
+      final committed =
+          await (_app.currentState?.commit() ??
+              _journal.currentState?.commit() ??
+              Future.value(true));
+      if (!committed) return;
+      await widget.ledger?.waitForWrites();
+      await widget.journal.archiveForClose();
+      await windowManager.destroy();
+    } catch (error) {
+      _messenger.currentState?.showSnackBar(
+        SnackBar(content: Text('无法完成归档，窗口尚未关闭：$error')),
+      );
+    } finally {
+      _closing = false;
+    }
+  }
+
+  @override
   void dispose() {
     widget.journal.removeListener(_syncRootColors);
+    windowManager.removeListener(this);
     if (_ownsAppearance) _appearance.dispose();
     if (_ownsSettings) _settings.dispose();
     widget.instanceLock?.close();
@@ -278,6 +314,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
       supportedLocales: const [Locale('zh', 'CN')],
       home: widget.ledger == null
           ? JournalScreen(
+              key: _journal,
               journal: widget.journal,
               tagColors: _appearance.state.tagColors,
               onTagColorChanged: _appearance.busy ? null : _setTagColor,
@@ -286,6 +323,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
               onJournalViewChanged: _setJournalView,
             )
           : AppScreen(
+              key: _app,
               journal: widget.journal,
               ledger: widget.ledger!,
               settings: _settings,

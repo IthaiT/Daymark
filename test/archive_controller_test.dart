@@ -165,6 +165,10 @@ void main() {
       expect(promoted.start, gap.start);
       expect(promoted.end, gap.end);
       expect(promoted.notes, gap.notes);
+      await journal.undo();
+      expect(store.events[gap.id], gap);
+      await journal.redo();
+      expect(store.events[id], promoted);
       await journal.archiveForClose();
       expect((await ArchiveStore.open(directory)).events[id], promoted);
     },

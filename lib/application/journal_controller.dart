@@ -77,8 +77,9 @@ class JournalController extends ChangeNotifier {
       final next = after[id];
       if (previous == next || tagConversionIds.contains(id)) continue;
       if (!(previous != null && isArchived(previous)) &&
-          !(next != null && isArchived(next)))
+          !(next != null && isArchived(next))) {
         continue;
+      }
       if (previous != null &&
           next != null &&
           previous.copyWith(tagId: next.tagId, clearTag: next.tagId == null) ==
@@ -508,11 +509,36 @@ class JournalController extends ChangeNotifier {
         event.tagId == null || store.tags.containsKey(event.tagId)
         ? event
         : event.copyWith(clearTag: true);
+    final restored = {
+      for (final item in snapshot.events.values) item.id: normalize(item),
+    };
+    final current = store.events;
+    final removed = current.values.where(
+      (event) => !restored.containsKey(event.id),
+    );
+    final added = restored.values.where(
+      (event) => !current.containsKey(event.id),
+    );
+    final tagConversions = <String>{};
+    for (final previous in removed) {
+      for (final next in added) {
+        if (previous.isUndefined != next.isUndefined &&
+            previous.copyWith(
+                  id: next.id,
+                  tagId: next.tagId,
+                  clearTag: next.tagId == null,
+                ) ==
+                next) {
+          tagConversions.addAll([previous.id, next.id]);
+        }
+      }
+    }
     await _apply(
-      {for (final item in snapshot.events.values) item.id: normalize(item)},
+      restored,
       {for (final item in snapshot.drafts.values) item.id: normalize(item)},
       record: false,
       suggestedEndIds: snapshot.suggestedEndIds,
+      tagConversionIds: tagConversions,
     );
   }
 

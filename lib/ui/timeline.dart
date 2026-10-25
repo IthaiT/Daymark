@@ -205,6 +205,7 @@ class TimelineState extends State<Timeline> {
   (Event, DragEdge)? _handle(Offset content) {
     final candidates = <(double, bool, Event, DragEdge)>[];
     for (final event in _events) {
+      if (!widget.journal.canEditEvent(event)) continue;
       final pieces = _pieces[event.id];
       final interval = event.intervalOn(widget.journal.day);
       if (pieces == null || interval == null) continue;
@@ -269,7 +270,11 @@ class TimelineState extends State<Timeline> {
       orderedIds: _displayEvents.map((event) => event.id),
     );
     _focus.requestFocus();
-    if (hit.isUndefined || widget.editorEventId == hit.id) return;
+    if (hit.isUndefined ||
+        widget.editorEventId == hit.id ||
+        !widget.journal.canEditEvent(hit)) {
+      return;
+    }
     setState(() {
       _dragAxis = axis;
       _dragScale = axis.pixelsPerMinute;
@@ -289,6 +294,10 @@ class TimelineState extends State<Timeline> {
 
   void _move(PointerMoveEvent pointer) {
     if (_original == null || _pointer != pointer.pointer) return;
+    if (!widget.journal.canEditEvent(_original!)) {
+      cancelDrag();
+      return;
+    }
     double dragPixels() =>
         pointer.localPosition.dx -
         _anchorX +
@@ -407,12 +416,13 @@ class TimelineState extends State<Timeline> {
     final content = _content(pointer.localPosition);
     final handle = _handle(content);
     final fold = handle == null ? _foldHit(content) : null;
+    final hit = _hit(content);
     setState(() {
       _cursor = fold != null
           ? SystemMouseCursors.click
           : handle != null
           ? SystemMouseCursors.resizeLeftRight
-          : _hit(content)?.isUndefined == false
+          : hit != null && !hit.isUndefined && widget.journal.canEditEvent(hit)
           ? SystemMouseCursors.move
           : SystemMouseCursors.basic;
       _hoverId = handle == null ? _hit(content)?.id : null;

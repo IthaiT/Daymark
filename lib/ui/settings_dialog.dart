@@ -7,15 +7,29 @@ Future<void> showSettingsDialog(
   BuildContext context, {
   required AppSettings settings,
   required Future<void> Function(AppSettings) onSave,
+  bool allowHistoryEditing = false,
+  ValueChanged<bool>? onHistoryEditingChanged,
 }) => showDialog<void>(
   context: context,
-  builder: (_) => _SettingsDialog(settings: settings, onSave: onSave),
+  builder: (_) => _SettingsDialog(
+    settings: settings,
+    onSave: onSave,
+    allowHistoryEditing: allowHistoryEditing,
+    onHistoryEditingChanged: onHistoryEditingChanged,
+  ),
 );
 
 class _SettingsDialog extends StatefulWidget {
-  const _SettingsDialog({required this.settings, required this.onSave});
+  const _SettingsDialog({
+    required this.settings,
+    required this.onSave,
+    required this.allowHistoryEditing,
+    this.onHistoryEditingChanged,
+  });
   final AppSettings settings;
   final Future<void> Function(AppSettings) onSave;
+  final bool allowHistoryEditing;
+  final ValueChanged<bool>? onHistoryEditingChanged;
   @override
   State<_SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -24,6 +38,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late bool _autoUndefined = widget.settings.autoUndefined;
   late int _dragMinutes = widget.settings.dragMinutes;
   late bool _splitOverlap = widget.settings.splitOverlap;
+  late bool _allowHistoryEditing = widget.allowHistoryEditing;
   bool _saving = false;
   String? _error;
 
@@ -41,6 +56,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           splitOverlap: _splitOverlap,
         ),
       );
+      widget.onHistoryEditingChanged?.call(_allowHistoryEditing);
       if (mounted) Navigator.pop(context);
     } catch (error) {
       if (mounted) setState(() => _error = errorText(error));
@@ -76,6 +92,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 onChanged: _saving
                     ? null
                     : (value) => setState(() => _autoUndefined = value),
+              ),
+              const Divider(height: 24),
+              SwitchListTile(
+                key: const ValueKey('setting-history-editing'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('允许修改已归档事件'),
+                subtitle: const Text('仅本次运行有效，重新打开软件后自动关闭。关闭时已归档事件仅可修改标签。'),
+                value: _allowHistoryEditing,
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() => _allowHistoryEditing = value),
               ),
               const Divider(height: 24),
               Text('拖动颗粒度', style: Theme.of(context).textTheme.titleSmall),
