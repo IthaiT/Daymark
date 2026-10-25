@@ -667,49 +667,78 @@ void main() {
     },
   );
 
-  testWidgets('renders synthetic annual work activity screenshot', (
-    tester,
-  ) async {
-    await loadScreenshotFonts(tester);
-    final events = <String, Event>{};
-    for (var index = 0; index < 300; index++) {
-      final date = DateTime.utc(2026).add(Duration(days: index));
-      if (date.weekday > 5 || index % 23 == 0) continue;
-      final hours = index % 11 == 0
-          ? 12
-          : index % 7 == 0
-          ? 11
-          : 9;
-      events['sample-$index'] = Event(
-        'sample-$index',
-        '合成工作记录',
-        'work',
-        date.add(const Duration(hours: 8)),
-        date.add(Duration(hours: 8 + hours)),
+  testWidgets(
+    'renders synthetic multi-tag activity and linked rows screenshot',
+    (tester) async {
+      await loadScreenshotFonts(tester);
+      final events = <String, Event>{};
+      for (var index = 0; index < 300; index++) {
+        final date = DateTime.utc(2026).add(Duration(days: index));
+        if (date.weekday > 5 || index % 23 == 0) continue;
+        final hours = index % 11 == 0
+            ? 12
+            : index % 7 == 0
+            ? 11
+            : 9;
+        events['sample-$index'] = Event(
+          'sample-$index',
+          '合成工作记录',
+          'work',
+          date.add(const Duration(hours: 8)),
+          date.add(Duration(hours: 8 + hours)),
+        );
+        if (index % 3 == 0) {
+          events['rest-$index'] = Event(
+            'rest-$index',
+            '合成休息记录',
+            'rest',
+            date.add(const Duration(hours: 20)),
+            date.add(const Duration(hours: 21)),
+          );
+        }
+      }
+      events['sample-unclassified'] = Event(
+        'sample-unclassified',
+        '未分类记录',
+        null,
+        DateTime.utc(2026, 10, 22, 21, 30),
+        DateTime.utc(2026, 10, 22, 22),
       );
-    }
-    await store.replaceEvents(events);
-    final boundaryKey = GlobalKey();
-    await open(tester, boundary: boundaryKey);
-    await heatmap(tester);
-    await select(tester, 'work');
-    await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-22')));
-    await tester.pumpAndSettle();
-    final boundary =
-        boundaryKey.currentContext!.findRenderObject()!
-            as RenderRepaintBoundary;
-    final image = (await tester.runAsync(
-      () => boundary.toImage(pixelRatio: 1),
-    ))!;
-    final bytes = (await tester.runAsync(
-      () => image.toByteData(format: ui.ImageByteFormat.png),
-    ))!;
-    await tester.runAsync(
-      () => File(
-        '.test-artifacts/tag-activity-heatmap.png',
-      ).writeAsBytes(bytes.buffer.asUint8List()),
-    );
-    image.dispose();
-    expect(tester.takeException(), isNull);
-  });
+      await store.replaceEvents(events);
+      final boundaryKey = GlobalKey();
+      await open(tester, boundary: boundaryKey);
+      await heatmap(tester);
+      await select(tester, 'work');
+      await tester.enterText(
+        find.byKey(const ValueKey('activity-tag-picker')),
+        '休息',
+      );
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-22')));
+      await tester.pumpAndSettle();
+      expect(find.byType(InputChip), findsNWidgets(2));
+      expect(find.text('合成工作记录'), findsOneWidget);
+      expect(find.text('合成休息记录'), findsOneWidget);
+      expect(find.text('未分类记录'), findsNothing);
+      final boundary =
+          boundaryKey.currentContext!.findRenderObject()!
+              as RenderRepaintBoundary;
+      final image = (await tester.runAsync(
+        () => boundary.toImage(pixelRatio: 1),
+      ))!;
+      final bytes = (await tester.runAsync(
+        () => image.toByteData(format: ui.ImageByteFormat.png),
+      ))!;
+      await tester.runAsync(
+        () => File(
+          '.test-artifacts/tag-activity-heatmap.png',
+        ).writeAsBytes(bytes.buffer.asUint8List()),
+      );
+      image.dispose();
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

@@ -517,7 +517,7 @@ class _TagSearchFieldState extends State<TagSearchField> {
       controller: _text,
       focusNode: _focus,
       decoration: InputDecoration(
-        hintText: widget.clearAfterSelection ? '搜索并添加标签（可多选）' : '输入标签名称搜索',
+        hintText: widget.clearAfterSelection ? '搜索标签，可继续添加' : '输入标签名称搜索',
         prefixIcon: const Icon(Icons.search, size: 18),
       ),
       onTap: _show,
