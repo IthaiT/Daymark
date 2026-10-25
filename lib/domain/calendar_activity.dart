@@ -109,9 +109,29 @@ class CalendarActivity {
       durations.values.where((value) => value > Duration.zero).length;
   Duration on(DateTime day) => durations[dayStart(day)] ?? Duration.zero;
 
-  /// Zero activity plus four quarter-peak bands, from light to dark.
-  int level(Duration value) =>
-      value <= Duration.zero || maximum <= Duration.zero
-      ? 0
-      : (value.inMicroseconds / maximum.inMicroseconds * 4).ceil().clamp(1, 4);
+  late final List<double> _quartiles = () {
+    final values =
+        durations.values
+            .where((value) => value > Duration.zero)
+            .map((value) => value.inMicroseconds.toDouble())
+            .toList()
+          ..sort();
+    if (values.isEmpty) return <double>[];
+
+    // R-7 interpolation, also used by D3 and the default R quantile function.
+    double quantile(double probability) {
+      final rank = (values.length - 1) * probability;
+      final lower = rank.floor();
+      final upper = rank.ceil();
+      return values[lower] + (values[upper] - values[lower]) * (rank - lower);
+    }
+
+    return [quantile(.25), quantile(.5), quantile(.75)];
+  }();
+
+  /// Zero is separate; equal values always share a right-inclusive quartile.
+  int level(Duration value) {
+    if (value <= Duration.zero || _quartiles.isEmpty) return 0;
+    return 1 + _quartiles.where((bound) => value.inMicroseconds > bound).length;
+  }
 }

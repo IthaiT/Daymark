@@ -178,38 +178,56 @@ void main() {
     expect(activity.total, const Duration(hours: 3));
   });
 
-  test('five levels use quarter-peak bands and rescale with the peak', () {
-    CalendarActivity peak(int hours) => CalendarActivity.of(
-      year: 2026,
-      events: [
+  CalendarActivity distribution(List<int> minutes) => CalendarActivity.of(
+    year: 2026,
+    events: [
+      for (final (index, value) in minutes.indexed)
         event(
-          'peak',
-          DateTime.utc(2026, 1, 1),
-          DateTime.utc(2026, 1, 1, hours),
+          'day-$index',
+          DateTime.utc(2026).add(Duration(days: index)),
+          DateTime.utc(2026).add(Duration(days: index, minutes: value)),
         ),
-      ],
-    );
-    final twelve = peak(12);
+    ],
+  );
+
+  test('quartiles interpolate active days and exclude zero-activity days', () {
+    final activity = distribution([0, 60, 120, 180, 240, 300, 360, 420, 480]);
     expect(
       [
         Duration.zero,
         const Duration(microseconds: 1),
-        const Duration(hours: 3),
-        const Duration(hours: 3, microseconds: 1),
-        const Duration(hours: 6),
-        const Duration(hours: 6, microseconds: 1),
-        const Duration(hours: 9),
-        const Duration(hours: 9, microseconds: 1),
-        const Duration(hours: 12),
-        const Duration(hours: 13),
-      ].map(twelve.level),
-      [0, 1, 1, 2, 2, 3, 3, 4, 4, 4],
+        const Duration(hours: 2, minutes: 45),
+        const Duration(hours: 2, minutes: 45, microseconds: 1),
+        const Duration(hours: 4, minutes: 30),
+        const Duration(hours: 4, minutes: 30, microseconds: 1),
+        const Duration(hours: 6, minutes: 15),
+        const Duration(hours: 6, minutes: 15, microseconds: 1),
+        const Duration(hours: 8),
+      ].map(activity.level),
+      [0, 1, 1, 2, 2, 3, 3, 4, 4],
     );
-    expect(peak(10).level(const Duration(hours: 10)), 4);
-    expect(peak(20).level(const Duration(hours: 10)), 2);
-    expect(peak(20).level(const Duration(hours: 20)), 4);
-    expect(twelve.level(Duration.zero), 0);
   });
+
+  test('quartiles distinguish close work durations despite a long outlier', () {
+    final activity = distribution([480, 540, 570, 600, 630, 1440]);
+    expect(activity.level(const Duration(minutes: 570)), 2);
+    expect(activity.level(const Duration(minutes: 630)), 4);
+    expect(activity.level(const Duration(hours: 24)), 4);
+  });
+
+  test(
+    'equal durations stay together and small samples remain deterministic',
+    () {
+      final repeated = distribution([360, 480, 480, 480, 480, 600]);
+      expect(repeated.level(const Duration(hours: 8)), 1);
+      expect(repeated.level(const Duration(hours: 10)), 4);
+      expect(distribution([480]).level(const Duration(hours: 8)), 1);
+      expect(distribution([480, 480]).level(const Duration(hours: 8)), 1);
+      final pair = distribution([360, 600]);
+      expect(pair.level(const Duration(hours: 6)), 1);
+      expect(pair.level(const Duration(hours: 10)), 4);
+    },
+  );
 
   test('empty and unclassified selections have independent totals', () {
     final empty = CalendarActivity.of(year: 2026, events: []);

@@ -486,7 +486,7 @@ void main() {
         '2026-10-23',
         '2026-10-24',
       ].map((date) => cellColor(tester, date)).toSet();
-      expect(shades.length, 2);
+      expect(shades.length, 3);
       final legend = find
           .ancestor(of: find.text('少'), matching: find.byType(Row))
           .first;
@@ -546,7 +546,7 @@ void main() {
   );
 
   testWidgets(
-    'unclassified excludes derived gaps and edits rescale immediately',
+    'unclassified excludes derived gaps and edits update quartile ranks',
     (tester) async {
       await open(tester);
       await heatmap(tester);
@@ -560,11 +560,11 @@ void main() {
       await journal!.updateEvent(
         store.events['work-2']!.copyWith(
           start: day,
-          end: day.add(const Duration(hours: 20)),
+          end: day.add(const Duration(hours: 5)),
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('单日峰值 20 小时 00 分'), findsOneWidget);
+      expect(find.text('单日峰值 11 小时 00 分'), findsOneWidget);
       expect(cellColor(tester, '2026-10-22'), isNot(before));
       await journal!.undo();
       await tester.pumpAndSettle();
