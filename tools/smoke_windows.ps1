@@ -10,7 +10,7 @@ $taskPreviousDay = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
 $taskTags = '{"version":1,"tags":[{"id":"work","name":"主业","parent_id":null}]}'
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'tags.json'), $taskTags, [Text.UTF8Encoding]::new($false))
 $taskLegacyHead = "undefined:legacy-leading,未定义,,${taskPreviousDay}T00:00:00,${taskPreviousDay}T22:00:00,`r`n"
-$taskEvents = "id,title,tag_id,start,end,notes`r`nvideo,视频,work,${taskPreviousDay}T22:00:00,${taskPreviousDay}T23:50:00,`r`nsleep,睡觉,work,${taskDay}T00:06:00,${taskDay}T08:00:00,`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
+$taskEvents = "id,title,tag_id,start,end,notes`r`ncoverage,合成整日覆盖,work,${taskPreviousDay}T00:00:00,${taskPreviousDay}T22:00:00,`r`nvideo,视频,work,${taskPreviousDay}T22:00:00,${taskPreviousDay}T23:50:00,`r`nsleep,睡觉,work,${taskDay}T00:06:00,${taskDay}T08:00:00,`r`nsynthetic,合成记录,work,${taskDay}T09:00:00,${taskDay}T10:00:00,隔离桌面测试`r`n"
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'events.csv'), $taskEvents + $taskLegacyHead, [Text.UTF8Encoding]::new($true))
 $taskLedger = '{"version":2,"default_cash_account_id":"cash","balance_enabled":true,"accounts":[{"id":"cash","name":"现金","kind":"cash","opening_cents":1000000,"balance_cents":997200},{"id":"provident","name":"公积金","kind":"provident","opening_cents":0,"balance_cents":0},{"id":"investment","name":"投资","kind":"investment","opening_cents":0,"balance_cents":0}],"categories":[{"id":"lunch","name":"午餐","kind":"expense","parent_id":null}],"records":[{"id":"synthetic-money","kind":"expense","amount_cents":2800,"date":"' + $taskDay + '","category_id":"lunch","notes":"隔离测试","account_id":"cash","to_account_id":null,"affects_balance":true}],"pinned":["lunch"]}'
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'ledger.json'), $taskLedger, [Text.UTF8Encoding]::new($false))
@@ -233,4 +233,8 @@ public static class DaymarkPrivateDesktop {
 }
 '@
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
-Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+$taskArchive = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'archive.json') | ConvertFrom-Json
+if ($taskArchive.version -ne 1 -or $taskArchive.days.Count -ne 1 -or $taskArchive.days[0] -ne $taskPreviousDay -or -not ($taskArchive.events.id -contains 'coverage')) {
+    throw 'Startup/normal close did not retain the completed-day archive backup.'
+}
+Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, completed-day archive backup and graceful close, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
