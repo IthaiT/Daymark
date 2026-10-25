@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../data/archive_store.dart';
 import '../data/store.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/history.dart';
+import '../domain/journal_archive.dart';
 import '../domain/model.dart';
 import '../domain/settings.dart';
 
@@ -37,6 +39,7 @@ class JournalSnapshot {
 class JournalController extends ChangeNotifier {
   JournalController(
     this.store, {
+    this.archive,
     DateTime? day,
     DateTime Function()? clock,
     AppSettings settings = const AppSettings(),
@@ -44,6 +47,48 @@ class JournalController extends ChangeNotifier {
        _settings = settings,
        clock = clock ?? DateTime.now;
   final Store store;
+  final ArchiveStore? archive;
+  bool _allowHistoryEditing = false;
+  bool get allowHistoryEditing => _allowHistoryEditing;
+  final _editedArchivedIds = <String>{};
+
+  void setAllowHistoryEditing(bool value) {
+    if (_allowHistoryEditing == value) return;
+    _allowHistoryEditing = value;
+    notifyListeners();
+  }
+
+  bool isArchived(Event event) =>
+      archive != null && eventTouchesDays(event, archive!.days);
+  bool canEditEvent(Event event) => allowHistoryEditing || !isArchived(event);
+  bool canEditDay(DateTime day) =>
+      allowHistoryEditing || !(archive?.days.contains(dayStart(day)) ?? false);
+  bool canEditCell(Event event, EventColumn column) =>
+      column == EventColumn.tag || canEditEvent(event);
+
+  void _checkHistoryChanges(
+    Map<String, Event> before,
+    Map<String, Event> after, {
+    Set<String> tagConversionIds = const {},
+  }) {
+    if (allowHistoryEditing) return;
+    for (final id in {...before.keys, ...after.keys}) {
+      final previous = before[id];
+      final next = after[id];
+      if (previous == next || tagConversionIds.contains(id)) continue;
+      if (!(previous != null && isArchived(previous)) &&
+          !(next != null && isArchived(next)))
+        continue;
+      if (previous != null &&
+          next != null &&
+          previous.copyWith(tagId: next.tagId, clearTag: next.tagId == null) ==
+              next) {
+        continue;
+      }
+      throw const FormatException('事件已归档，仅可修改标签。请在设置中开启「允许修改已归档事件」。');
+    }
+  }
+
   final DateTime Function() clock;
   final history = History<JournalSnapshot>();
   AppSettings _settings;
@@ -140,11 +185,28 @@ class JournalController extends ChangeNotifier {
     DateTime? day,
     bool record = true,
     Set<String>? suggestedEndIds,
+    Set<String> tagConversionIds = const {},
   }) async {
     final before = _capture();
+    // Validate requested edits before derived gaps are reconciled. Automatic
+    // gap behavior is unchanged, including startup and settings transitions.
+    _checkHistoryChanges(
+      store.events,
+      events,
+      tagConversionIds: tagConversionIds,
+    );
+    _checkHistoryChanges(_drafts, drafts);
+    final edited = {
+      for (final id in {...before.events.keys, ...events.keys})
+        if (before.events[id] != events[id] &&
+            (before.events[id] != null && isArchived(before.events[id]!) ||
+                events[id] != null && isArchived(events[id]!)))
+          id,
+    };
     final desiredDay = day ?? _day;
     final desired = _reconcile(events, drafts);
     if (!mapEquals(desired, store.events)) await store.replaceEvents(desired);
+    _editedArchivedIds.addAll(edited);
     _drafts = Map.of(drafts);
     _suggestedEndIds = {
       for (final id in suggestedEndIds ?? _suggestedEndIds)
@@ -158,8 +220,18 @@ class JournalController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> initialize() =>
-      _run(() => _apply(store.events, _drafts, record: false));
+  Future<void> _archiveCompletedDays() async {
+    await archive?.capture(store, clock(), editedIds: _editedArchivedIds);
+    _editedArchivedIds.clear();
+  }
+
+  Future<void> initialize() => _run(() async {
+    await _archiveCompletedDays();
+    await _apply(store.events, _drafts, record: false);
+  });
+
+  /// Runs behind every pending event write; blank drafts remain in memory.
+  Future<void> archiveForClose() => _run(_archiveCompletedDays);
 
   /// Applies a new recording policy. Disabling derived undefined records only
   /// hides them; stored gaps and their user-edited names are never discarded.
@@ -323,7 +395,8 @@ class JournalController extends ChangeNotifier {
     }
     if (changed.tagId != null &&
         (changed.title.trim().isEmpty ||
-            current.isUndefined && current.title == '未定义')) {
+            current.isUndefined && current.title == '未定义') &&
+        canEditEvent(current)) {
       changed = changed.copyWith(title: store.tagName(changed.tagId));
     }
     final events = {...store.events};
@@ -361,6 +434,12 @@ class JournalController extends ChangeNotifier {
       suggestedEndIds: column == EventColumn.end
           ? ({..._suggestedEndIds}..remove(id))
           : null,
+      tagConversionIds:
+          current.isUndefined &&
+              column == EventColumn.tag &&
+              changed.tagId != null
+          ? {current.id, changed.id}
+          : const {},
     );
     select(changed.id);
     return changed.id;
