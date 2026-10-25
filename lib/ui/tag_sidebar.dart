@@ -16,7 +16,7 @@ class TagSidebar extends StatefulWidget {
     required this.onError,
     this.tagColors = const {},
     this.onTagColorChanged,
-    this.activityTagId,
+    this.activityTagIds = const {},
     this.onActivityTagSelected,
   });
   final JournalController journal;
@@ -24,7 +24,7 @@ class TagSidebar extends StatefulWidget {
   final ValueChanged<Object> onError;
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
-  final String? activityTagId;
+  final Set<String> activityTagIds;
   final ValueChanged<String>? onActivityTagSelected;
   @override
   State<TagSidebar> createState() => _TagSidebarState();
@@ -174,7 +174,7 @@ class _TagSidebarState extends State<TagSidebar> {
                                 depth: store.ancestors(tag.id).length - 1,
                                 selected: widget.onActivityTagSelected == null
                                     ? _selected == tag.id
-                                    : widget.activityTagId == tag.id,
+                                    : widget.activityTagIds.contains(tag.id),
                                 collapsed: _collapsed.contains(tag.id),
                                 onToggle: _hasChildren(store, tag)
                                     ? () => setState(() => _toggle(tag.id))

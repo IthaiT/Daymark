@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
 import '../domain/appearance.dart';
+import '../domain/calendar_activity.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/model.dart';
 import 'calendar_heatmap.dart';
@@ -47,13 +48,10 @@ class JournalScreenState extends State<JournalScreen> {
   bool _calendarOpen = false;
   EventTableMode _tableMode = EventTableMode.chronological;
   JournalChartMode _chartMode = JournalChartMode.timeline;
-  ActivityTag _activityTag = allActivityTags;
+  ActivityTagSelection _activityTag = allActivityTags;
 
-  ActivityTag get _validActivityTag =>
-      _activityTag.id != null &&
-          !widget.journal.store.tags.containsKey(_activityTag.id)
-      ? allActivityTags
-      : _activityTag;
+  ActivityTagSelection get _validActivityTag =>
+      _activityTag.validFor(widget.journal.store.tags);
 
   Future<void> _setChartMode(JournalChartMode mode) async {
     if (_chartMode == mode || !await commit() || !mounted) return;
@@ -61,7 +59,7 @@ class JournalScreenState extends State<JournalScreen> {
     setState(() => _chartMode = mode);
   }
 
-  Future<void> _setActivityTag(ActivityTag value) async {
+  Future<void> _setActivityTag(ActivityTagSelection value) async {
     if (!await commit() || !mounted) return;
     setState(() => _activityTag = value);
   }
@@ -512,11 +510,11 @@ class JournalScreenState extends State<JournalScreen> {
                     child: WorkspaceLayout(
                       sidebar: TagSidebar(
                         journal: widget.journal,
-                        activityTagId: _validActivityTag.id,
+                        activityTagIds: _validActivityTag.ids.nonNulls.toSet(),
                         onActivityTagSelected:
                             _chartMode == JournalChartMode.activity
                             ? (id) => unawaited(
-                                _setActivityTag((id: id, unclassified: false)),
+                                _setActivityTag(ActivityTagSelection([id])),
                               )
                             : null,
                         beforeAction: _beforeAction,

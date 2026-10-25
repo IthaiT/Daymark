@@ -10,6 +10,74 @@ void main() {
     String? tag = 'work',
   ]) => Event(id, id, tag, start, end);
 
+  final tags = {
+    'work': const Tag('work', '工作', null),
+    'child': const Tag('child', '子项', 'work'),
+    'rest': const Tag('rest', '休息', null),
+    'other': const Tag('other', '其他', null),
+  };
+
+  test(
+    'multi-tag selection includes descendants and ordinary unclassified',
+    () {
+      final selection = ActivityTagSelection(['work', 'child', 'rest', null]);
+      final start = DateTime.utc(2026, 10, 1, 22);
+      final events = [
+        event('parent', start, start.add(const Duration(hours: 2))),
+        event('child', start, start.add(const Duration(hours: 3)), 'child'),
+        event('rest', start, start.add(const Duration(hours: 4)), 'rest'),
+        event('free', start, start.add(const Duration(hours: 1)), null),
+        event('other', start, start.add(const Duration(hours: 4)), 'other'),
+        event(
+          'undefined:gap',
+          start,
+          start.add(const Duration(hours: 5)),
+          null,
+        ),
+      ];
+      expect(
+        events
+            .where((event) => selection.includes(event, tags))
+            .map((e) => e.id),
+        ['parent', 'child', 'rest', 'free'],
+      );
+      for (final split in [false, true]) {
+        final activity = CalendarActivity.of(
+          year: 2026,
+          events: events,
+          where: (event) => selection.includes(event, tags),
+          splitOverlap: split,
+        );
+        expect(
+          activity.on(DateTime.utc(2026, 10, 1)),
+          split ? const Duration(minutes: 93) : const Duration(hours: 2),
+        );
+        expect(
+          activity.on(DateTime.utc(2026, 10, 2)),
+          split ? const Duration(minutes: 70) : const Duration(hours: 2),
+        );
+      }
+      expect(() => selection.ids.clear(), throwsUnsupportedError);
+    },
+  );
+
+  test('selection keeps remaining stable IDs after tag deletion or a move', () {
+    final selection = ActivityTagSelection(['work', 'rest', null]);
+    final remaining = selection.validFor({...tags}..remove('rest'));
+    expect(remaining.ids, {'work', null});
+    expect(remaining.remove('work').ids, {null});
+    expect(remaining.remove('work').remove(null).isAll, isTrue);
+    expect(ActivityTagSelection(['missing']).validFor(tags).isAll, isTrue);
+    final child = event('child', DateTime.utc(2026), null, 'child');
+    expect(ActivityTagSelection(['work']).includes(child, tags), isTrue);
+    expect(
+      ActivityTagSelection([
+        'work',
+      ]).includes(child, {...tags, 'child': const Tag('child', '子项', 'other')}),
+      isFalse,
+    );
+  });
+
   test(
     'clips year edges, splits midnight and preserves leap day and seconds',
     () {

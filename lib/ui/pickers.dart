@@ -173,10 +173,11 @@ List<String?> matchingTagIds(
   String query, {
   Set<String> excluded = const {},
   String emptyLabel = '未分类',
+  bool includeUnclassified = true,
 }) {
   final needle = caseFold(query.trim());
   return [
-    if (caseFold(emptyLabel).contains(needle)) null,
+    if (includeUnclassified && caseFold(emptyLabel).contains(needle)) null,
     for (final tag in store.orderedTags())
       if (!excluded.contains(tag.id) &&
           caseFold(
@@ -196,6 +197,7 @@ class TagChoices extends StatefulWidget {
     this.emptyLabel = '未分类',
     this.query = '',
     this.showSelection = true,
+    this.includeUnclassified = true,
   });
   final Store store;
   final ValueChanged<String?> onChoose;
@@ -204,6 +206,7 @@ class TagChoices extends StatefulWidget {
   final String emptyLabel;
   final String query;
   final bool showSelection;
+  final bool includeUnclassified;
   @override
   State<TagChoices> createState() => TagChoicesState();
 }
@@ -218,6 +221,7 @@ class TagChoicesState extends State<TagChoices> {
             widget.query,
             excluded: widget.excluded,
             emptyLabel: widget.emptyLabel,
+            includeUnclassified: widget.includeUnclassified,
           )
           .where(
             (id) =>
@@ -301,6 +305,8 @@ class TagSearchField extends StatefulWidget {
     required this.onChanged,
     this.allSelected = false,
     this.onChooseAll,
+    this.clearAfterSelection = false,
+    this.excluded = const {},
   }) : assert(!allSelected || onChooseAll != null);
 
   final Store store;
@@ -308,6 +314,8 @@ class TagSearchField extends StatefulWidget {
   final ValueChanged<String?> onChanged;
   final bool allSelected;
   final VoidCallback? onChooseAll;
+  final bool clearAfterSelection;
+  final Set<String?> excluded;
 
   @override
   State<TagSearchField> createState() => _TagSearchFieldState();
@@ -326,7 +334,9 @@ class _TagSearchFieldState extends State<TagSearchField> {
   late String _label;
   _TagSearchOption? _active;
 
-  String get _selectionLabel => widget.allSelected
+  String get _selectionLabel => widget.clearAfterSelection
+      ? ''
+      : widget.allSelected
       ? '全部标签'
       : widget.value == null
       ? '未分类'
@@ -341,11 +351,17 @@ class _TagSearchFieldState extends State<TagSearchField> {
       (id: null, all: true),
     for (final id
         in visible
-            ? _choices.currentState?.visibleIds ??
-                  matchingTagIds(widget.store, _query)
-            : matchingTagIds(widget.store, _query))
+            ? _choices.currentState?.visibleIds ?? _matchingIds()
+            : _matchingIds())
       (id: id, all: false),
   ];
+
+  List<String?> _matchingIds() => matchingTagIds(
+    widget.store,
+    _query,
+    excluded: widget.excluded.nonNulls.toSet(),
+    includeUnclassified: !widget.excluded.contains(null),
+  );
 
   @override
   void initState() {
@@ -360,9 +376,10 @@ class _TagSearchFieldState extends State<TagSearchField> {
   void didUpdateWidget(TagSearchField oldWidget) {
     super.didUpdateWidget(oldWidget);
     final label = _selectionLabel;
-    if (oldWidget.value != widget.value ||
-        oldWidget.allSelected != widget.allSelected ||
-        label != _label) {
+    if (!widget.clearAfterSelection &&
+        (oldWidget.value != widget.value ||
+            oldWidget.allSelected != widget.allSelected ||
+            label != _label)) {
       _label = label;
       _open = false;
       _query = '';
@@ -398,7 +415,9 @@ class _TagSearchFieldState extends State<TagSearchField> {
     setState(() {
       _open = true;
       _query = '';
-      _active = (id: widget.value, all: widget.allSelected);
+      _active = widget.clearAfterSelection
+          ? _options().firstOrNull
+          : (id: widget.value, all: widget.allSelected);
       _text.selection = TextSelection(
         baseOffset: 0,
         extentOffset: _text.text.length,
@@ -416,6 +435,16 @@ class _TagSearchFieldState extends State<TagSearchField> {
   }
 
   void _choose(_TagSearchOption option) {
+    if (widget.clearAfterSelection && !option.all) {
+      setState(() {
+        _query = '';
+        _active = null;
+        _text.clear();
+      });
+      _focus.requestFocus();
+      widget.onChanged(option.id);
+      return;
+    }
     _close();
     if (option.all) {
       widget.onChooseAll?.call();
@@ -487,9 +516,9 @@ class _TagSearchFieldState extends State<TagSearchField> {
       groupId: _group,
       controller: _text,
       focusNode: _focus,
-      decoration: const InputDecoration(
-        hintText: '输入标签名称搜索',
-        prefixIcon: Icon(Icons.search, size: 18),
+      decoration: InputDecoration(
+        hintText: widget.clearAfterSelection ? '搜索并添加标签（可多选）' : '输入标签名称搜索',
+        prefixIcon: const Icon(Icons.search, size: 18),
       ),
       onTap: _show,
       onChanged: (text) => setState(() {
@@ -517,6 +546,8 @@ class _TagSearchFieldState extends State<TagSearchField> {
             key: _choices,
             store: widget.store,
             query: _query,
+            excluded: widget.excluded.nonNulls.toSet(),
+            includeUnclassified: !widget.excluded.contains(null),
             selected: _active?.id,
             showSelection: _active != null && !_active!.all,
             onChoose: (id) => _choose((id: id, all: false)),

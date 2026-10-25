@@ -99,6 +99,59 @@ void main() {
   Color? cellColor(WidgetTester tester, String date) =>
       tester.widget<Material>(find.byKey(ValueKey('activity-day-$date'))).color;
 
+  testWidgets('adds repeated searches, excludes duplicates and removes chips', (
+    tester,
+  ) async {
+    await open(tester);
+    await heatmap(tester);
+    final search = find.byKey(const ValueKey('activity-tag-picker'));
+    Future<void> add(String query) async {
+      await tester.enterText(search, query);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+    }
+
+    await add('主业');
+    await add('Linux');
+    await add('未分类');
+    expect(
+      tester
+          .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+          .selection
+          .ids,
+      {'work', 'linux', null},
+    );
+    expect(find.byType(InputChip), findsNWidgets(3));
+    expect(find.text('累计 33 小时 00 分 · 3 个活跃日'), findsOneWidget);
+    await tester.enterText(search, 'LINUX');
+    await tester.pumpAndSettle();
+    expect(find.text('没有匹配的标签'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('移除未分类'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+          .selection
+          .ids,
+      {'work', 'linux'},
+    );
+    expect(find.text('累计 32 小时 00 分 · 3 个活跃日'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('activity-clear-tags')));
+    await tester.pumpAndSettle();
+    expect(find.byType(InputChip), findsNothing);
+    expect(
+      tester
+          .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+          .selection
+          .isAll,
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'defaults to timeline; parent selection includes children and preserves rows',
     (tester) async {
@@ -133,8 +186,8 @@ void main() {
         tester
             .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
             .selection
-            .id,
-        'linux',
+            .ids,
+        {'linux'},
       );
       expect(tester.takeException(), isNull);
     },
@@ -300,18 +353,15 @@ void main() {
         tester
             .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
             .selection
-            .id,
-        'linux',
+            .ids,
+        {'linux'},
       );
-      expect(find.byType(TagChoices), findsNothing);
+      expect(find.byType(TagChoices), findsOneWidget);
       final input = find.descendant(
         of: search,
         matching: find.byType(TextField),
       );
-      expect(
-        tester.widget<TextField>(input).controller!.text,
-        '主业 / 嵌入式 / Linux',
-      );
+      expect(tester.widget<TextField>(input).controller!.text, '');
       expect(find.text('单日峰值 12 小时 00 分'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
@@ -332,15 +382,15 @@ void main() {
         tester
             .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
             .selection
-            .id,
-        'embedded',
+            .ids,
+        {'embedded'},
       );
       await select(tester, 'rest');
       final input = find.descendant(
         of: search,
         matching: find.byType(TextField),
       );
-      expect(tester.widget<TextField>(input).controller!.text, '生活 / 休息');
+      expect(tester.widget<TextField>(input).controller!.text, '');
       await tester.enterText(search, '不存在的标签');
       await tester.pumpAndSettle();
       expect(find.text('没有匹配的标签'), findsOneWidget);
@@ -350,12 +400,12 @@ void main() {
         tester
             .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
             .selection
-            .id,
-        'rest',
+            .ids,
+        {'rest'},
       );
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      expect(tester.widget<TextField>(input).controller!.text, '生活 / 休息');
+      expect(tester.widget<TextField>(input).controller!.text, '');
       expect(find.byType(TagChoices), findsNothing);
       await tester.enterText(search, '全部');
       await tester.pumpAndSettle();
@@ -400,8 +450,11 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
     expect(
-      tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection.id,
-      'linux',
+      tester
+          .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+          .selection
+          .ids,
+      {'linux'},
     );
     expect(tester.takeException(), isNull);
   });
@@ -426,8 +479,8 @@ void main() {
         tester
             .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
             .selection
-            .id,
-        'other-linux',
+            .ids,
+        {'other-linux'},
       );
       expect(find.text('本年暂无已完成记录'), findsOneWidget);
       expect(store.events['work-2']!.tagId, 'linux');

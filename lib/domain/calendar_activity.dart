@@ -1,6 +1,39 @@
 import 'event_stats.dart';
 import 'model.dart';
 
+/// An empty selection means all tags; null selects ordinary unclassified rows.
+class ActivityTagSelection {
+  ActivityTagSelection(Iterable<String?> ids) : ids = Set.unmodifiable(ids);
+  const ActivityTagSelection.all() : ids = const {};
+
+  final Set<String?> ids;
+  bool get isAll => ids.isEmpty;
+
+  ActivityTagSelection add(String? id) => ActivityTagSelection({...ids, id});
+  ActivityTagSelection remove(String? id) =>
+      ActivityTagSelection(ids.where((value) => value != id));
+
+  ActivityTagSelection validFor(Map<String, Tag> tags) {
+    final valid = ids.where((id) => id == null || tags.containsKey(id));
+    if (valid.length == ids.length) return this;
+    return valid.isEmpty
+        ? const ActivityTagSelection.all()
+        : ActivityTagSelection(valid);
+  }
+
+  bool includes(Event event, Map<String, Tag> tags) {
+    if (event.isUndefined) return false;
+    if (isAll) return true;
+    var id = event.tagId;
+    if (id == null) return ids.contains(null);
+    while (id != null) {
+      if (ids.contains(id)) return true;
+      id = tags[id]?.parentId;
+    }
+    return false;
+  }
+}
+
 /// Daily civil-time totals for one year, independent of the visible day.
 class CalendarActivity {
   CalendarActivity._(this.year, Map<DateTime, Duration> durations)

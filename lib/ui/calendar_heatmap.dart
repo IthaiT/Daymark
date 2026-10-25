@@ -8,8 +8,7 @@ import '../domain/model.dart';
 import 'pickers.dart';
 import 'theme.dart';
 
-typedef ActivityTag = ({String? id, bool unclassified});
-const allActivityTags = (id: null, unclassified: false);
+const allActivityTags = ActivityTagSelection.all();
 
 /// A GitHub-style year grid. Its scale belongs to the selected tag and year.
 class CalendarHeatmap extends StatefulWidget {
@@ -22,8 +21,8 @@ class CalendarHeatmap extends StatefulWidget {
   });
 
   final JournalController journal;
-  final ActivityTag selection;
-  final ValueChanged<ActivityTag> onSelectionChanged;
+  final ActivityTagSelection selection;
+  final ValueChanged<ActivityTagSelection> onSelectionChanged;
   final ValueChanged<DateTime> onDaySelected;
 
   @override
@@ -46,25 +45,21 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
     final journal = widget.journal;
     final store = journal.store;
     final selection = widget.selection;
-    final tagId = selection.id;
-    final ids = tagId == null ? null : store.descendants(tagId);
+    final tagId = selection.ids.length == 1 ? selection.ids.single : null;
     final activity = CalendarActivity.of(
       year: journal.day.year,
       events: store.events.values,
-      where: (event) => selection.unclassified
-          ? event.tagId == null
-          : ids == null || ids.contains(event.tagId),
+      where: (event) => selection.includes(event, store.tags),
       splitOverlap: journal.splitOverlap,
     );
     final family = tagId == null
         ? Colors.green
         : tagFamily(context, store, tagId);
     final scheme = Theme.of(context).colorScheme;
-    final name = selection.unclassified
+    String label(String? id) => id == null
         ? '未分类'
-        : tagId == null
-        ? '全部标签'
-        : store.ancestors(tagId).map((tag) => tag.name).join(' / ');
+        : store.ancestors(id).map((tag) => tag.name).join(' / ');
+    final name = selection.isAll ? '全部标签' : selection.ids.map(label).join('、');
 
     Color color(int level) =>
         level == 0 ? scheme.surfaceContainerHighest : family[level * 100]!;
@@ -92,14 +87,14 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                   child: TagSearchField(
                     key: const ValueKey('activity-tag-picker'),
                     store: store,
-                    value: tagId,
-                    allSelected: tagId == null && !selection.unclassified,
+                    value: null,
+                    clearAfterSelection: true,
+                    excluded: selection.ids,
+                    allSelected: selection.isAll,
                     onChooseAll: () =>
                         widget.onSelectionChanged(allActivityTags),
-                    onChanged: (id) => widget.onSelectionChanged((
-                      id: id,
-                      unclassified: id == null,
-                    )),
+                    onChanged: (id) =>
+                        widget.onSelectionChanged(selection.add(id)),
                   ),
                 ),
                 Row(
@@ -136,6 +131,33 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                 ),
               ],
             ),
+            if (!selection.isAll) ...[
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final id in selection.ids)
+                    InputChip(
+                      key: ValueKey(('activity-tag-chip', id)),
+                      label: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        child: Text(label(id), overflow: TextOverflow.ellipsis),
+                      ),
+                      tooltip: label(id),
+                      deleteButtonTooltipMessage: '移除${label(id)}',
+                      onDeleted: () =>
+                          widget.onSelectionChanged(selection.remove(id)),
+                    ),
+                  TextButton(
+                    key: const ValueKey('activity-clear-tags'),
+                    onPressed: () => widget.onSelectionChanged(allActivityTags),
+                    child: const Text('全部标签'),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {
