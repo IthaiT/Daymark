@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../data/appearance_store.dart';
 import '../domain/appearance.dart';
+import '../domain/journal_view_preferences.dart';
 
 class AppearanceController extends ChangeNotifier {
   AppearanceController([this.store]);
@@ -22,6 +23,23 @@ class AppearanceController extends ChangeNotifier {
   Future<void> setTagColor(String tagId, TagColor? color) => _change(() {
     if (state.tagColors[tagId] == color) return null;
     return state.withTagColor(tagId, color);
+  });
+
+  Future<void> setTagStyle(
+    String tagId,
+    TagColor? color,
+    TagDisplay? display,
+  ) => _change(() {
+    if (state.tagColors[tagId] == color &&
+        state.tagDisplays[tagId] == display) {
+      return null;
+    }
+    return state.withTagStyle(tagId, color, display);
+  });
+
+  Future<void> setJournalView(JournalViewPreferences value) => _change(() {
+    if (state.journalView == value) return null;
+    return state.copyWith(journalView: value);
   });
 
   /// Serializes appearance writes; a null result means nothing changed.
