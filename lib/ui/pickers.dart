@@ -306,6 +306,7 @@ class TagSearchField extends StatefulWidget {
     this.allSelected = false,
     this.onChooseAll,
     this.clearAfterSelection = false,
+    this.chips = const [],
     this.excluded = const {},
   }) : assert(!allSelected || onChooseAll != null);
 
@@ -315,6 +316,7 @@ class TagSearchField extends StatefulWidget {
   final bool allSelected;
   final VoidCallback? onChooseAll;
   final bool clearAfterSelection;
+  final List<Widget> chips;
   final Set<String?> excluded;
 
   @override
@@ -408,6 +410,7 @@ class _TagSearchFieldState extends State<TagSearchField> {
     } else {
       _close();
     }
+    if (widget.clearAfterSelection) setState(() {});
   }
 
   void _show() {
@@ -507,19 +510,24 @@ class _TagSearchFieldState extends State<TagSearchField> {
   }
 
   @override
-  Widget build(BuildContext context) => PickerPopup(
-    open: _open,
-    groupId: _group,
-    color: Theme.of(context).colorScheme.surfaceContainer,
-    onClose: _close,
-    anchor: TextField(
+  Widget build(BuildContext context) {
+    final input = TextField(
       groupId: _group,
       controller: _text,
       focusNode: _focus,
-      decoration: InputDecoration(
-        hintText: widget.clearAfterSelection ? '搜索标签' : '输入标签名称搜索',
-        prefixIcon: const Icon(Icons.search, size: 18),
-      ),
+      decoration: widget.clearAfterSelection
+          ? const InputDecoration(
+              hintText: '搜索标签',
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            )
+          : const InputDecoration(
+              hintText: '输入标签名称搜索',
+              prefixIcon: Icon(Icons.search, size: 18),
+            ),
       onTap: _show,
       onChanged: (text) => setState(() {
         _query = text;
@@ -529,32 +537,79 @@ class _TagSearchFieldState extends State<TagSearchField> {
       onEditingComplete: () {},
       onSubmitted: (_) => _confirm(),
       onTapOutside: (_) => _close(),
-    ),
-    builder: (context, close) => Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_options().any((option) => option.all))
-          TagTreeTile(
-            key: _allChoice,
-            store: widget.store,
-            label: '全部标签',
-            selected: _active?.all == true,
-            onTap: () => _choose((id: null, all: true)),
-          ),
-        if (_options().any((option) => !option.all) || _options().isEmpty)
-          TagChoices(
-            key: _choices,
-            store: widget.store,
-            query: _query,
-            excluded: widget.excluded.nonNulls.toSet(),
-            includeUnclassified: !widget.excluded.contains(null),
-            selected: _active?.id,
-            showSelection: _active != null && !_active!.all,
-            onChoose: (id) => _choose((id: id, all: false)),
-          ),
-      ],
-    ),
-  );
+    );
+    return PickerPopup(
+      open: _open,
+      groupId: _group,
+      color: Theme.of(context).colorScheme.surfaceContainer,
+      onClose: _close,
+      anchor: !widget.clearAfterSelection
+          ? input
+          : GestureDetector(
+              onTap: () {
+                _focus.requestFocus();
+                _show();
+              },
+              child: InputDecorator(
+                isFocused: _focus.hasFocus,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search, size: 18),
+                ),
+                child: SizedBox(
+                  height: 70,
+                  child: SingleChildScrollView(
+                    key: const ValueKey('tag-search-chips'),
+                    primary: false,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 70),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        heightFactor: 1,
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ...widget.chips,
+                            SizedBox(
+                              key: const ValueKey('tag-search-input'),
+                              width: 180,
+                              child: input,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+      builder: (context, close) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_options().any((option) => option.all))
+            TagTreeTile(
+              key: _allChoice,
+              store: widget.store,
+              label: '全部标签',
+              selected: _active?.all == true,
+              onTap: () => _choose((id: null, all: true)),
+            ),
+          if (_options().any((option) => !option.all) || _options().isEmpty)
+            TagChoices(
+              key: _choices,
+              store: widget.store,
+              query: _query,
+              excluded: widget.excluded.nonNulls.toSet(),
+              includeUnclassified: !widget.excluded.contains(null),
+              selected: _active?.id,
+              showSelection: _active != null && !_active!.all,
+              onChoose: (id) => _choose((id: id, all: false)),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class TagField extends StatefulWidget {

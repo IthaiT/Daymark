@@ -100,12 +100,15 @@ void main() {
   Color? cellColor(WidgetTester tester, String date) =>
       tester.widget<Material>(find.byKey(ValueKey('activity-day-$date'))).color;
 
-  testWidgets('adds repeated searches, excludes duplicates and removes chips', (
+  testWidgets('keeps chosen tags in search and ignores duplicate selections', (
     tester,
   ) async {
     await open(tester);
     await heatmap(tester);
     final search = find.byKey(const ValueKey('activity-tag-picker'));
+    final initialSearch = tester.getRect(search);
+    final year = find.byKey(const ValueKey('activity-year-controls'));
+    final initialYear = tester.getRect(year);
     Future<void> add(String query) async {
       await tester.enterText(search, query);
       await tester.pumpAndSettle();
@@ -124,10 +127,12 @@ void main() {
       {'work', 'linux', null},
     );
     expect(find.byType(InputChip), findsNWidgets(3));
-    final searchY = tester.getCenter(search).dy;
+    expect(tester.getRect(search), initialSearch);
+    expect(tester.getRect(year), initialYear);
     for (var index = 0; index < 3; index++) {
       final chip = find.byType(InputChip).at(index);
-      expect(tester.getCenter(chip).dy, closeTo(searchY, 1));
+      expect(initialSearch.contains(tester.getTopLeft(chip)), isTrue);
+      expect(initialSearch.contains(tester.getBottomRight(chip)), isTrue);
       final event = store.events[['work-0', 'work-2', 'free'][index]]!;
       expect(
         tester.widget<InputChip>(chip).backgroundColor,
@@ -139,7 +144,16 @@ void main() {
     expect(find.text('累计 33 小时 00 分 · 3 个活跃日'), findsOneWidget);
     await tester.enterText(search, 'LINUX');
     await tester.pumpAndSettle();
-    expect(find.text('没有匹配的标签'), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-choice-linux')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.byType(InputChip), findsNWidgets(3));
+    expect(find.byKey(const ValueKey('tag-choice-work')), findsOneWidget);
+    expect(find.byKey(const ValueKey('tag-choice-linux')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('tag-choice-unclassified')),
+      findsOneWidget,
+    );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('移除未分类'));
@@ -166,6 +180,54 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'many chips wrap inside a fixed input without shifting the chart',
+    (tester) async {
+      await store.replaceTags({
+        ...store.tags,
+        for (var index = 0; index < 7; index++)
+          'extra-$index': Tag('extra-$index', '用于换行的较长标签名称 $index', null),
+      });
+      await open(tester);
+      await heatmap(tester);
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      final year = find.byKey(const ValueKey('activity-year-controls'));
+      final grid = find.byKey(const ValueKey('activity-grid'));
+      final searchBounds = tester.getRect(search);
+      final yearBounds = tester.getRect(year);
+      final gridBounds = tester.getRect(grid);
+      double? firstLeft;
+      for (var index = 0; index < 7; index++) {
+        await tester.enterText(search, '用于换行的较长标签名称 $index');
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        firstLeft ??= tester.getTopLeft(find.byType(InputChip).first).dx;
+        expect(tester.getTopLeft(find.byType(InputChip).first).dx, firstLeft);
+        expect(tester.getRect(search), searchBounds);
+        expect(tester.getRect(year), yearBounds);
+        expect(tester.getRect(grid), gridBounds);
+      }
+      expect(find.byType(InputChip), findsNWidgets(7));
+      final viewport = find.byKey(const ValueKey('tag-search-chips'));
+      expect(
+        tester.widget<SingleChildScrollView>(viewport).scrollDirection,
+        Axis.vertical,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      final summary = tester.getRect(
+        find.byKey(const ValueKey('activity-summary')),
+      );
+      final legend = tester.getRect(
+        find.byKey(const ValueKey('activity-legend')),
+      );
+      expect(summary.top, greaterThanOrEqualTo(gridBounds.bottom));
+      expect(legend.right, closeTo(yearBounds.right, 1));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'day cells link both table modes to the selected tag union and descendants',
@@ -197,8 +259,8 @@ void main() {
       await open(tester);
       final original = Map.of(store.events);
       await heatmap(tester);
-      await select(tester, 'work');
       final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await select(tester, 'work');
       await tester.enterText(search, '休息');
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
@@ -499,20 +561,19 @@ void main() {
     (tester) async {
       await open(tester, size: const Size(760, 440));
       await heatmap(tester);
-      await select(tester, 'work');
       final search = find.byKey(const ValueKey('activity-tag-picker'));
+      final searchBounds = tester.getRect(search);
+      final year = find.byKey(const ValueKey('activity-year-controls'));
+      final yearBounds = tester.getRect(year);
+      await select(tester, 'work');
       await tester.enterText(search, 'Linux');
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
-      for (var index = 0; index < 2; index++) {
-        expect(
-          tester.getCenter(find.byType(InputChip).at(index)).dy,
-          closeTo(tester.getCenter(search).dy, 1),
-        );
-      }
+      expect(tester.getRect(search), searchBounds);
+      expect(tester.getRect(year), yearBounds);
       expect(tester.takeException(), isNull);
       await journal!.setDay(DateTime.utc(2024, 2, 29));
       await tester.pumpAndSettle();

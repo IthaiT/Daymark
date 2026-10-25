@@ -33,25 +33,10 @@ class CalendarHeatmap extends StatefulWidget {
 class _CalendarHeatmapState extends State<CalendarHeatmap> {
   final _horizontal = ScrollController();
   final _vertical = ScrollController();
-  final _tags = ScrollController();
-
-  @override
-  void didUpdateWidget(CalendarHeatmap oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.selection.ids.length > oldWidget.selection.ids.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _tags.hasClients) {
-          _tags.jumpTo(_tags.position.maxScrollExtent);
-        }
-      });
-    }
-  }
-
   @override
   void dispose() {
     _horizontal.dispose();
     _vertical.dispose();
-    _tags.dispose();
     super.dispose();
   }
 
@@ -87,12 +72,13 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
       return InputChip(
         key: ValueKey(('activity-tag-chip', id)),
         label: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 100),
+          constraints: const BoxConstraints(maxWidth: 200),
           child: Text(store.tagName(id), overflow: TextOverflow.ellipsis),
         ),
         backgroundColor: fill,
         labelStyle: TextStyle(color: ink),
         deleteIconColor: ink,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         side: BorderSide.none,
         tooltip: label(id),
         deleteButtonTooltipMessage: '移除${label(id)}',
@@ -116,86 +102,54 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            LayoutBuilder(
-              builder: (context, constraints) => Wrap(
-                spacing: 16,
-                runSpacing: 6,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  SizedBox(
-                    width: selection.isAll
-                        ? 240
-                        : math.min(480, constraints.maxWidth),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: selection.isAll
-                              ? 240
-                              : math.min(240, constraints.maxWidth / 2),
-                          child: TagSearchField(
-                            key: const ValueKey('activity-tag-picker'),
-                            store: store,
-                            value: null,
-                            clearAfterSelection: true,
-                            excluded: selection.ids,
-                            onChanged: (id) =>
-                                widget.onSelectionChanged(selection.add(id)),
-                          ),
-                        ),
-                        if (!selection.isAll)
-                          Expanded(
-                            child: SingleChildScrollView(
-                              controller: _tags,
-                              scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Row(
-                                children: [
-                                  for (final id in selection.ids)
-                                    Padding(
-                                      padding: const EdgeInsets.only(right: 6),
-                                      child: chip(id),
-                                    ),
-                                ],
-                              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TagSearchField(
+                    key: const ValueKey('activity-tag-picker'),
+                    store: store,
+                    value: null,
+                    clearAfterSelection: true,
+                    chips: [for (final id in selection.ids) chip(id)],
+                    onChanged: (id) {
+                      if (!selection.ids.contains(id)) {
+                        widget.onSelectionChanged(selection.add(id));
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Row(
+                  key: const ValueKey('activity-year-controls'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      key: const ValueKey('activity-previous-year'),
+                      tooltip: '上一年',
+                      onPressed: activity.year <= 1
+                          ? null
+                          : () => widget.onDaySelected(
+                              DateTime.utc(activity.year - 1),
                             ),
-                          ),
-                      ],
+                      icon: const Icon(Icons.chevron_left),
                     ),
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        key: const ValueKey('activity-previous-year'),
-                        tooltip: '上一年',
-                        onPressed: activity.year <= 1
-                            ? null
-                            : () => widget.onDaySelected(
-                                DateTime.utc(activity.year - 1),
-                              ),
-                        icon: const Icon(Icons.chevron_left),
-                      ),
-                      Text(
-                        '${activity.year} 年',
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                      IconButton(
-                        key: const ValueKey('activity-next-year'),
-                        tooltip: '下一年',
-                        onPressed: activity.year >= 9999
-                            ? null
-                            : () => widget.onDaySelected(
-                                DateTime.utc(activity.year + 1),
-                              ),
-                        icon: const Icon(Icons.chevron_right),
-                      ),
-                    ],
-                  ),
-                  Text(
-                    '累计 ${durationText(activity.total)} · ${activity.activeDays} 个活跃日',
-                  ),
-                ],
-              ),
+                    Text(
+                      '${activity.year} 年',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    IconButton(
+                      key: const ValueKey('activity-next-year'),
+                      tooltip: '下一年',
+                      onPressed: activity.year >= 9999
+                          ? null
+                          : () => widget.onDaySelected(
+                              DateTime.utc(activity.year + 1),
+                            ),
+                      icon: const Icon(Icons.chevron_right),
+                    ),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             LayoutBuilder(
@@ -215,6 +169,7 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.only(bottom: 12),
                     child: SizedBox(
+                      key: const ValueKey('activity-grid'),
                       width: width,
                       child: Column(
                         children: [
@@ -278,19 +233,32 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
               },
             ),
             const SizedBox(height: 4),
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  activity.activeDays == 0
-                      ? '本年暂无已完成记录'
-                      : '单日峰值 ${durationText(activity.maximum)}',
-                  key: const ValueKey('activity-peak'),
-                  style: Theme.of(context).textTheme.bodySmall,
+                Expanded(
+                  child: Wrap(
+                    spacing: 16,
+                    runSpacing: 4,
+                    children: [
+                      Text(
+                        '累计 ${durationText(activity.total)} · ${activity.activeDays} 个活跃日',
+                        key: const ValueKey('activity-summary'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      Text(
+                        activity.activeDays == 0
+                            ? '本年暂无已完成记录'
+                            : '单日峰值 ${durationText(activity.maximum)}',
+                        key: const ValueKey('activity-peak'),
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 16),
                 Row(
+                  key: const ValueKey('activity-legend'),
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text('少'),
