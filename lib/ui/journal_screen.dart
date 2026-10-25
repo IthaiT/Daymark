@@ -53,15 +53,31 @@ class JournalScreenState extends State<JournalScreen> {
   ActivityTagSelection get _validActivityTag =>
       _activityTag.validFor(widget.journal.store.tags);
 
+  List<Event> get _tableRows {
+    final journal = widget.journal;
+    final rows = journal.rows;
+    if (_chartMode == JournalChartMode.timeline) return rows;
+    final selection = _validActivityTag;
+    return rows.where((event) {
+      // Keep new/pasted rows reachable until their editing session ends.
+      return selection.includes(event, journal.store.tags) ||
+          journal.drafts.containsKey(event.id) ||
+          journal.selected.contains(event.id) ||
+          _edit?.event.id == event.id;
+    }).toList();
+  }
+
   Future<void> _setChartMode(JournalChartMode mode) async {
     if (_chartMode == mode || !await commit() || !mounted) return;
     _timeline.currentState?.cancelDrag();
     setState(() => _chartMode = mode);
+    widget.journal.clearSelection();
   }
 
   Future<void> _setActivityTag(ActivityTagSelection value) async {
     if (!await commit() || !mounted) return;
     setState(() => _activityTag = value);
+    widget.journal.clearSelection();
   }
 
   @override
@@ -705,6 +721,7 @@ class JournalScreenState extends State<JournalScreen> {
                                 key: _table,
                                 journal: widget.journal,
                                 mode: _tableMode,
+                                events: _tableRows,
                                 onCell: (id, column) =>
                                     unawaited(_cell(id, column)),
                                 onBlank: () => unawaited(_clear()),

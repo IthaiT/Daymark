@@ -25,12 +25,14 @@ class EventTable extends StatefulWidget {
     required this.onContext,
     required this.beforeScroll,
     required this.mode,
+    this.events,
     this.editorId,
     this.editorColumn,
     this.editor,
   });
   final JournalController journal;
   final EventTableMode mode;
+  final List<Event>? events;
   final void Function(String, EventColumn?) onCell;
   final VoidCallback onBlank;
   final VoidCallback onAdd;
@@ -48,6 +50,7 @@ class EventTableState extends State<EventTable> {
   final horizontal = ScrollController();
   final _expanded = <EventGroupKey>{};
   EventTableMode get _mode => widget.mode;
+  List<Event> get _rows => widget.events ?? widget.journal.rows;
   Map<String, Event?> _lastSelection = {};
   late DateTime _day = widget.journal.day;
   static const _rowHeight = 40.0;
@@ -72,7 +75,7 @@ class EventTableState extends State<EventTable> {
   }
 
   List<EventGroup> get _groups => eventGroups(
-    widget.journal.rows,
+    _rows,
     widget.journal.day,
     draftIds: widget.journal.drafts.keys.toSet(),
     profile: _profile,
@@ -92,8 +95,7 @@ class EventTableState extends State<EventTable> {
   List<_TableEntry> get _entries {
     if (_mode == EventTableMode.chronological) {
       return [
-        for (final event in widget.journal.rows)
-          (event: event, group: null, nested: false),
+        for (final event in _rows) (event: event, group: null, nested: false),
       ];
     }
     return [

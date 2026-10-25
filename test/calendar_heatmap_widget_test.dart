@@ -6,6 +6,7 @@ import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/domain/settings.dart';
 import 'package:daymark/ui/calendar_heatmap.dart';
+import 'package:daymark/ui/event_table.dart';
 import 'package:daymark/ui/journal_screen.dart';
 import 'package:daymark/ui/pickers.dart';
 import 'package:daymark/ui/theme.dart';
@@ -149,6 +150,184 @@ void main() {
           .isAll,
       isTrue,
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'day cells link both table modes to the selected tag union and descendants',
+    (tester) async {
+      await store.replaceEvents({
+        ...store.events,
+        'rest-day': Event(
+          'rest-day',
+          '休息记录',
+          'rest',
+          day.add(const Duration(hours: 20)),
+          day.add(const Duration(hours: 21)),
+        ),
+        'overnight': Event(
+          'overnight',
+          '跨日工作',
+          'linux',
+          day.subtract(const Duration(hours: 1)),
+          day.add(const Duration(hours: 1)),
+        ),
+        'unfinished': Event(
+          'unfinished',
+          '待补全工作',
+          'linux',
+          day.add(const Duration(hours: 7)),
+          null,
+        ),
+      });
+      await open(tester);
+      final original = Map.of(store.events);
+      await heatmap(tester);
+      await select(tester, 'work');
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.enterText(search, '休息');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-24')));
+      await tester.pumpAndSettle();
+      List<String> rows() => tester
+          .widget<EventTable>(find.byType(EventTable))
+          .events!
+          .map((event) => event.id)
+          .toList();
+      expect(rows(), ['overnight', 'unfinished', 'work-2', 'rest-day']);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      expect(find.text('跨日工作'), findsOneWidget);
+      expect(find.text('待补全工作'), findsOneWidget);
+      await tester.tap(find.text('汇总'));
+      await tester.pumpAndSettle();
+      expect(rows(), ['overnight', 'unfinished', 'work-2', 'rest-day']);
+      expect(find.text('未分类 / 未定义'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-23')));
+      await tester.pumpAndSettle();
+      expect(rows(), ['work-1', 'overnight']);
+      await tester.tap(find.text('时间轴'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('next-day')));
+      await tester.pumpAndSettle();
+      expect(rows(), journal!.rows.map((event) => event.id).toList());
+      expect(rows(), contains('free'));
+      expect(store.events, original);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'unclassified table excludes gaps and tag changes clear selection',
+    (tester) async {
+      await open(tester);
+      await heatmap(tester);
+      await select(tester, 'work');
+      await tester.tap(find.byKey(const ValueKey('cell-work-2-title')));
+      await tester.pumpAndSettle();
+      expect(journal!.selected, {'work-2'});
+      await select(tester, 'rest');
+      expect(journal!.selected, isEmpty);
+      expect(find.byKey(const ValueKey('row-work-2')), findsNothing);
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.enterText(search, '未分类');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-24')));
+      await tester.pumpAndSettle();
+      final table = tester.widget<EventTable>(find.byType(EventTable));
+      expect(table.events!.map((event) => event.id), ['free']);
+      expect(store.events.values.any((event) => event.isUndefined), isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('filtered summary keeps the whole day overlap denominator', (
+    tester,
+  ) async {
+    await store.replaceEvents({
+      ...store.events,
+      'free': store.events['free']!.copyWith(
+        start: day.add(const Duration(hours: 8)),
+        end: day.add(const Duration(hours: 20)),
+      ),
+    });
+    await open(tester);
+    await journal!.applySettings(const AppSettings(splitOverlap: true));
+    await heatmap(tester);
+    await select(tester, 'linux');
+    await tester.tap(find.text('汇总'));
+    await tester.pumpAndSettle();
+    expect(find.text('单日峰值 11 小时 00 分'), findsOneWidget);
+    expect(find.textContaining('6 小时 00 分'), findsOneWidget);
+    expect(find.text('未分类 / 未定义'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'filtered table keeps new rows reachable through tag completion',
+    (tester) async {
+      await open(tester);
+      await heatmap(tester);
+      await select(tester, 'work');
+      await tester.tap(find.byKey(const ValueKey('add-event')));
+      await tester.pumpAndSettle();
+      final id = journal!.drafts.keys.single;
+      await tester.enterText(find.byKey(ValueKey('input-$id-title')), '新增工作');
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      expect(find.byKey(ValueKey('row-$id')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(ValueKey('input-$id-tag')), 'Linux');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(store.events[id]!.tagId, 'linux');
+      expect(find.byKey(ValueKey('row-$id')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('failed edits block heatmap filter and day changes', (
+    tester,
+  ) async {
+    await open(tester);
+    await heatmap(tester);
+    await select(tester, 'work');
+    final cell = find.byKey(const ValueKey('cell-work-2-title'));
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+    await tester.tap(cell);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('input-work-2-title')),
+      '保留修改',
+    );
+    failWrites = true;
+    await select(tester, 'rest');
+    await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-22')));
+    await tester.pumpAndSettle();
+    expect(journal!.day, day);
+    expect(
+      tester
+          .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+          .selection
+          .ids,
+      {'work'},
+    );
+    expect(find.text('保留修改'), findsOneWidget);
+    expect(store.events['work-2']!.title, '工作 12 小时');
+    failWrites = false;
+    await select(tester, 'rest');
+    expect(store.events['work-2']!.title, '保留修改');
+    expect(find.byKey(const ValueKey('row-work-2')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
