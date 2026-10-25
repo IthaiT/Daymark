@@ -7,11 +7,13 @@ import 'package:daymark/domain/model.dart';
 import 'package:daymark/domain/settings.dart';
 import 'package:daymark/ui/calendar_heatmap.dart';
 import 'package:daymark/ui/journal_screen.dart';
+import 'package:daymark/ui/pickers.dart';
 import 'package:daymark/ui/theme.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/screenshot_fonts.dart';
@@ -108,6 +110,7 @@ void main() {
       await select(tester, 'work');
       expect(find.byKey(const ValueKey('tag-linux')), findsOneWidget);
       expect(find.text('单日峰值 12 小时 00 分'), findsOneWidget);
+      expect(find.textContaining('颜色按当前标签本年峰值'), findsNothing);
       expect(journal!.rows, rows);
       final shades = [
         '2026-10-22',
@@ -173,7 +176,7 @@ void main() {
       await heatmap(tester);
       await tester.tap(find.byKey(const ValueKey('activity-tag-picker')));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('未分类').last);
+      await tester.tap(find.byKey(const ValueKey('tag-choice-unclassified')));
       await tester.pumpAndSettle();
       expect(find.text('单日峰值 1 小时 00 分'), findsOneWidget);
       await select(tester, 'work');
@@ -264,6 +267,170 @@ void main() {
         ),
         findsNWidgets(366),
       );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'searches full paths without case sensitivity and confirms with keyboard',
+    (tester) async {
+      await open(tester);
+      await heatmap(tester);
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.tap(search);
+      await tester.pumpAndSettle();
+      expect(find.byType(TagChoices), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is ListTile && widget.selected,
+        ),
+        findsOneWidget,
+      );
+      await tester.enterText(search, '主业 / 嵌入式 / LINUX');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tag-choice-linux')), findsOneWidget);
+      expect(find.byKey(const ValueKey('tag-choice-work')), findsNothing);
+      expect(
+        tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection,
+        allActivityTags,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .id,
+        'linux',
+      );
+      expect(find.byType(TagChoices), findsNothing);
+      final input = find.descendant(
+        of: search,
+        matching: find.byType(TextField),
+      );
+      expect(
+        tester.widget<TextField>(input).controller!.text,
+        '主业 / 嵌入式 / Linux',
+      );
+      expect(find.text('单日峰值 12 小时 00 分'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'search navigates matches, cancels unknown queries and follows sidebar changes',
+    (tester) async {
+      await open(tester);
+      await heatmap(tester);
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.enterText(search, '主业');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.sendKeyEvent(LogicalKeyboardKey.numpadEnter);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .id,
+        'embedded',
+      );
+      await select(tester, 'rest');
+      final input = find.descendant(
+        of: search,
+        matching: find.byType(TextField),
+      );
+      expect(tester.widget<TextField>(input).controller!.text, '生活 / 休息');
+      await tester.enterText(search, '不存在的标签');
+      await tester.pumpAndSettle();
+      expect(find.text('没有匹配的标签'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .id,
+        'rest',
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(input).controller!.text, '生活 / 休息');
+      expect(find.byType(TagChoices), findsNothing);
+      await tester.enterText(search, '全部');
+      await tester.pumpAndSettle();
+      expect(find.text('没有匹配的标签'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection,
+        allActivityTags,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('tag search leaves Enter and arrows to IME composition', (
+    tester,
+  ) async {
+    await open(tester);
+    await heatmap(tester);
+    final search = find.byKey(const ValueKey('activity-tag-picker'));
+    await tester.tap(search);
+    await tester.pumpAndSettle();
+    const composing = TextEditingValue(
+      text: 'Linux',
+      selection: TextSelection.collapsed(offset: 5),
+      composing: TextRange(start: 0, end: 5),
+    );
+    tester.testTextInput.updateEditingValue(composing);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection,
+      allActivityTags,
+    );
+    expect(find.byType(TagChoices), findsOneWidget);
+    tester.testTextInput.updateEditingValue(
+      composing.copyWith(composing: TextRange.empty),
+    );
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection.id,
+      'linux',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'search results disambiguate equal leaf names by path and stable id',
+    (tester) async {
+      await store.replaceTags({
+        ...store.tags,
+        'other-linux': const Tag('other-linux', 'Linux', 'life'),
+      });
+      await open(tester);
+      await heatmap(tester);
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.enterText(search, 'Linux');
+      await tester.pumpAndSettle();
+      expect(find.text('主业 / 嵌入式 / Linux'), findsOneWidget);
+      expect(find.text('生活 / Linux'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tag-choice-other-linux')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .id,
+        'other-linux',
+      );
+      expect(find.text('本年暂无已完成记录'), findsOneWidget);
+      expect(store.events['work-2']!.tagId, 'linux');
       expect(tester.takeException(), isNull);
     },
   );

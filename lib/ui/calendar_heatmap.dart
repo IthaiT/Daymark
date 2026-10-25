@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../application/journal_controller.dart';
 import '../domain/calendar_activity.dart';
 import '../domain/model.dart';
+import 'pickers.dart';
 import 'theme.dart';
 
 typedef ActivityTag = ({String? id, bool unclassified});
@@ -88,36 +89,17 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
               children: [
                 SizedBox(
                   width: 240,
-                  child: DropdownButton<ActivityTag>(
+                  child: TagSearchField(
                     key: const ValueKey('activity-tag-picker'),
-                    value: selection,
-                    isExpanded: true,
-                    menuMaxHeight: 360,
-                    underline: const SizedBox.shrink(),
-                    items: [
-                      const DropdownMenuItem(
-                        value: allActivityTags,
-                        child: Text('全部标签'),
-                      ),
-                      const DropdownMenuItem(
-                        value: (id: null, unclassified: true),
-                        child: Text('未分类'),
-                      ),
-                      for (final tag in store.orderedTags())
-                        DropdownMenuItem(
-                          value: (id: tag.id, unclassified: false),
-                          child: Text(
-                            store
-                                .ancestors(tag.id)
-                                .map((tag) => tag.name)
-                                .join(' / '),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) widget.onSelectionChanged(value);
-                    },
+                    store: store,
+                    value: tagId,
+                    allSelected: tagId == null && !selection.unclassified,
+                    onChooseAll: () =>
+                        widget.onSelectionChanged(allActivityTags),
+                    onChanged: (id) => widget.onSelectionChanged((
+                      id: id,
+                      unclassified: id == null,
+                    )),
                   ),
                 ),
                 Row(
@@ -266,13 +248,6 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                   ],
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '颜色按当前标签本年峰值动态调整；父标签包含子标签。${journal.splitOverlap ? '重叠时段按设置均分。' : '重叠时段只计一次。'}悬停查看时长，点击查看当天记录。',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
             ),
           ],
         ),

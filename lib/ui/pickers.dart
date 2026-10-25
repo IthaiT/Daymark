@@ -195,6 +195,7 @@ class TagChoices extends StatefulWidget {
     this.excluded = const {},
     this.emptyLabel = '未分类',
     this.query = '',
+    this.showSelection = true,
   });
   final Store store;
   final ValueChanged<String?> onChoose;
@@ -202,6 +203,7 @@ class TagChoices extends StatefulWidget {
   final Set<String> excluded;
   final String emptyLabel;
   final String query;
+  final bool showSelection;
   @override
   State<TagChoices> createState() => TagChoicesState();
 }
@@ -232,7 +234,8 @@ class TagChoicesState extends State<TagChoices> {
   void didUpdateWidget(TagChoices oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selected != widget.selected ||
-        oldWidget.query != widget.query) {
+        oldWidget.query != widget.query ||
+        oldWidget.showSelection != widget.showSelection) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final target = _highlight.currentContext;
         if (mounted && target != null) {
@@ -243,12 +246,14 @@ class TagChoicesState extends State<TagChoices> {
   }
 
   Widget _tile(String? id) => KeyedSubtree(
-    key: id == widget.selected ? _highlight : ValueKey(('tag-option', id)),
+    key: widget.showSelection && id == widget.selected
+        ? _highlight
+        : ValueKey(('tag-option', id)),
     child: id == null
         ? TagTreeTile(
             key: const ValueKey('tag-choice-unclassified'),
             store: widget.store,
-            selected: widget.selected == null,
+            selected: widget.showSelection && widget.selected == null,
             label: widget.emptyLabel,
             onTap: () => widget.onChoose(null),
           )
@@ -262,7 +267,7 @@ class TagChoicesState extends State<TagChoices> {
             depth: widget.query.trim().isEmpty
                 ? widget.store.ancestors(id).length - 1
                 : 0,
-            selected: widget.selected == id,
+            selected: widget.showSelection && widget.selected == id,
             collapsed: _collapsed.contains(id),
             onToggle:
                 widget.query.trim().isEmpty &&
@@ -284,6 +289,240 @@ class TagChoicesState extends State<TagChoices> {
       if (visibleIds.isEmpty) const Text('没有匹配的标签'),
       for (final id in visibleIds) _tile(id),
     ],
+  );
+}
+
+/// Search input using the same paths, tree and popup as event tag completion.
+class TagSearchField extends StatefulWidget {
+  const TagSearchField({
+    super.key,
+    required this.store,
+    required this.value,
+    required this.onChanged,
+    this.allSelected = false,
+    this.onChooseAll,
+  }) : assert(!allSelected || onChooseAll != null);
+
+  final Store store;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+  final bool allSelected;
+  final VoidCallback? onChooseAll;
+
+  @override
+  State<TagSearchField> createState() => _TagSearchFieldState();
+}
+
+typedef _TagSearchOption = ({String? id, bool all});
+
+class _TagSearchFieldState extends State<TagSearchField> {
+  final _text = TextEditingController();
+  final _focus = FocusNode();
+  final _choices = GlobalKey<TagChoicesState>();
+  final _allChoice = GlobalKey();
+  final _group = Object();
+  bool _open = false;
+  String _query = '';
+  late String _label;
+  _TagSearchOption? _active;
+
+  String get _selectionLabel => widget.allSelected
+      ? '全部标签'
+      : widget.value == null
+      ? '未分类'
+      : widget.store.ancestors(widget.value).map((tag) => tag.name).join(' / ');
+
+  bool get _composing =>
+      _text.value.composing.isValid && !_text.value.composing.isCollapsed;
+
+  List<_TagSearchOption> _options({bool visible = false}) => [
+    if (widget.onChooseAll != null &&
+        caseFold('全部标签').contains(caseFold(_query.trim())))
+      (id: null, all: true),
+    for (final id
+        in visible
+            ? _choices.currentState?.visibleIds ??
+                  matchingTagIds(widget.store, _query)
+            : matchingTagIds(widget.store, _query))
+      (id: id, all: false),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _label = _selectionLabel;
+    _restoreText();
+    _focus.onKeyEvent = _handleKey;
+    _focus.addListener(_focusChanged);
+  }
+
+  @override
+  void didUpdateWidget(TagSearchField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final label = _selectionLabel;
+    if (oldWidget.value != widget.value ||
+        oldWidget.allSelected != widget.allSelected ||
+        label != _label) {
+      _label = label;
+      _open = false;
+      _query = '';
+      _restoreText();
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_focusChanged);
+    _focus.dispose();
+    _text.dispose();
+    super.dispose();
+  }
+
+  void _restoreText() {
+    _text.value = TextEditingValue(
+      text: _label,
+      selection: TextSelection.collapsed(offset: _label.length),
+    );
+  }
+
+  void _focusChanged() {
+    if (_focus.hasFocus) {
+      _show();
+    } else {
+      _close();
+    }
+  }
+
+  void _show() {
+    if (_open) return;
+    setState(() {
+      _open = true;
+      _query = '';
+      _active = (id: widget.value, all: widget.allSelected);
+      _text.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _text.text.length,
+      );
+    });
+  }
+
+  void _close() {
+    if (!_open) return;
+    setState(() {
+      _open = false;
+      _query = '';
+      _restoreText();
+    });
+  }
+
+  void _choose(_TagSearchOption option) {
+    _close();
+    if (option.all) {
+      widget.onChooseAll?.call();
+    } else {
+      widget.onChanged(option.id);
+    }
+  }
+
+  void _confirm() {
+    if (_composing || !_open || _active == null) return;
+    _choose(_active!);
+  }
+
+  KeyEventResult _handleKey(FocusNode node, KeyEvent event) {
+    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) || _composing) {
+      return KeyEventResult.ignored;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.tab) {
+      _close();
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _close();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+        event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      _show();
+      final options = _options(visible: true);
+      if (options.isNotEmpty) {
+        final active = _active;
+        final index = active == null ? -1 : options.indexOf(active);
+        final next = index < 0
+            ? 0
+            : (index +
+                      (event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1))
+                  .clamp(0, options.length - 1);
+        setState(() => _active = options[next]);
+        if (_active!.all) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final target = _allChoice.currentContext;
+            if (mounted && target != null) Scrollable.ensureVisible(target);
+          });
+        }
+      }
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _confirm();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  @override
+  Widget build(BuildContext context) => PickerPopup(
+    open: _open,
+    groupId: _group,
+    color: Theme.of(context).colorScheme.surfaceContainer,
+    onClose: _close,
+    anchor: TextField(
+      groupId: _group,
+      controller: _text,
+      focusNode: _focus,
+      decoration: const InputDecoration(
+        hintText: '输入标签名称搜索',
+        prefixIcon: Icon(Icons.search, size: 18),
+      ),
+      onTap: _show,
+      onChanged: (text) => setState(() {
+        _query = text;
+        _open = true;
+        _active = _options().firstOrNull;
+      }),
+      onEditingComplete: () {},
+      onSubmitted: (_) => _confirm(),
+      onTapOutside: (_) => _close(),
+    ),
+    builder: (context, close) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_options().any((option) => option.all))
+          TagTreeTile(
+            key: _allChoice,
+            store: widget.store,
+            label: '全部标签',
+            selected: _active?.all == true,
+            onTap: () => _choose((id: null, all: true)),
+          ),
+        if (_options().any((option) => !option.all) || _options().isEmpty)
+          TagChoices(
+            key: _choices,
+            store: widget.store,
+            query: _query,
+            selected: _active?.id,
+            showSelection: _active != null && !_active!.all,
+            onChoose: (id) => _choose((id: id, all: false)),
+          ),
+      ],
+    ),
   );
 }
 
