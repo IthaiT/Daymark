@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
 import '../domain/appearance.dart';
+import '../domain/journal_presentation.dart';
+import '../domain/journal_view_preferences.dart';
 import '../domain/model.dart';
 import '../domain/timeline_interaction.dart';
 import 'theme.dart';
@@ -21,6 +23,7 @@ class Timeline extends StatefulWidget {
     required this.onError,
     this.editorEventId,
     this.titleEditor,
+    this.presentation,
   });
   final JournalController journal;
   final Future<bool> Function() beforeAction;
@@ -29,6 +32,7 @@ class Timeline extends StatefulWidget {
   final ValueChanged<Object> onError;
   final String? editorEventId;
   final Widget? titleEditor;
+  final JournalPresentation? presentation;
   @override
   State<Timeline> createState() => TimelineState();
 }
@@ -77,15 +81,27 @@ class TimelineState extends State<Timeline> {
     for (final event in widget.journal.visibleEvents)
       event.id == _preview?.id ? _preview! : event,
   ];
-  List<Event> get _displayEvents => [
+  JournalPresentation get _presentation =>
+      widget.presentation ??
+      JournalPresentation(
+        tags: widget.journal.store.tags,
+        autoUndefined: widget.journal.autoUndefined,
+        view: JournalViewPreferences.fullDay,
+      );
+  List<Event> get _allDisplayEvents => [
     ..._events,
     if (widget.journal.autoUndefined)
       for (final gap in undefinedEvents([
         for (final event in widget.journal.regularEvents)
           event.id == _preview?.id ? _preview! : event,
       ], widget.journal.day))
-        gap.copyWith(title: widget.journal.event(gap.id)?.title ?? gap.title),
+        gap.copyWith(
+          title: widget.journal.event(gap.id)?.title ?? gap.title,
+          notes: widget.journal.event(gap.id)?.notes ?? gap.notes,
+        ),
   ];
+  List<Event> get _displayEvents =>
+      _allDisplayEvents.where(_presentation.includes).toList();
   double _x(DateTime value) =>
       24 +
       value.difference(widget.journal.day).inMicroseconds /
@@ -170,6 +186,7 @@ class TimelineState extends State<Timeline> {
       hit.id,
       toggle: HardwareKeyboard.instance.isControlPressed,
       range: HardwareKeyboard.instance.isShiftPressed,
+      orderedIds: _displayEvents.map((event) => event.id),
     );
     _focus.requestFocus();
     if (hit.isUndefined || widget.editorEventId == hit.id) return;

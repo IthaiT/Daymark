@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:daymark/application/journal_controller.dart';
+import 'package:daymark/application/appearance_controller.dart';
 import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/ledger_store.dart';
@@ -12,6 +13,7 @@ import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/event_summary.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/domain/settings.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/event_table.dart';
@@ -89,7 +91,12 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(DaymarkApp(journal: journal));
+    final appearance = AppearanceController();
+    addTearDown(appearance.dispose);
+    await appearance.setJournalView(JournalViewPreferences.fullDay);
+    await tester.pumpWidget(
+      DaymarkApp(journal: journal, appearance: appearance),
+    );
     await tester.pumpAndSettle();
     if (grouped) {
       await tester.tap(find.text('汇总'));

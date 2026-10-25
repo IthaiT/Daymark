@@ -70,7 +70,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: const Text('自动生成未定义事件'),
                 subtitle: const Text(
-                  '在相邻事件之间的空档生成「未定义」记录。关闭后记录不再显示，但已填写的名称会保留，重新开启后恢复。',
+                  '自动补全事件之间的空档；可在时间轴的「显示」菜单中折叠。关闭后不再生成或显示，已有名称和备注保留，重新开启后恢复。',
                 ),
                 value: _autoUndefined,
                 onChanged: _saving

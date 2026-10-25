@@ -2,12 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:daymark/application/journal_controller.dart';
+import 'package:daymark/application/appearance_controller.dart';
 import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/application/settings_controller.dart';
 import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/settings_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/gestures.dart';
@@ -89,8 +91,16 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    final appearance = AppearanceController();
+    addTearDown(appearance.dispose);
+    await appearance.setJournalView(JournalViewPreferences.fullDay);
     await tester.pumpWidget(
-      DaymarkApp(journal: journal, ledger: ledger, settings: settings),
+      DaymarkApp(
+        journal: journal,
+        ledger: ledger,
+        settings: settings,
+        appearance: appearance,
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('settings')), findsOneWidget);

@@ -8,6 +8,8 @@ import '../domain/appearance.dart';
 import '../domain/calendar_activity.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/model.dart';
+import '../domain/journal_presentation.dart';
+import '../domain/journal_view_preferences.dart';
 import 'calendar_heatmap.dart';
 import 'dialogs.dart';
 import 'event_table.dart';
@@ -18,8 +20,11 @@ import 'tag_sidebar.dart';
 import 'timeline.dart';
 import 'title_bar.dart';
 import 'workspace_style.dart';
+import 'theme.dart';
 
 enum JournalChartMode { timeline, activity }
+
+enum _DisplayAction { focused, fullDay, routine, undefined }
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({
@@ -29,12 +34,16 @@ class JournalScreen extends StatefulWidget {
     this.tagColors = const {},
     this.onTagColorChanged,
     this.onTagStyleChanged,
+    this.journalView = JournalViewPreferences.focused,
+    this.onJournalViewChanged,
   });
   final JournalController journal;
   final bool showTitleBar;
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
   final TagStyleChanged? onTagStyleChanged;
+  final JournalViewPreferences journalView;
+  final Future<void> Function(JournalViewPreferences)? onJournalViewChanged;
   @override
   State<JournalScreen> createState() => JournalScreenState();
 }
@@ -51,6 +60,113 @@ class JournalScreenState extends State<JournalScreen> {
   EventTableMode _tableMode = EventTableMode.chronological;
   JournalChartMode _chartMode = JournalChartMode.timeline;
   ActivityTagSelection _activityTag = allActivityTags;
+  late JournalViewPreferences _view = widget.journalView;
+  bool _savingView = false;
+
+  JournalPresentation get _presentation => JournalPresentation(
+    tags: widget.journal.store.tags,
+    tagDisplays: tagDisplayOverrides(context),
+    view: _chartMode == JournalChartMode.timeline
+        ? _view
+        : JournalViewPreferences.fullDay,
+    autoUndefined: widget.journal.autoUndefined,
+    revealedIds: {
+      ...widget.journal.selected,
+      if (_edit != null) _edit!.event.id,
+    },
+  );
+
+  @override
+  void didUpdateWidget(covariant JournalScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.journalView != widget.journalView) _view = widget.journalView;
+  }
+
+  Future<void> _setDisplay(_DisplayAction action) async {
+    if (_savingView || !await commit() || !mounted) return;
+    final desired = switch (action) {
+      _DisplayAction.focused => JournalViewPreferences.focused,
+      _DisplayAction.fullDay => JournalViewPreferences.fullDay,
+      _DisplayAction.routine => _view.copyWith(showRoutine: !_view.showRoutine),
+      _DisplayAction.undefined => _view.copyWith(
+        showUndefined: !_view.showUndefined,
+      ),
+    };
+    _timeline.currentState?.cancelDrag();
+    setState(() => _savingView = true);
+    try {
+      await widget.onJournalViewChanged?.call(desired);
+      if (!mounted) return;
+      setState(() => _view = desired);
+      widget.journal.clearSelection();
+    } catch (error) {
+      _showError(error);
+    } finally {
+      if (mounted) setState(() => _savingView = false);
+    }
+  }
+
+  Widget _displayMenu() {
+    final preset = _view.preset(autoUndefined: widget.journal.autoUndefined);
+    final label = switch (preset) {
+      JournalViewPreset.focused => '关注事项',
+      JournalViewPreset.fullDay => '完整一天',
+      JournalViewPreset.custom => '自定义',
+    };
+    return PopupMenuButton<_DisplayAction>(
+      key: const ValueKey('journal-display'),
+      enabled: !_savingView,
+      tooltip: '显示范围',
+      onSelected: (action) => unawaited(_setDisplay(action)),
+      itemBuilder: (_) => [
+        CheckedPopupMenuItem(
+          key: const ValueKey('view-focused'),
+          value: _DisplayAction.focused,
+          checked: preset == JournalViewPreset.focused,
+          child: const Text('关注事项'),
+        ),
+        CheckedPopupMenuItem(
+          key: const ValueKey('view-full-day'),
+          value: _DisplayAction.fullDay,
+          checked: preset == JournalViewPreset.fullDay,
+          child: const Text('完整一天'),
+        ),
+        const PopupMenuDivider(),
+        CheckedPopupMenuItem(
+          key: const ValueKey('view-routine'),
+          value: _DisplayAction.routine,
+          checked: _view.showRoutine,
+          child: const Text('显示日常背景'),
+        ),
+        CheckedPopupMenuItem(
+          key: const ValueKey('view-undefined'),
+          value: _DisplayAction.undefined,
+          checked: widget.journal.autoUndefined && _view.showUndefined,
+          enabled: widget.journal.autoUndefined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('显示未定义空档'),
+              if (!widget.journal.autoUndefined)
+                const Text('自动生成已关闭', style: TextStyle(fontSize: 12)),
+            ],
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('显示：$label'),
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
 
   ActivityTagSelection get _validActivityTag =>
       _activityTag.validFor(widget.journal.store.tags);
@@ -58,7 +174,9 @@ class JournalScreenState extends State<JournalScreen> {
   List<Event> get _tableRows {
     final journal = widget.journal;
     final rows = journal.rows;
-    if (_chartMode == JournalChartMode.timeline) return rows;
+    if (_chartMode == JournalChartMode.timeline) {
+      return rows.where(_presentation.includes).toList();
+    }
     final selection = _validActivityTag;
     return rows.where((event) {
       // Keep new/pasted rows reachable until their editing session ends.
@@ -623,22 +741,29 @@ class JournalScreenState extends State<JournalScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-                          AppSegmentedButton<JournalChartMode>(
-                            segments: const [
-                              ButtonSegment(
-                                value: JournalChartMode.timeline,
-                                label: Text('时间轴'),
-                                icon: Icon(Icons.schedule),
+                          Row(
+                            children: [
+                              AppSegmentedButton<JournalChartMode>(
+                                segments: const [
+                                  ButtonSegment(
+                                    value: JournalChartMode.timeline,
+                                    label: Text('时间轴'),
+                                    icon: Icon(Icons.schedule),
+                                  ),
+                                  ButtonSegment(
+                                    value: JournalChartMode.activity,
+                                    label: Text('活动热力图'),
+                                    icon: Icon(Icons.calendar_view_month),
+                                  ),
+                                ],
+                                selected: {_chartMode},
+                                onSelectionChanged: (values) =>
+                                    unawaited(_setChartMode(values.single)),
                               ),
-                              ButtonSegment(
-                                value: JournalChartMode.activity,
-                                label: Text('活动热力图'),
-                                icon: Icon(Icons.calendar_view_month),
-                              ),
+                              const Spacer(),
+                              if (_chartMode == JournalChartMode.timeline)
+                                _displayMenu(),
                             ],
-                            selected: {_chartMode},
-                            onSelectionChanged: (values) =>
-                                unawaited(_setChartMode(values.single)),
                           ),
                           const SizedBox(height: 12),
                           Expanded(
@@ -661,6 +786,7 @@ class JournalScreenState extends State<JournalScreen> {
                                     : Timeline(
                                         key: _timeline,
                                         journal: widget.journal,
+                                        presentation: _presentation,
                                         beforeAction: commit,
                                         onRename: (id) => unawaited(
                                           _startEdit(
@@ -709,6 +835,16 @@ class JournalScreenState extends State<JournalScreen> {
                                     unawaited(_setTableMode(values.single)),
                               ),
                               const Spacer(),
+                              if (_tableMode == EventTableMode.summary)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 12),
+                                  child: Text(
+                                    '当前视图汇总',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                ),
                               FilledButton.icon(
                                 key: const ValueKey('add-event'),
                                 onPressed: () => unawaited(_add()),

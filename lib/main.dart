@@ -12,6 +12,7 @@ import 'application/appearance_controller.dart';
 import 'application/settings_controller.dart';
 import 'data/appearance_store.dart';
 import 'domain/appearance.dart';
+import 'domain/journal_view_preferences.dart';
 import 'data/instance_lock.dart';
 import 'data/ledger_store.dart';
 import 'data/settings_store.dart';
@@ -227,6 +228,9 @@ class _DaymarkAppState extends State<DaymarkApp> {
   Future<void> _setTagStyle(String id, TagColor? color, TagDisplay? display) =>
       _appearance.setTagStyle(id, color, display);
 
+  Future<void> _setJournalView(JournalViewPreferences value) =>
+      _appearance.setJournalView(value);
+
   @override
   void dispose() {
     widget.journal.removeListener(_syncRootColors);
@@ -257,6 +261,8 @@ class _DaymarkAppState extends State<DaymarkApp> {
               tagColors: _appearance.state.tagColors,
               onTagColorChanged: _appearance.busy ? null : _setTagColor,
               onTagStyleChanged: _appearance.busy ? null : _setTagStyle,
+              journalView: _appearance.state.journalView,
+              onJournalViewChanged: _setJournalView,
             )
           : AppScreen(
               journal: widget.journal,
@@ -267,6 +273,8 @@ class _DaymarkAppState extends State<DaymarkApp> {
               tagColors: _appearance.state.tagColors,
               onTagColorChanged: _appearance.busy ? null : _setTagColor,
               onTagStyleChanged: _appearance.busy ? null : _setTagStyle,
+              journalView: _appearance.state.journalView,
+              onJournalViewChanged: _setJournalView,
             ),
     ),
   );

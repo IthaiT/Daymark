@@ -8,6 +8,7 @@ import '../application/ledger_controller.dart';
 import '../application/settings_controller.dart';
 import '../application/tag_map_controller.dart';
 import '../domain/appearance.dart';
+import '../domain/journal_view_preferences.dart';
 import 'palette_picker.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
@@ -27,6 +28,8 @@ class AppScreen extends StatefulWidget {
     this.tagColors = const {},
     this.onTagColorChanged,
     this.onTagStyleChanged,
+    this.journalView = JournalViewPreferences.focused,
+    this.onJournalViewChanged,
   });
   final JournalController journal;
   final LedgerController ledger;
@@ -36,6 +39,8 @@ class AppScreen extends StatefulWidget {
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
   final TagStyleChanged? onTagStyleChanged;
+  final JournalViewPreferences journalView;
+  final Future<void> Function(JournalViewPreferences)? onJournalViewChanged;
   @override
   State<AppScreen> createState() => _AppScreenState();
 }
@@ -103,14 +108,20 @@ class _AppScreenState extends State<AppScreen> {
 
   /// Journal data changes first so a failed preference write never leaves the
   /// event table out of step with the stored policy; retrying is idempotent.
-  Future<void> _openSettings() => showSettingsDialog(
-    context,
-    settings: widget.journal.settings,
-    onSave: (value) async {
-      await widget.journal.applySettings(value);
-      await widget.settings.update(value);
-    },
-  );
+  Future<void> _openSettings() async {
+    if (!await (_journal.currentState?.commit() ?? Future.value(true)) ||
+        !mounted) {
+      return;
+    }
+    await showSettingsDialog(
+      context,
+      settings: widget.journal.settings,
+      onSave: (value) async {
+        await widget.journal.applySettings(value);
+        await widget.settings.update(value);
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -214,6 +225,8 @@ class _AppScreenState extends State<AppScreen> {
                         tagColors: widget.tagColors,
                         onTagColorChanged: widget.onTagColorChanged,
                         onTagStyleChanged: widget.onTagStyleChanged,
+                        journalView: widget.journalView,
+                        onJournalViewChanged: widget.onJournalViewChanged,
                       ),
                     ),
                     FocusScope(

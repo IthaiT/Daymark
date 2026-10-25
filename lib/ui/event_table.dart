@@ -25,14 +25,13 @@ class EventTable extends StatefulWidget {
     required this.onContext,
     required this.beforeScroll,
     required this.mode,
-    this.events,
     this.editorId,
     this.editorColumn,
     this.editor,
+    this.events,
   });
   final JournalController journal;
   final EventTableMode mode;
-  final List<Event>? events;
   final void Function(String, EventColumn?) onCell;
   final VoidCallback onBlank;
   final VoidCallback onAdd;
@@ -41,6 +40,7 @@ class EventTable extends StatefulWidget {
   final String? editorId;
   final EventColumn? editorColumn;
   final Widget? editor;
+  final List<Event>? events;
   @override
   State<EventTable> createState() => EventTableState();
 }
