@@ -6,6 +6,7 @@ import '../application/journal_controller.dart';
 import '../domain/calendar_activity.dart';
 import '../domain/model.dart';
 import 'pickers.dart';
+import 'tag_visual.dart';
 import 'theme.dart';
 
 const allActivityTags = ActivityTagSelection.all();
@@ -32,11 +33,25 @@ class CalendarHeatmap extends StatefulWidget {
 class _CalendarHeatmapState extends State<CalendarHeatmap> {
   final _horizontal = ScrollController();
   final _vertical = ScrollController();
+  final _tags = ScrollController();
+
+  @override
+  void didUpdateWidget(CalendarHeatmap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selection.ids.length > oldWidget.selection.ids.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _tags.hasClients) {
+          _tags.jumpTo(_tags.position.maxScrollExtent);
+        }
+      });
+    }
+  }
 
   @override
   void dispose() {
     _horizontal.dispose();
     _vertical.dispose();
+    _tags.dispose();
     super.dispose();
   }
 
@@ -61,6 +76,30 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
         : store.ancestors(id).map((tag) => tag.name).join(' / ');
     final name = selection.isAll ? '全部标签' : selection.ids.map(label).join('、');
 
+    Widget chip(String? id) {
+      final (fill, ink) = id == null
+          ? (Colors.blueGrey[100]!, Colors.blueGrey[800]!)
+          : tagSurfaceColors(
+              tagFamily(context, store, id),
+              tagDot(context, store, id),
+              opacity: .20,
+            );
+      return InputChip(
+        key: ValueKey(('activity-tag-chip', id)),
+        label: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 100),
+          child: Text(store.tagName(id), overflow: TextOverflow.ellipsis),
+        ),
+        backgroundColor: fill,
+        labelStyle: TextStyle(color: ink),
+        deleteIconColor: ink,
+        side: BorderSide.none,
+        tooltip: label(id),
+        deleteButtonTooltipMessage: '移除${label(id)}',
+        onDeleted: () => widget.onSelectionChanged(selection.remove(id)),
+      );
+    }
+
     Color color(int level) =>
         level == 0 ? scheme.surfaceContainerHighest : family[level * 100]!;
 
@@ -77,87 +116,87 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              spacing: 16,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                SizedBox(
-                  width: 240,
-                  child: TagSearchField(
-                    key: const ValueKey('activity-tag-picker'),
-                    store: store,
-                    value: null,
-                    clearAfterSelection: true,
-                    excluded: selection.ids,
-                    allSelected: selection.isAll,
-                    onChooseAll: () =>
-                        widget.onSelectionChanged(allActivityTags),
-                    onChanged: (id) =>
-                        widget.onSelectionChanged(selection.add(id)),
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      key: const ValueKey('activity-previous-year'),
-                      tooltip: '上一年',
-                      onPressed: activity.year <= 1
-                          ? null
-                          : () => widget.onDaySelected(
-                              DateTime.utc(activity.year - 1),
-                            ),
-                      icon: const Icon(Icons.chevron_left),
-                    ),
-                    Text(
-                      '${activity.year} 年',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    IconButton(
-                      key: const ValueKey('activity-next-year'),
-                      tooltip: '下一年',
-                      onPressed: activity.year >= 9999
-                          ? null
-                          : () => widget.onDaySelected(
-                              DateTime.utc(activity.year + 1),
-                            ),
-                      icon: const Icon(Icons.chevron_right),
-                    ),
-                  ],
-                ),
-                Text(
-                  '累计 ${durationText(activity.total)} · ${activity.activeDays} 个活跃日',
-                ),
-              ],
-            ),
-            if (!selection.isAll) ...[
-              const SizedBox(height: 6),
-              Wrap(
-                spacing: 6,
+            LayoutBuilder(
+              builder: (context, constraints) => Wrap(
+                spacing: 16,
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  for (final id in selection.ids)
-                    InputChip(
-                      key: ValueKey(('activity-tag-chip', id)),
-                      label: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 240),
-                        child: Text(label(id), overflow: TextOverflow.ellipsis),
-                      ),
-                      tooltip: label(id),
-                      deleteButtonTooltipMessage: '移除${label(id)}',
-                      onDeleted: () =>
-                          widget.onSelectionChanged(selection.remove(id)),
+                  SizedBox(
+                    width: selection.isAll
+                        ? 240
+                        : math.min(480, constraints.maxWidth),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: selection.isAll
+                              ? 240
+                              : math.min(240, constraints.maxWidth / 2),
+                          child: TagSearchField(
+                            key: const ValueKey('activity-tag-picker'),
+                            store: store,
+                            value: null,
+                            clearAfterSelection: true,
+                            excluded: selection.ids,
+                            onChanged: (id) =>
+                                widget.onSelectionChanged(selection.add(id)),
+                          ),
+                        ),
+                        if (!selection.isAll)
+                          Expanded(
+                            child: SingleChildScrollView(
+                              controller: _tags,
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Row(
+                                children: [
+                                  for (final id in selection.ids)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 6),
+                                      child: chip(id),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  TextButton(
-                    key: const ValueKey('activity-clear-tags'),
-                    onPressed: () => widget.onSelectionChanged(allActivityTags),
-                    child: const Text('全部标签'),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: const ValueKey('activity-previous-year'),
+                        tooltip: '上一年',
+                        onPressed: activity.year <= 1
+                            ? null
+                            : () => widget.onDaySelected(
+                                DateTime.utc(activity.year - 1),
+                              ),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      Text(
+                        '${activity.year} 年',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      IconButton(
+                        key: const ValueKey('activity-next-year'),
+                        tooltip: '下一年',
+                        onPressed: activity.year >= 9999
+                            ? null
+                            : () => widget.onDaySelected(
+                                DateTime.utc(activity.year + 1),
+                              ),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    '累计 ${durationText(activity.total)} · ${activity.activeDays} 个活跃日',
                   ),
                 ],
               ),
-            ],
+            ),
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {

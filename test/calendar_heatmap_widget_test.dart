@@ -124,6 +124,18 @@ void main() {
       {'work', 'linux', null},
     );
     expect(find.byType(InputChip), findsNWidgets(3));
+    final searchY = tester.getCenter(search).dy;
+    for (var index = 0; index < 3; index++) {
+      final chip = find.byType(InputChip).at(index);
+      expect(tester.getCenter(chip).dy, closeTo(searchY, 1));
+      final event = store.events[['work-0', 'work-2', 'free'][index]]!;
+      expect(
+        tester.widget<InputChip>(chip).backgroundColor,
+        eventColors(tester.element(search), store, event).$1,
+      );
+    }
+    expect(find.byKey(const ValueKey('activity-clear-tags')), findsNothing);
+    expect(find.text('全部标签'), findsNothing);
     expect(find.text('累计 33 小时 00 分 · 3 个活跃日'), findsOneWidget);
     await tester.enterText(search, 'LINUX');
     await tester.pumpAndSettle();
@@ -140,7 +152,9 @@ void main() {
       {'work', 'linux'},
     );
     expect(find.text('累计 32 小时 00 分 · 3 个活跃日'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('activity-clear-tags')));
+    await tester.tap(find.byTooltip('移除主业'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('移除主业 / 嵌入式 / Linux'));
     await tester.pumpAndSettle();
     expect(find.byType(InputChip), findsNothing);
     expect(
@@ -485,6 +499,20 @@ void main() {
     (tester) async {
       await open(tester, size: const Size(760, 440));
       await heatmap(tester);
+      await select(tester, 'work');
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      await tester.enterText(search, 'Linux');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      for (var index = 0; index < 2; index++) {
+        expect(
+          tester.getCenter(find.byType(InputChip).at(index)).dy,
+          closeTo(tester.getCenter(search).dy, 1),
+        );
+      }
       expect(tester.takeException(), isNull);
       await journal!.setDay(DateTime.utc(2024, 2, 29));
       await tester.pumpAndSettle();
@@ -586,14 +614,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(input).controller!.text, '');
       expect(find.byType(TagChoices), findsNothing);
-      await tester.enterText(search, '全部');
-      await tester.pumpAndSettle();
-      expect(find.text('没有匹配的标签'), findsNothing);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.tap(find.byTooltip('移除生活 / 休息'));
       await tester.pumpAndSettle();
       expect(
-        tester.widget<CalendarHeatmap>(find.byType(CalendarHeatmap)).selection,
-        allActivityTags,
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .isAll,
+        isTrue,
       );
       expect(tester.takeException(), isNull);
     },
