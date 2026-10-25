@@ -160,7 +160,9 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                   child: SingleChildScrollView(
                     controller: _horizontal,
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.only(bottom: 12),
+                    padding: EdgeInsets.only(
+                      bottom: width > constraints.maxWidth ? 12 : 0,
+                    ),
                     child: SizedBox(
                       key: const ValueKey('activity-grid'),
                       width: width,

@@ -120,6 +120,47 @@ void main() {
   Color? cellColor(WidgetTester tester, String date) =>
       tester.widget<Material>(find.byKey(ValueKey('activity-day-$date'))).color;
 
+  testWidgets('compact tag input leaves the graph visible at desktop scales', (
+    tester,
+  ) async {
+    await open(tester, size: const Size(1360, 760));
+    await heatmap(tester);
+    final search = find.byKey(const ValueKey('activity-tag-picker'));
+    for (final scale in [1.0, 1.25, 1.5]) {
+      tester.view.physicalSize = Size(1360 * scale, 760 * scale);
+      tester.view.devicePixelRatio = scale;
+      await tester.pumpAndSettle();
+      expect(
+        tester.getSize(search).height,
+        lessThanOrEqualTo(
+          tester.getSize(find.byKey(const ValueKey('day-input'))).height + 2,
+        ),
+      );
+      final scroll = tester
+          .widgetList<SingleChildScrollView>(
+            find.descendant(
+              of: find.byType(CalendarHeatmap),
+              matching: find.byType(SingleChildScrollView),
+            ),
+          )
+          .singleWhere(
+            (view) =>
+                view.scrollDirection == Axis.vertical &&
+                view.controller != null,
+          );
+      expect(scroll.controller!.position.maxScrollExtent, closeTo(0, .01));
+      expect(
+        tester
+            .getBottomRight(find.byKey(const ValueKey('activity-summary')))
+            .dy,
+        lessThanOrEqualTo(
+          tester.getBottomRight(find.byType(CalendarHeatmap)).dy,
+        ),
+      );
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('keeps chosen tags in search and ignores duplicate selections', (
     tester,
   ) async {

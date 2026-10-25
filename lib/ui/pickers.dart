@@ -554,14 +554,18 @@ class _TagSearchFieldState extends State<TagSearchField> {
                 isFocused: _focus.hasFocus,
                 decoration: const InputDecoration(
                   prefixIcon: Icon(Icons.search, size: 18),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
                 ),
                 child: SizedBox(
-                  height: 70,
+                  height: 32,
                   child: SingleChildScrollView(
                     key: const ValueKey('tag-search-chips'),
                     primary: false,
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 70),
+                      constraints: const BoxConstraints(minHeight: 32),
                       child: Align(
                         alignment: Alignment.centerLeft,
                         heightFactor: 1,
