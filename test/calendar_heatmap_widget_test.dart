@@ -288,7 +288,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('next-day')));
       await tester.pumpAndSettle();
-      expect(rows(), journal!.rows.map((event) => event.id).toList());
+      expect(rows(), ['overnight', 'unfinished', 'work-2', 'rest-day', 'free']);
       expect(rows(), contains('free'));
       expect(store.events, original);
       expect(tester.takeException(), isNull);

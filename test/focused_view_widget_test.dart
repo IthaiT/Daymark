@@ -103,6 +103,41 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'heatmap tag filters and timeline display choices remain independent',
+    (tester) async {
+      await open(tester);
+      await toggleUnclassified(tester);
+      expect(find.byKey(const ValueKey('row-sleep')), findsNothing);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      await tester.tap(find.text('活动热力图'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-free')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('tag-work')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-a')), findsOneWidget);
+      for (final id in ['sleep', 'b', 'free']) {
+        expect(find.byKey(ValueKey('row-$id')), findsNothing);
+      }
+      await tester.tap(find.text('时间轴'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-a')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-b')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-sleep')), findsNothing);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      await menu(tester);
+      await tester.tap(find.byKey(const ValueKey('view-full-day')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      await tester.tap(find.text('活动热力图'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-a')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-b')), findsNothing);
+    },
+  );
+
   testWidgets('all hidden records remain inspectable without any axis folds', (
     tester,
   ) async {
