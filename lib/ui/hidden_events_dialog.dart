@@ -49,8 +49,8 @@ class _HiddenEventsDialogState extends State<_HiddenEventsDialog> {
   }
 
   DataCell _textCell(String value, double width) => DataCell(
-    SizedBox(
-      width: width,
+    ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: width),
       child: Tooltip(
         message: value,
         child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -73,8 +73,10 @@ class _HiddenEventsDialogState extends State<_HiddenEventsDialog> {
     return AlertDialog(
       key: const ValueKey('hidden-events-dialog'),
       title: Text(within == null ? '隐藏的事项' : '折叠时段的事项'),
-      content: SizedBox(
-        width: math.min(1040, math.max(280, viewport.width - 128)),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: math.min(1040, math.max(280, viewport.width - 128)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

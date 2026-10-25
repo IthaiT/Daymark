@@ -438,6 +438,15 @@ void main() {
     expect(find.text('折叠时段的事项'), findsOneWidget);
     expect(find.textContaining('11:00 — 13:00'), findsOneWidget);
     expect(tester.widget<DataTable>(find.byType(DataTable)).rows.length, 2);
+    final dialog = tester.widget<AlertDialog>(
+      find.byKey(const ValueKey('hidden-events-dialog')),
+    );
+    final tableWidth = tester.getSize(find.byType(DataTable)).width;
+    expect(tableWidth, lessThan(900));
+    expect(
+      tester.getSize(find.byWidget(dialog.content!)).width,
+      closeTo(tableWidth, 1),
+    );
     expect(find.text('显示完整一天'), findsNothing);
     await tester.tap(find.text('关闭'));
     await tester.pumpAndSettle();
