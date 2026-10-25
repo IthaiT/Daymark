@@ -85,6 +85,60 @@ void main() {
     });
     tearDown(() async => directory.delete(recursive: true));
     test(
+      'a whole gap-only day is backed up before gap synchronization',
+      () async {
+        final left = event(
+          'left',
+          day.subtract(const Duration(hours: 1)),
+          day.subtract(const Duration(minutes: 10)),
+        );
+        final right = event(
+          'right',
+          day.add(const Duration(days: 1, minutes: 6)),
+          day.add(const Duration(days: 1, hours: 8)),
+        );
+        await store.replaceEvents({left.id: left, right.id: right});
+        final archive = await ArchiveStore.open(directory);
+        await archive.capture(
+          store,
+          day.add(const Duration(days: 1, hours: 9)),
+        );
+        final reopened = await ArchiveStore.open(directory);
+        expect(reopened.days, {day});
+        expect(
+          reopened.events.values.single,
+          undefinedEvents([left, right]).single,
+        );
+        expect(store.events.length, 2);
+      },
+    );
+    test(
+      'archived gap snapshots retain stored names, notes and full overnight bounds',
+      () async {
+        final left = event('left', day, day.add(const Duration(hours: 10)));
+        final right = event(
+          'right',
+          day.add(const Duration(days: 1, hours: 2)),
+          day.add(const Duration(days: 1, hours: 8)),
+        );
+        final gap = undefinedEvents([
+          left,
+          right,
+        ]).single.copyWith(title: '跨天已记录空档', notes: '保留已有内容');
+        await store.replaceEvents({
+          left.id: left,
+          right.id: right,
+          gap.id: gap,
+        });
+        final archive = await ArchiveStore.open(directory);
+        await archive.capture(
+          store,
+          day.add(const Duration(days: 1, hours: 9)),
+        );
+        expect((await ArchiveStore.open(directory)).events[gap.id], gap);
+      },
+    );
+    test(
       'round trips full records and tags, appends dates and retains old backup',
       () async {
         final archive = await ArchiveStore.open(directory);

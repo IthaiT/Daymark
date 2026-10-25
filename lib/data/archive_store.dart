@@ -99,6 +99,12 @@ class ArchiveStore {
     final desiredDays = {..._days, ...completed};
     if (desiredDays.isEmpty) return;
     final current = store.events;
+    // Startup archives before reconciliation. Include bounded gaps even when
+    // their mirror rows have not yet been written to the working CSV.
+    final covered = {
+      for (final gap in undefinedEvents(current.values)) gap.id: gap,
+      ...current,
+    };
     final desiredEvents = {..._events};
     for (final id in editedIds) {
       desiredEvents.remove(id);
@@ -107,7 +113,7 @@ class ArchiveStore {
         desiredEvents[id] = event;
       }
     }
-    for (final event in current.values) {
+    for (final event in covered.values) {
       if (eventTouchesDays(event, addedDays)) {
         desiredEvents.putIfAbsent(event.id, () => event);
       }
