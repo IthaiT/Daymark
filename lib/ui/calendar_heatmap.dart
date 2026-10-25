@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../application/journal_controller.dart';
 import '../domain/calendar_activity.dart';
@@ -55,6 +56,11 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
         ? Colors.green
         : tagFamily(context, store, tagId);
     final scheme = Theme.of(context).colorScheme;
+    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    double snap(double value) =>
+        (value * pixelRatio).roundToDouble() / pixelRatio;
+    final gutter = snap(30);
+    final monthHeight = snap(24);
     String label(String? id) => id == null
         ? '未分类'
         : store.ancestors(id).map((tag) => tag.name).join(' / ');
@@ -147,13 +153,17 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
             const SizedBox(height: 8),
             LayoutBuilder(
               builder: (context, constraints) {
-                final pitch = ((constraints.maxWidth - 30) / weeks).clamp(
-                  14.0,
-                  22.0,
-                );
+                final pitchPixels =
+                    ((constraints.maxWidth - gutter) / weeks * pixelRatio)
+                        .floor()
+                        .clamp(
+                          (14 * pixelRatio).ceil(),
+                          (22 * pixelRatio).floor(),
+                        );
+                final pitch = pitchPixels / pixelRatio;
                 final width = math.max(
                   constraints.maxWidth,
-                  30 + weeks * pitch,
+                  gutter + weeks * pitch,
                 );
                 return Scrollbar(
                   controller: _horizontal,
@@ -163,64 +173,68 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                     padding: EdgeInsets.only(
                       bottom: width > constraints.maxWidth ? 12 : 0,
                     ),
-                    child: SizedBox(
-                      key: const ValueKey('activity-grid'),
-                      width: width,
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            height: 24,
-                            child: Stack(
-                              children: [
-                                for (var month = 1; month <= 12; month++)
-                                  Positioned(
-                                    left:
-                                        30 +
-                                        DateTime.utc(
-                                              activity.year,
-                                              month,
-                                            ).difference(start).inDays ~/
-                                            7 *
-                                            pitch,
-                                    child: Text(
-                                      '$month 月',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
+                    child: _PixelAlignedOrigin(
+                      pixelRatio: pixelRatio,
+                      child: SizedBox(
+                        key: const ValueKey('activity-grid'),
+                        width: width,
+                        child: Column(
+                          children: [
+                            SizedBox(
+                              height: monthHeight,
+                              child: Stack(
+                                children: [
+                                  for (var month = 1; month <= 12; month++)
+                                    Positioned(
+                                      left:
+                                          gutter +
+                                          DateTime.utc(
+                                                activity.year,
+                                                month,
+                                              ).difference(start).inDays ~/
+                                              7 *
+                                              pitch,
+                                      child: Text(
+                                        '$month 月',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
                                     ),
-                                  ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          for (var weekday = 0; weekday < 7; weekday++)
-                            Row(
-                              children: [
-                                SizedBox(
-                                  width: 30,
-                                  height: pitch,
-                                  child: Center(
-                                    child: Text(
-                                      '一二三四五六日'[weekday],
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall,
+                            for (var weekday = 0; weekday < 7; weekday++)
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: gutter,
+                                    height: pitch,
+                                    child: Center(
+                                      child: Text(
+                                        '一二三四五六日'[weekday],
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                for (var week = 0; week < weeks; week++)
-                                  _cell(
-                                    context,
-                                    start.add(
-                                      Duration(days: week * 7 + weekday),
+                                  for (var week = 0; week < weeks; week++)
+                                    _cell(
+                                      context,
+                                      start.add(
+                                        Duration(days: week * 7 + weekday),
+                                      ),
+                                      activity,
+                                      pitch,
+                                      color,
+                                      name,
+                                      pixelRatio,
                                     ),
-                                    activity,
-                                    pitch,
-                                    color,
-                                    name,
-                                  ),
-                              ],
-                            ),
-                        ],
+                                ],
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -259,13 +273,16 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                     const Text('少'),
                     const SizedBox(width: 6),
                     for (var level = 0; level <= 4; level++)
-                      Container(
-                        width: 12,
-                        height: 12,
-                        margin: const EdgeInsets.only(right: 3),
-                        decoration: BoxDecoration(
-                          color: color(level),
-                          borderRadius: BorderRadius.circular(2),
+                      _PixelAlignedOrigin(
+                        pixelRatio: pixelRatio,
+                        child: Container(
+                          width: snap(12),
+                          height: snap(12),
+                          margin: EdgeInsets.only(right: snap(3)),
+                          decoration: BoxDecoration(
+                            color: color(level),
+                            borderRadius: BorderRadius.circular(snap(2)),
+                          ),
                         ),
                       ),
                     const Text('多'),
@@ -286,16 +303,29 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
     double pitch,
     Color Function(int) color,
     String name,
+    double pixelRatio,
   ) {
     if (day.year != activity.year) return SizedBox(width: pitch, height: pitch);
     final selected = day == widget.journal.day;
+    final inset = (1.5 * pixelRatio).round() / pixelRatio;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(
+        (3 * pixelRatio).round() / pixelRatio,
+      ),
+      side: BorderSide(
+        color: selected
+            ? Theme.of(context).colorScheme.onSurface
+            : Theme.of(context).colorScheme.outlineVariant,
+        width: (selected ? 2 : 1) / pixelRatio,
+      ),
+    );
     final message =
         '${dateText(day)} · $name\n${durationText(activity.on(day))}';
     return SizedBox(
       width: pitch,
       height: pitch,
       child: Padding(
-        padding: const EdgeInsets.all(1.5),
+        padding: EdgeInsets.all(inset),
         child: Tooltip(
           message: message,
           child: Semantics(
@@ -307,21 +337,72 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
             child: Material(
               key: ValueKey('activity-day-${dateText(day)}'),
               color: color(activity.level(activity.on(day))),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(3),
-                side: BorderSide(
-                  color: selected
-                      ? Theme.of(context).colorScheme.onSurface
-                      : Theme.of(context).colorScheme.outlineVariant,
-                  width: selected ? 2 : .5,
-                ),
+              shape: shape,
+              child: InkWell(
+                customBorder: shape,
+                onTap: () => widget.onDaySelected(day),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(onTap: () => widget.onDaySelected(day)),
             ),
           ),
         ),
       ),
     );
   }
+}
+
+/// Keeps the grid's fractional parent/scroll origin off physical pixel edges.
+class _PixelAlignedOrigin extends SingleChildRenderObjectWidget {
+  const _PixelAlignedOrigin({required this.pixelRatio, required super.child});
+  final double pixelRatio;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderPixelAlignedOrigin(pixelRatio);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderPixelAlignedOrigin renderObject,
+  ) {
+    renderObject.pixelRatio = pixelRatio;
+  }
+}
+
+class _RenderPixelAlignedOrigin extends RenderProxyBox {
+  _RenderPixelAlignedOrigin(this._pixelRatio);
+  double _pixelRatio;
+  set pixelRatio(double value) {
+    if (_pixelRatio == value) return;
+    _pixelRatio = value;
+    markNeedsPaint();
+    markNeedsSemanticsUpdate();
+  }
+
+  Offset get _shift {
+    final origin = localToGlobal(Offset.zero);
+    return Offset(
+      (origin.dx * _pixelRatio).round() / _pixelRatio - origin.dx,
+      (origin.dy * _pixelRatio).round() / _pixelRatio - origin.dy,
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) =>
+      super.paint(context, offset + _shift);
+
+  @override
+  void applyPaintTransform(RenderObject child, Matrix4 transform) {
+    final shift = _shift;
+    transform.translateByDouble(shift.dx, shift.dy, 0, 1);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
+      child != null &&
+      result.addWithPaintOffset(
+        offset: _shift,
+        position: position,
+        hitTest: (result, transformed) =>
+            child!.hitTest(result, position: transformed),
+      );
 }
