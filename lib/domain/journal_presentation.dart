@@ -50,5 +50,28 @@ class JournalPresentation {
     return view.preset == JournalViewPreset.fullDay || !isRoutine(event);
   }
 
+  /// Hidden records are independent of the axis's merged empty intervals.
+  /// Keep overlaps, distinct records with the same name, and incomplete rows.
+  List<Event> hiddenEvents(
+    Iterable<Event> events,
+    DateTime day, {
+    Interval? within,
+  }) {
+    final origin = dayStart(day);
+    return events.where((event) {
+      if (event.isUndefined && !autoUndefined || includes(event)) return false;
+      final interval = event.intervalOn(origin);
+      if (interval != null) {
+        return within == null ||
+            interval.start.isBefore(within.end) &&
+                interval.end.isAfter(within.start);
+      }
+      if (event.end != null || dayStart(event.start) != origin) return false;
+      return within == null ||
+          !event.start.isBefore(within.start) &&
+              event.start.isBefore(within.end);
+    }).toList()..sort(compareEvents);
+  }
+
   bool get foldsEmptyTime => view.foldsEmptyTime;
 }
