@@ -28,11 +28,13 @@ class JournalScreen extends StatefulWidget {
     this.showTitleBar = true,
     this.tagColors = const {},
     this.onTagColorChanged,
+    this.onTagStyleChanged,
   });
   final JournalController journal;
   final bool showTitleBar;
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
+  final TagStyleChanged? onTagStyleChanged;
   @override
   State<JournalScreen> createState() => JournalScreenState();
 }
@@ -537,6 +539,7 @@ class JournalScreenState extends State<JournalScreen> {
                         onError: _showError,
                         tagColors: widget.tagColors,
                         onTagColorChanged: widget.onTagColorChanged,
+                        onTagStyleChanged: widget.onTagStyleChanged,
                       ),
                       content: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,

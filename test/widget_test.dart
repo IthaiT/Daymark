@@ -2181,11 +2181,39 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('修改标签'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('自动／继承'));
+      await tester.tap(find.byKey(const ValueKey('tag-color-source')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('自动／继承').last);
       await tester.pumpAndSettle();
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(dot(), Colors.blue[500]);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'tag display role is edited in the existing dialog and uses a neutral dot',
+    (tester) async {
+      await open(tester);
+      await tester.tap(
+        find.byKey(const ValueKey('tag-life')),
+        buttons: kSecondaryMouseButton,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('修改标签'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tag-display')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('日常背景').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      final dot = tester.widget<Container>(
+        find.byKey(const ValueKey('tag-dot-life')).first,
+      );
+      expect((dot.decoration! as BoxDecoration).color, Colors.grey[600]);
+      expect(journal.store.events['a']!.tagId, 'life');
       expect(tester.takeException(), isNull);
     },
   );

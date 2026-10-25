@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../data/store.dart';
 import '../domain/appearance.dart';
 import '../domain/model.dart';
+import '../domain/journal_presentation.dart';
+import '../domain/tag_colors.dart';
 import 'tag_visual.dart';
 import 'theme_tokens.dart';
 import 'workspace_style.dart';
@@ -26,6 +28,7 @@ MaterialColor paletteSwatch(AppPalette palette) => switch (palette) {
 ThemeData daymarkTheme({
   AppPalette palette = AppPalette.slate,
   Map<String, TagColor> tagColors = const {},
+  Map<String, TagDisplay> tagDisplays = const {},
 }) {
   final scheme = ColorScheme.fromSeed(
     seedColor: paletteSwatch(palette),
@@ -49,7 +52,10 @@ ThemeData daymarkTheme({
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    extensions: [DaymarkColors.fromScheme(scheme), TagColorTheme(tagColors)],
+    extensions: [
+      DaymarkColors.fromScheme(scheme),
+      TagColorTheme(tagColors, displays: tagDisplays),
+    ],
     brightness: Brightness.light,
     fontFamily: 'Noto Sans SC',
     fontFamilyFallback: const ['Segoe UI', 'Microsoft YaHei UI'],
@@ -141,6 +147,7 @@ String tagColorText(TagColor color) => switch (color) {
   TagColor.cyan => '青色',
   TagColor.pink => '粉色',
   TagColor.blue => '蓝色',
+  TagColor.brown => '棕色',
 };
 
 MaterialColor tagColorSwatch(TagColor color) => switch (color) {
@@ -151,69 +158,22 @@ MaterialColor tagColorSwatch(TagColor color) => switch (color) {
   TagColor.cyan => Colors.cyan,
   TagColor.pink => Colors.pink,
   TagColor.blue => Colors.blue,
+  TagColor.brown => Colors.brown,
 };
-
-/// Keeps the four original root tags on their familiar colours.
-const _tagDefaults = {
-  'work': TagColor.blue,
-  'side': TagColor.purple,
-  'explore': TagColor.teal,
-  'life': TagColor.orange,
-};
-
-// Anchored family hues, far apart on the color wheel: the hue expresses the
-// root family, the lightness expresses the member within it.
-// Lightness steps are handed out in sidebar (tree) order so adjacent siblings
-// always differ; the root keeps its family's anchor step.
-const _steps = [400, 600, 300, 700, 500, 800];
 
 Map<String, TagColor> tagColorOverrides(BuildContext context) =>
     Theme.of(context).extension<TagColorTheme>()?.overrides ??
     const <String, TagColor>{};
 
-int _tagHash(String id) =>
-    id.codeUnits.fold(0, (sum, unit) => (sum * 31 + unit) & 0x7fffffff);
+Map<String, TagDisplay> tagDisplayOverrides(BuildContext context) =>
+    Theme.of(context).extension<TagColorTheme>()?.displays ?? const {};
 
-/// A root hue that no other root already uses, until all seven are taken.
-///
-/// Roots are walked in creation order, which a move does not change, so moving
-/// a child tag out to the root list only picks a free hue instead of recolouring
-/// its siblings. Beyond seven roots the hash repeats, as no free hue is left.
+/// Fallback for callers without persisted appearance preferences.
 TagColor rootTagColor(
   Store store,
   String rootId,
   Map<String, TagColor> overrides,
-) {
-  // Reserve every explicit or preset root colour first so an automatic tag can
-  // never take a hue that a later root already claims.
-  final fixed = <String, TagColor>{};
-  for (final tag in store.tags.values) {
-    if (tag.parentId != null) continue;
-    final color = overrides[tag.id] ?? _tagDefaults[tag.id];
-    if (color != null) fixed[tag.id] = color;
-  }
-  final preset = fixed[rootId];
-  if (preset != null) return preset;
-
-  final used = {...fixed.values};
-  for (final tag in store.tags.values) {
-    if (tag.parentId != null || fixed.containsKey(tag.id)) continue;
-    if (used.length >= TagColor.values.length) {
-      final repeated =
-          TagColor.values[_tagHash(tag.id) % TagColor.values.length];
-      if (tag.id == rootId) return repeated;
-      continue;
-    }
-    var index = _tagHash(tag.id) % TagColor.values.length;
-    while (used.contains(TagColor.values[index])) {
-      index = (index + 1) % TagColor.values.length;
-    }
-    final color = TagColor.values[index];
-    if (tag.id == rootId) return color;
-    used.add(color);
-  }
-  return TagColor.values[_tagHash(rootId) % TagColor.values.length];
-}
+) => assignRootColors(store.tags.values, overrides)[rootId] ?? TagColor.blue;
 
 /// The nearest explicit override wins, then the root tag's automatic hue.
 MaterialColor tagFamilyFor(
@@ -236,18 +196,6 @@ MaterialColor tagFamily(BuildContext context, Store store, String? tagId) =>
 /// Cyan uses a darker anchor so it stays distinct from blue at 10px.
 int _rootStep(MaterialColor family) => family == Colors.cyan ? 600 : 500;
 
-int _stepFor(Store store, String? tagId, MaterialColor family) {
-  if (tagId == null) return 600;
-  final root = store.ancestors(tagId).first.id;
-  var index = 0;
-  for (final tag in store.orderedTags()) {
-    if (store.ancestors(tag.id).first.id != root) continue;
-    if (tag.id == tagId) break;
-    index++;
-  }
-  return index == 0 ? _rootStep(family) : _steps[(index - 1) % _steps.length];
-}
-
 /// Background and foreground pair that keeps tagged events readable on any
 /// surface; use the foreground for text drawn on the background.
 (Color, Color) eventColorsFor(
@@ -255,15 +203,30 @@ int _stepFor(Store store, String? tagId, MaterialColor family) {
   Event event,
   Map<String, TagColor> overrides, {
   bool selected = false,
+  Map<String, TagDisplay> tagDisplays = const {},
 }) {
+  if (effectiveTagDisplay(store.tags, event.tagId, tagDisplays) ==
+      TagDisplay.routine) {
+    return (Colors.grey[selected ? 300 : 200]!, Colors.grey[800]!);
+  }
+  if (event.isUndefined) {
+    return (
+      Colors.grey[selected
+          ? 200
+          : isUnfilledGap(event)
+          ? 50
+          : 100]!,
+      Colors.grey[800]!,
+    );
+  }
   if (event.tagId == null) {
-    return (Colors.blueGrey[selected ? 200 : 100]!, Colors.blueGrey[800]!);
+    return (Colors.blueGrey[selected ? 100 : 50]!, Colors.blueGrey[800]!);
   }
   final family = tagFamilyFor(store, event.tagId, overrides);
   return tagSurfaceColors(
     family,
     tagDotFor(store, event.tagId, overrides),
-    opacity: selected ? .34 : .20,
+    opacity: selected ? .40 : .28,
   );
 }
 
@@ -277,13 +240,17 @@ int _stepFor(Store store, String? tagId, MaterialColor family) {
   event,
   tagColorOverrides(context),
   selected: selected,
+  tagDisplays: tagDisplayOverrides(context),
 );
 
 /// Accent color for the dot marking a tag in the sidebar.
 Color tagDotFor(Store store, String? tagId, Map<String, TagColor> overrides) {
   final family = tagFamilyFor(store, tagId, overrides);
-  return family[_stepFor(store, tagId, family)]!;
+  return family[tagId == null ? 600 : _rootStep(family)]!;
 }
 
 Color tagDot(BuildContext context, Store store, String? tagId) =>
-    tagDotFor(store, tagId, tagColorOverrides(context));
+    effectiveTagDisplay(store.tags, tagId, tagDisplayOverrides(context)) ==
+        TagDisplay.routine
+    ? Colors.grey[600]!
+    : tagDotFor(store, tagId, tagColorOverrides(context));

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -153,6 +154,8 @@ class _DaymarkAppState extends State<DaymarkApp> {
     _appearance = widget.appearance ?? AppearanceController();
     _ownsSettings = widget.settings == null;
     _settings = widget.settings ?? SettingsController();
+    widget.journal.addListener(_syncRootColors);
+    unawaited(_initializeRootColors());
     if (_appearance.store?.readError != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -171,13 +174,33 @@ class _DaymarkAppState extends State<DaymarkApp> {
     }
   }
 
+  Future<void> _initializeRootColors() async {
+    try {
+      await _appearance.ensureRootColors(widget.journal.store.tags.values);
+    } catch (error) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _messenger.currentState?.showSnackBar(
+          SnackBar(content: Text('无法保存标签配色：$error')),
+        );
+      });
+    }
+  }
+
+  void _syncRootColors() => unawaited(_initializeRootColors());
+
   @override
   void didUpdateWidget(covariant DaymarkApp oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.journal != oldWidget.journal) {
+      oldWidget.journal.removeListener(_syncRootColors);
+      widget.journal.addListener(_syncRootColors);
+    }
     if (widget.appearance != oldWidget.appearance) {
       if (_ownsAppearance) _appearance.dispose();
       _ownsAppearance = widget.appearance == null;
       _appearance = widget.appearance ?? AppearanceController();
+      _syncRootColors();
     }
     if (widget.settings != oldWidget.settings) {
       if (_ownsSettings) _settings.dispose();
@@ -201,8 +224,12 @@ class _DaymarkAppState extends State<DaymarkApp> {
   Future<void> _setTagColor(String id, TagColor? color) =>
       _appearance.setTagColor(id, color);
 
+  Future<void> _setTagStyle(String id, TagColor? color, TagDisplay? display) =>
+      _appearance.setTagStyle(id, color, display);
+
   @override
   void dispose() {
+    widget.journal.removeListener(_syncRootColors);
     if (_ownsAppearance) _appearance.dispose();
     if (_ownsSettings) _settings.dispose();
     widget.instanceLock?.close();
@@ -218,6 +245,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
       theme: daymarkTheme(
         palette: _appearance.state.palette,
         tagColors: _appearance.state.tagColors,
+        tagDisplays: _appearance.state.tagDisplays,
       ),
       scaffoldMessengerKey: _messenger,
       locale: const Locale('zh', 'CN'),
@@ -228,6 +256,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
               journal: widget.journal,
               tagColors: _appearance.state.tagColors,
               onTagColorChanged: _appearance.busy ? null : _setTagColor,
+              onTagStyleChanged: _appearance.busy ? null : _setTagStyle,
             )
           : AppScreen(
               journal: widget.journal,
@@ -237,6 +266,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
               onPaletteChanged: _appearance.busy ? null : _setPalette,
               tagColors: _appearance.state.tagColors,
               onTagColorChanged: _appearance.busy ? null : _setTagColor,
+              onTagStyleChanged: _appearance.busy ? null : _setTagStyle,
             ),
     ),
   );

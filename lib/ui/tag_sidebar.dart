@@ -7,6 +7,7 @@ import '../domain/model.dart';
 import 'dialogs.dart';
 import 'tag_tree_tile.dart';
 import 'workspace_style.dart';
+import 'theme.dart';
 
 class TagSidebar extends StatefulWidget {
   const TagSidebar({
@@ -16,6 +17,7 @@ class TagSidebar extends StatefulWidget {
     required this.onError,
     this.tagColors = const {},
     this.onTagColorChanged,
+    this.onTagStyleChanged,
     this.activityTagIds = const {},
     this.onActivityTagSelected,
   });
@@ -24,6 +26,7 @@ class TagSidebar extends StatefulWidget {
   final ValueChanged<Object> onError;
   final Map<String, TagColor> tagColors;
   final Future<void> Function(String id, TagColor? color)? onTagColorChanged;
+  final TagStyleChanged? onTagStyleChanged;
   final Set<String> activityTagIds;
   final ValueChanged<String>? onActivityTagSelected;
   @override
@@ -71,6 +74,7 @@ class _TagSidebarState extends State<TagSidebar> {
             widget.journal,
             parentId: tag?.id,
             onColorChanged: widget.onTagColorChanged,
+            onStyleChanged: widget.onTagStyleChanged,
           );
         case 'edit':
           await showTagEditor(
@@ -78,7 +82,9 @@ class _TagSidebarState extends State<TagSidebar> {
             widget.journal,
             id: tag!.id,
             color: widget.tagColors[tag.id],
+            display: tagDisplayOverrides(context)[tag.id],
             onColorChanged: widget.onTagColorChanged,
+            onStyleChanged: widget.onTagStyleChanged,
           );
         case 'delete':
           await widget.journal.deleteTag(tag!.id);

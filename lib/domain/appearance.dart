@@ -4,11 +4,13 @@ enum AppPalette { pine, indigo, sand, rose, slate }
 
 enum TagDisplay { normal, routine }
 
+typedef TagStyleChanged =
+    Future<void> Function(String id, TagColor? color, TagDisplay? display);
+
 /// Selectable tag hues, listed in the order used for automatic assignment.
 ///
-/// Seven anchored hues stay distinguishable as 10px dots, including for
-/// red-green colour blindness; more hues would need an icon or a label.
-enum TagColor { teal, amber, purple, orange, cyan, pink, blue }
+/// Labels accompany colour; a palette alone does not guarantee accessibility.
+enum TagColor { teal, amber, purple, orange, cyan, pink, blue, brown }
 
 /// Appearance preferences are separate from journal and ledger data.
 class AppAppearance {

@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../data/appearance_store.dart';
 import '../domain/appearance.dart';
 import '../domain/journal_view_preferences.dart';
+import '../domain/model.dart';
+import '../domain/tag_colors.dart';
 
 class AppearanceController extends ChangeNotifier {
   AppearanceController([this.store]);
@@ -41,6 +43,17 @@ class AppearanceController extends ChangeNotifier {
     if (state.journalView == value) return null;
     return state.copyWith(journalView: value);
   });
+
+  Future<void> ensureRootColors(Iterable<Tag> tags) {
+    final snapshot = tags.toList();
+    return _change(() {
+      // Automatic migration must not replace an unreadable preferences file.
+      if (store?.readError != null) return null;
+      final colors = assignRootColors(snapshot, state.tagColors);
+      if (mapEquals(colors, state.tagColors)) return null;
+      return state.copyWith(tagColors: colors);
+    });
+  }
 
   /// Serializes appearance writes; a null result means nothing changed.
   Future<void> _change(AppAppearance? Function() build) {

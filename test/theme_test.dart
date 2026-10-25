@@ -64,7 +64,7 @@ void main() {
   );
 
   test(
-    'seven tag hues keep the original roots and inherit overrides',
+    'Material tag hues keep the original roots and inherit overrides',
     () async {
       final directory = await Directory(
         '.test-artifacts',
@@ -72,8 +72,9 @@ void main() {
       addTearDown(() => directory.delete(recursive: true));
       final store = await Store.open(directory);
 
-      expect(TagColor.values.length, 7);
-      expect(TagColor.values.map(tagColorSwatch).toSet().length, 7);
+      expect(TagColor.values.length, 8);
+      expect(tagColorSwatch(TagColor.brown), Colors.brown);
+      expect(TagColor.values.map(tagColorSwatch).toSet().length, 8);
       expect(tagFamilyFor(store, 'work', const {}), Colors.blue);
       expect(tagFamilyFor(store, 'side', const {}), Colors.deepPurple);
       expect(tagFamilyFor(store, 'explore', const {}), Colors.teal);
@@ -139,14 +140,16 @@ void main() {
     // Seven roots still keep seven different hues.
     await store.saveTag('学习', null);
     expect(rootColors().toSet().length, 7);
-    // The eighth root has to repeat, but must not disturb the seven above.
-    final before = rootColors();
+    // Eight roots use eight hues; a ninth can repeat without reshuffling.
     await store.saveTag('健康', null);
+    expect(rootColors().toSet().length, 8);
+    final before = rootColors();
+    await store.saveTag('兴趣', null);
     final after = rootColors();
-    expect(after.toSet().length, 7);
-    expect(after.take(8).toSet().length, 7);
+    expect(after.toSet().length, 8);
+    expect(after.take(8).toSet().length, 8);
     expect(after.take(7).toSet().length, 7);
-    expect(before.toSet().length, 7);
+    expect(before.toSet().length, 8);
     // The four original roots keep their familiar colours.
     expect(tagFamilyFor(store, 'work', const {}), Colors.blue);
     expect(tagFamilyFor(store, 'side', const {}), Colors.deepPurple);

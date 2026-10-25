@@ -4,16 +4,21 @@ import '../domain/appearance.dart';
 
 /// Explicit tag colour overrides carried by the theme.
 ///
-/// A tag without an entry keeps the automatic colour, so an empty map restores
-/// the original behaviour for existing journals.
+/// Children inherit the nearest independent colour and display setting.
 class TagColorTheme extends ThemeExtension<TagColorTheme> {
-  const TagColorTheme(this.overrides);
+  const TagColorTheme(this.overrides, {this.displays = const {}});
 
   final Map<String, TagColor> overrides;
+  final Map<String, TagDisplay> displays;
 
   @override
-  TagColorTheme copyWith({Map<String, TagColor>? overrides}) =>
-      TagColorTheme(overrides ?? this.overrides);
+  TagColorTheme copyWith({
+    Map<String, TagColor>? overrides,
+    Map<String, TagDisplay>? displays,
+  }) => TagColorTheme(
+    overrides ?? this.overrides,
+    displays: displays ?? this.displays,
+  );
 
   @override
   TagColorTheme lerp(covariant TagColorTheme? other, double t) => other ?? this;

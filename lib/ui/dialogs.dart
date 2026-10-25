@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../application/journal_controller.dart';
 import '../domain/appearance.dart';
 import '../domain/model.dart';
+import '../domain/tag_colors.dart';
 import 'pickers.dart';
 import 'theme.dart';
 
@@ -15,6 +16,8 @@ Future<void> showTagEditor(
   String? id,
   String? parentId,
   TagColor? color,
+  TagDisplay? display,
+  TagStyleChanged? onStyleChanged,
   Future<void> Function(String id, TagColor? color)? onColorChanged,
 }) => showDialog<void>(
   context: context,
@@ -23,6 +26,8 @@ Future<void> showTagEditor(
     id: id,
     parentId: parentId,
     color: color,
+    display: display,
+    onStyleChanged: onStyleChanged,
     onColorChanged: onColorChanged,
   ),
 );
@@ -33,12 +38,16 @@ class _TagEditor extends StatefulWidget {
     this.id,
     this.parentId,
     this.color,
+    this.display,
+    this.onStyleChanged,
     this.onColorChanged,
   });
   final JournalController journal;
   final String? id;
   final String? parentId;
   final TagColor? color;
+  final TagDisplay? display;
+  final TagStyleChanged? onStyleChanged;
   final Future<void> Function(String id, TagColor? color)? onColorChanged;
   @override
   State<_TagEditor> createState() => _TagEditorState();
@@ -52,6 +61,8 @@ class _TagEditorState extends State<_TagEditor> {
       ? widget.parentId
       : widget.journal.store.tags[widget.id]!.parentId;
   late TagColor? _color = widget.color;
+  late TagColor? _lastIndependentColor = widget.color;
+  late TagDisplay? _display = widget.display;
   String? _savedId;
   bool _saving = false;
   String? _error;
@@ -76,7 +87,10 @@ class _TagEditorState extends State<_TagEditor> {
         id: widget.id ?? _savedId,
       );
       _savedId = tag.id;
-      if (_color != widget.color) {
+      if (widget.onStyleChanged != null &&
+          (_color != widget.color || _display != widget.display)) {
+        await widget.onStyleChanged!(tag.id, _color, _display);
+      } else if (widget.onStyleChanged == null && _color != widget.color) {
         await widget.onColorChanged?.call(tag.id, _color);
       }
       if (mounted) Navigator.pop(context);
@@ -112,7 +126,32 @@ class _TagEditorState extends State<_TagEditor> {
                   : widget.journal.store.descendants(widget.id!),
               onChanged: (value) => setState(() => _parent = value),
             ),
-            if (widget.onColorChanged != null) ...[
+            if (widget.onStyleChanged != null) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('tag-display'),
+                initialValue: _display?.name ?? 'inherit',
+                decoration: const InputDecoration(labelText: '显示方式'),
+                items: const [
+                  DropdownMenuItem(value: 'inherit', child: Text('跟随父标签')),
+                  DropdownMenuItem(value: 'normal', child: Text('普通事项')),
+                  DropdownMenuItem(value: 'routine', child: Text('日常背景')),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() {
+                        _display = value == 'inherit'
+                            ? null
+                            : TagDisplay.values.firstWhere(
+                                (item) => item.name == value,
+                              );
+                      }),
+              ),
+              const SizedBox(height: 6),
+              const Text('日常背景在关注视图中折叠，完整一天中以灰色显示。'),
+            ],
+            if (widget.onColorChanged != null ||
+                widget.onStyleChanged != null) ...[
               const SizedBox(height: 18),
               Align(
                 alignment: Alignment.centerLeft,
@@ -122,40 +161,64 @@ class _TagEditorState extends State<_TagEditor> {
                 ),
               ),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('自动／继承'),
-                      selected: _color == null,
-                      onSelected: _saving
-                          ? null
-                          : (_) => setState(() => _color = null),
-                    ),
-                    for (final color in TagColor.values)
-                      ChoiceChip(
-                        key: ValueKey('tag-color-${color.name}'),
-                        avatar: CircleAvatar(
-                          backgroundColor: tagColorSwatch(color)[500],
-                          radius: 8,
-                        ),
-                        label: Text(tagColorText(color)),
-                        selected: _color == color,
-                        onSelected: _saving
-                            ? null
-                            : (_) => setState(() => _color = color),
-                      ),
-                  ],
-                ),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('tag-color-source'),
+                initialValue: _color == null ? 'inherit' : 'own',
+                decoration: const InputDecoration(labelText: '颜色来源'),
+                items: const [
+                  DropdownMenuItem(value: 'inherit', child: Text('自动／继承')),
+                  DropdownMenuItem(value: 'own', child: Text('独立颜色')),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() {
+                        if (value == 'inherit') {
+                          _lastIndependentColor = _color;
+                          _color = null;
+                        } else {
+                          _color =
+                              _lastIndependentColor ??
+                              suggestTagColor(
+                                widget.journal.store.tags.values,
+                                tagColorOverrides(context),
+                                exceptId: widget.id,
+                              );
+                        }
+                      }),
               ),
+              if (_color != null) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final color in TagColor.values)
+                        ChoiceChip(
+                          key: ValueKey('tag-color-${color.name}'),
+                          avatar: CircleAvatar(
+                            backgroundColor: tagColorSwatch(color)[500],
+                            radius: 8,
+                          ),
+                          label: Text(tagColorText(color)),
+                          selected: _color == color,
+                          onSelected: _saving
+                              ? null
+                              : (_) => setState(() {
+                                  _color = color;
+                                  _lastIndependentColor = color;
+                                }),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '子标签默认跟随最近一级已设置的颜色。',
+                  '子标签继承最近的独立颜色；独立颜色固定，不随日期或排序变化。',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),

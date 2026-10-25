@@ -446,6 +446,7 @@ class TimelineState extends State<Timeline> {
                                     zoom: zoom,
                                     scheme: Theme.of(context).colorScheme,
                                     tagColors: tagColorOverrides(context),
+                                    tagDisplays: tagDisplayOverrides(context),
                                     textStyle: Theme.of(
                                       context,
                                     ).textTheme.bodySmall!,
@@ -512,6 +513,7 @@ class _TimelinePainter extends CustomPainter {
     required this.zoom,
     required this.scheme,
     required this.tagColors,
+    required this.tagDisplays,
     required this.textStyle,
     this.preview,
     this.snap,
@@ -523,6 +525,7 @@ class _TimelinePainter extends CustomPainter {
   final double zoom;
   final ColorScheme scheme;
   final Map<String, TagColor> tagColors;
+  final Map<String, TagDisplay> tagDisplays;
   final TextStyle textStyle;
   final Event? preview;
   final DateTime? snap;
@@ -612,6 +615,7 @@ class _TimelinePainter extends CustomPainter {
         event,
         tagColors,
         selected: selected,
+        tagDisplays: tagDisplays,
       );
       canvas.drawPath(path, Paint()..color = background);
       final outline = Paint()
