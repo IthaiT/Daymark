@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/store.dart';
+import 'package:daymark/domain/appearance.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/domain/settings.dart';
 import 'package:daymark/ui/calendar_heatmap.dart';
@@ -66,6 +67,7 @@ void main() {
     WidgetTester tester, {
     Size size = const Size(1360, 900),
     GlobalKey? boundary,
+    AppAppearance appearance = const AppAppearance(),
   }) async {
     journal = JournalController(
       store,
@@ -79,7 +81,10 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     Widget app = MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: daymarkTheme(),
+      theme: daymarkTheme(
+        tagColors: appearance.tagColors,
+        tagDisplays: appearance.tagDisplays,
+      ),
       home: JournalScreen(journal: journal!, showTitleBar: false),
     );
     if (boundary != null) app = RepaintBoundary(key: boundary, child: app);
@@ -96,6 +101,21 @@ void main() {
     await tester.tap(find.byKey(ValueKey('tag-$id')));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('inline heatmap chips respect routine background colors', (
+    tester,
+  ) async {
+    const appearance = AppAppearance(
+      tagColors: {'work': TagColor.pink},
+      tagDisplays: {'work': TagDisplay.routine},
+    );
+    await open(tester, appearance: appearance);
+    await heatmap(tester);
+    await select(tester, 'work');
+    final chip = tester.widget<InputChip>(find.byType(InputChip));
+    expect(chip.backgroundColor, Colors.grey[200]);
+    expect(chip.labelStyle!.color, Colors.grey[800]);
+  });
 
   Color? cellColor(WidgetTester tester, String date) =>
       tester.widget<Material>(find.byKey(ValueKey('activity-day-$date'))).color;

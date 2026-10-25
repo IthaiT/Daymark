@@ -196,8 +196,41 @@ MaterialColor tagFamily(BuildContext context, Store store, String? tagId) =>
 /// Cyan uses a darker anchor so it stays distinct from blue at 10px.
 int _rootStep(MaterialColor family) => family == Colors.cyan ? 600 : 500;
 
-/// Background and foreground pair that keeps tagged events readable on any
-/// surface; use the foreground for text drawn on the background.
+/// Shared ordinary-event and tag-chip colors, including routine backgrounds.
+(Color, Color) tagEventColorsFor(
+  Store store,
+  String? tagId,
+  Map<String, TagColor> overrides, {
+  bool selected = false,
+  Map<String, TagDisplay> tagDisplays = const {},
+}) {
+  if (effectiveTagDisplay(store.tags, tagId, tagDisplays) ==
+      TagDisplay.routine) {
+    return (Colors.grey[selected ? 300 : 200]!, Colors.grey[800]!);
+  }
+  if (tagId == null) {
+    return (Colors.blueGrey[selected ? 100 : 50]!, Colors.blueGrey[800]!);
+  }
+  final family = tagFamilyFor(store, tagId, overrides);
+  return tagSurfaceColors(
+    family,
+    tagDotFor(store, tagId, overrides),
+    opacity: selected ? .40 : .28,
+  );
+}
+
+(Color, Color) tagEventColors(
+  BuildContext context,
+  Store store,
+  String? tagId,
+) => tagEventColorsFor(
+  store,
+  tagId,
+  tagColorOverrides(context),
+  tagDisplays: tagDisplayOverrides(context),
+);
+
+/// Derived gaps use their neutral style; ordinary records share tag colors.
 (Color, Color) eventColorsFor(
   Store store,
   Event event,
@@ -205,11 +238,9 @@ int _rootStep(MaterialColor family) => family == Colors.cyan ? 600 : 500;
   bool selected = false,
   Map<String, TagDisplay> tagDisplays = const {},
 }) {
-  if (effectiveTagDisplay(store.tags, event.tagId, tagDisplays) ==
-      TagDisplay.routine) {
-    return (Colors.grey[selected ? 300 : 200]!, Colors.grey[800]!);
-  }
-  if (event.isUndefined) {
+  if (event.isUndefined &&
+      effectiveTagDisplay(store.tags, event.tagId, tagDisplays) !=
+          TagDisplay.routine) {
     return (
       Colors.grey[selected
           ? 200
@@ -219,14 +250,12 @@ int _rootStep(MaterialColor family) => family == Colors.cyan ? 600 : 500;
       Colors.grey[800]!,
     );
   }
-  if (event.tagId == null) {
-    return (Colors.blueGrey[selected ? 100 : 50]!, Colors.blueGrey[800]!);
-  }
-  final family = tagFamilyFor(store, event.tagId, overrides);
-  return tagSurfaceColors(
-    family,
-    tagDotFor(store, event.tagId, overrides),
-    opacity: selected ? .40 : .28,
+  return tagEventColorsFor(
+    store,
+    event.tagId,
+    overrides,
+    selected: selected,
+    tagDisplays: tagDisplays,
   );
 }
 

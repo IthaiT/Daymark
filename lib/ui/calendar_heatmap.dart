@@ -6,7 +6,6 @@ import '../application/journal_controller.dart';
 import '../domain/calendar_activity.dart';
 import '../domain/model.dart';
 import 'pickers.dart';
-import 'tag_visual.dart';
 import 'theme.dart';
 
 const allActivityTags = ActivityTagSelection.all();
@@ -62,13 +61,7 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
     final name = selection.isAll ? '全部标签' : selection.ids.map(label).join('、');
 
     Widget chip(String? id) {
-      final (fill, ink) = id == null
-          ? (Colors.blueGrey[100]!, Colors.blueGrey[800]!)
-          : tagSurfaceColors(
-              tagFamily(context, store, id),
-              tagDot(context, store, id),
-              opacity: .20,
-            );
+      final (fill, ink) = tagEventColors(context, store, id);
       return InputChip(
         key: ValueKey(('activity-tag-chip', id)),
         label: ConstrainedBox(
