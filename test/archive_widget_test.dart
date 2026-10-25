@@ -229,7 +229,7 @@ void main() {
     },
   );
   testWidgets(
-    'native close commits the active editor and archives before destroying the window',
+    'native close commits the active editor and archives before closing the host window',
     (tester) async {
       await open(tester);
       await override(tester);
@@ -244,7 +244,7 @@ void main() {
       await close(tester);
       expect(store.events['a']!.title, '关闭前更正');
       expect(archive.events['a']!.title, '关闭前更正');
-      expect(windowCalls.where((call) => call == 'destroy'), hasLength(1));
+      expect(windowCalls, ['setPreventClose', 'close']);
     },
   );
   testWidgets('failed close archive keeps the window open and can retry', (
@@ -258,12 +258,12 @@ void main() {
     now = day.add(const Duration(days: 2, hours: 9));
     failArchive = true;
     await close(tester);
-    expect(windowCalls, isNot(contains('destroy')));
+    expect(windowCalls, isNot(contains('close')));
     expect(find.textContaining('模拟归档失败'), findsOneWidget);
     expect(archive.days, {day});
     failArchive = false;
     await close(tester);
-    expect(windowCalls, contains('destroy'));
+    expect(windowCalls, contains('close'));
     expect(archive.days, {day, day.add(const Duration(days: 1))});
   });
   testWidgets(

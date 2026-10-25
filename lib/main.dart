@@ -274,16 +274,21 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
           await (_app.currentState?.commit() ??
               _journal.currentState?.commit() ??
               Future.value(true));
-      if (!committed) return;
+      if (!committed) {
+        _closing = false;
+        return;
+      }
       await widget.ledger?.waitForWrites();
       await widget.journal.archiveForClose();
-      await windowManager.destroy();
+      // Return to the host's normal WM_CLOSE path after the archive is safe.
+      // Keep the flag set while its second close notification is dispatched.
+      await windowManager.setPreventClose(false);
+      await windowManager.close();
     } catch (error) {
+      _closing = false;
       _messenger.currentState?.showSnackBar(
         SnackBar(content: Text('无法完成归档，窗口尚未关闭：$error')),
       );
-    } finally {
-      _closing = false;
     }
   }
 
