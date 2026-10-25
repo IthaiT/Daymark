@@ -2033,7 +2033,7 @@ void main() {
   );
 
   testWidgets(
-    'full workspace timeline body and both edges drag by minutes at default zoom',
+    'full workspace full-day timeline body and both edges drag by minutes at default zoom',
     (tester) async {
       await open(tester);
       final ledgerStore = (await tester.runAsync(
@@ -2041,7 +2041,12 @@ void main() {
       ))!;
       final ledger = LedgerController(ledgerStore);
       addTearDown(ledger.dispose);
-      await tester.pumpWidget(DaymarkApp(journal: journal, ledger: ledger));
+      final appearance = AppearanceController();
+      addTearDown(appearance.dispose);
+      await appearance.setJournalView(JournalViewPreferences.fullDay);
+      await tester.pumpWidget(
+        DaymarkApp(journal: journal, ledger: ledger, appearance: appearance),
+      );
       await tester.pumpAndSettle();
       final timeline = find.byType(Timeline);
       expect(tester.state<TimelineState>(timeline).zoom, 1);

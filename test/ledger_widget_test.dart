@@ -679,10 +679,12 @@ void main() {
     final journalStore = (await tester.runAsync(() => Store.open(directory)))!;
     final journal = JournalController(journalStore, day: day);
     addTearDown(journal.dispose);
+    var appearanceWrites = 0;
     final preferences = (await tester.runAsync(
       () => AppearanceStore.open(
         directory,
         writer: (file, bytes) async {
+          appearanceWrites++;
           throw const FileSystemException('模拟配色保存失败');
         },
       ),
@@ -693,11 +695,17 @@ void main() {
       DaymarkApp(journal: journal, ledger: ledger, appearance: appearance),
     );
     await tester.pumpAndSettle();
+    expect(appearanceWrites, 1);
+    journal.clearSelection();
+    journal.clearSelection();
+    await tester.pumpAndSettle();
+    expect(appearanceWrites, 1, reason: '选择变化不应重复尝试失败的自动配色写入');
     await tester.tap(find.byKey(const ValueKey('mode-1')));
     await tester.pumpAndSettle();
     await tester.enterText(quick('lunch'), '31');
     await tester.tap(find.byKey(const ValueKey('palette-pine')));
     await tester.pumpAndSettle();
+    expect(appearanceWrites, 2, reason: '仍可主动尝试保存主题');
     expect(appearance.state.palette, AppPalette.slate);
     expect(find.textContaining('无法保存配色设置'), findsOneWidget);
     expect(tester.widget<TextField>(quick('lunch')).controller!.text, '31');

@@ -147,6 +147,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
   late SettingsController _settings;
   late bool _ownsSettings;
   final _messenger = GlobalKey<ScaffoldMessengerState>();
+  Set<String>? _colorRootIds;
 
   @override
   void initState() {
@@ -156,7 +157,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
     _ownsSettings = widget.settings == null;
     _settings = widget.settings ?? SettingsController();
     widget.journal.addListener(_syncRootColors);
-    unawaited(_initializeRootColors());
+    _syncRootColors();
     if (_appearance.store?.readError != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -181,14 +182,32 @@ class _DaymarkAppState extends State<DaymarkApp> {
     } catch (error) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _messenger.currentState?.showSnackBar(
-          SnackBar(content: Text('无法保存标签配色：$error')),
-        );
+        _showAppearanceError('无法保存标签配色：$error');
       });
     }
   }
 
-  void _syncRootColors() => unawaited(_initializeRootColors());
+  void _syncRootColors() {
+    final roots = widget.journal.store.tags.values
+        .where((tag) => tag.parentId == null)
+        .map((tag) => tag.id)
+        .toSet();
+    final previous = _colorRootIds;
+    if (previous != null &&
+        previous.length == roots.length &&
+        previous.containsAll(roots)) {
+      return;
+    }
+    // Selection and event edits must not repeatedly retry a failed migration.
+    _colorRootIds = roots;
+    unawaited(_initializeRootColors());
+  }
+
+  void _showAppearanceError(String message) {
+    final messenger = _messenger.currentState;
+    messenger?.hideCurrentSnackBar();
+    messenger?.showSnackBar(SnackBar(content: Text(message)));
+  }
 
   @override
   void didUpdateWidget(covariant DaymarkApp oldWidget) {
@@ -201,12 +220,16 @@ class _DaymarkAppState extends State<DaymarkApp> {
       if (_ownsAppearance) _appearance.dispose();
       _ownsAppearance = widget.appearance == null;
       _appearance = widget.appearance ?? AppearanceController();
-      _syncRootColors();
     }
     if (widget.settings != oldWidget.settings) {
       if (_ownsSettings) _settings.dispose();
       _ownsSettings = widget.settings == null;
       _settings = widget.settings ?? SettingsController();
+    }
+    if (widget.journal != oldWidget.journal ||
+        widget.appearance != oldWidget.appearance) {
+      _colorRootIds = null;
+      _syncRootColors();
     }
   }
 
@@ -215,9 +238,7 @@ class _DaymarkAppState extends State<DaymarkApp> {
       await _appearance.setPalette(palette);
     } catch (error) {
       if (!mounted) return;
-      _messenger.currentState?.showSnackBar(
-        SnackBar(content: Text('无法保存配色设置：$error')),
-      );
+      _showAppearanceError('无法保存配色设置：$error');
     }
   }
 
