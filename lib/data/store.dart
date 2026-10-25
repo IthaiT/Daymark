@@ -124,10 +124,17 @@ class Store {
     }
   }
 
-  void validateEvent(Event event, {bool allowIncomplete = false}) {
+  void validateEvent(Event event, {bool allowIncomplete = false}) =>
+      validateEventData(event, _tags, allowIncomplete: allowIncomplete);
+
+  static void validateEventData(
+    Event event,
+    Map<String, Tag> tags, {
+    bool allowIncomplete = false,
+  }) {
     if (event.id.isEmpty) throw const FormatException('事件 ID 不能为空。');
     if (event.title.trim().isEmpty) throw const FormatException('请输入事件名称。');
-    if (event.tagId != null && !_tags.containsKey(event.tagId)) {
+    if (event.tagId != null && !tags.containsKey(event.tagId)) {
       throw const FormatException('所选标签不存在。');
     }
     if (event.end == null && !allowIncomplete) {
