@@ -109,14 +109,9 @@ class CalendarActivity {
       durations.values.where((value) => value > Duration.zero).length;
   Duration on(DateTime day) => durations[dayStart(day)] ?? Duration.zero;
 
-  /// Nine positive levels keep 9, 11 and 12 hours distinct at a 12-hour peak.
-  /// Every tag/year uses its own peak; half the peak sits in the middle.
+  /// Zero activity plus four quarter-peak bands, from light to dark.
   int level(Duration value) =>
       value <= Duration.zero || maximum <= Duration.zero
       ? 0
-      : 1 +
-            (value.inMicroseconds / maximum.inMicroseconds * 8).round().clamp(
-              0,
-              8,
-            );
+      : (value.inMicroseconds / maximum.inMicroseconds * 4).ceil().clamp(1, 4);
 }

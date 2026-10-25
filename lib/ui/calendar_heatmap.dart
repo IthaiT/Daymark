@@ -80,7 +80,7 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
     }
 
     Color color(int level) =>
-        level == 0 ? scheme.surfaceContainerHighest : family[level * 100]!;
+        level == 0 ? scheme.surfaceContainerHighest : family[level * 200]!;
 
     final first = DateTime.utc(activity.year);
     final last = DateTime.utc(activity.year, 12, 31);
@@ -256,7 +256,7 @@ class _CalendarHeatmapState extends State<CalendarHeatmap> {
                   children: [
                     const Text('少'),
                     const SizedBox(width: 6),
-                    for (var level = 0; level <= 9; level++)
+                    for (var level = 0; level <= 4; level++)
                       Container(
                         width: 12,
                         height: 12,

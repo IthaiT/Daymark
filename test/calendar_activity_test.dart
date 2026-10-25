@@ -178,7 +178,7 @@ void main() {
     expect(activity.total, const Duration(hours: 3));
   });
 
-  test('scale separates overtime and rescales when the maximum increases', () {
+  test('five levels use quarter-peak bands and rescale with the peak', () {
     CalendarActivity peak(int hours) => CalendarActivity.of(
       year: 2026,
       events: [
@@ -192,15 +192,22 @@ void main() {
     final twelve = peak(12);
     expect(
       [
-        9,
-        11,
-        12,
-      ].map((hours) => twelve.level(Duration(hours: hours))).toSet().length,
-      3,
+        Duration.zero,
+        const Duration(microseconds: 1),
+        const Duration(hours: 3),
+        const Duration(hours: 3, microseconds: 1),
+        const Duration(hours: 6),
+        const Duration(hours: 6, microseconds: 1),
+        const Duration(hours: 9),
+        const Duration(hours: 9, microseconds: 1),
+        const Duration(hours: 12),
+        const Duration(hours: 13),
+      ].map(twelve.level),
+      [0, 1, 1, 2, 2, 3, 3, 4, 4, 4],
     );
-    expect(peak(10).level(const Duration(hours: 10)), 9);
-    expect(peak(20).level(const Duration(hours: 10)), 5);
-    expect(peak(20).level(const Duration(hours: 20)), 9);
+    expect(peak(10).level(const Duration(hours: 10)), 4);
+    expect(peak(20).level(const Duration(hours: 10)), 2);
+    expect(peak(20).level(const Duration(hours: 20)), 4);
     expect(twelve.level(Duration.zero), 0);
   });
 

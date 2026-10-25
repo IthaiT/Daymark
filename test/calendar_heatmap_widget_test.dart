@@ -445,14 +445,21 @@ void main() {
         '2026-10-23',
         '2026-10-24',
       ].map((date) => cellColor(tester, date)).toSet();
-      expect(shades.length, 3);
-      expect(cellColor(tester, '2026-10-24'), Colors.blue[900]);
+      expect(shades.length, 2);
+      final legend = find
+          .ancestor(of: find.text('少'), matching: find.byType(Row))
+          .first;
+      expect(
+        find.descendant(of: legend, matching: find.byType(Container)),
+        findsNWidgets(5),
+      );
+      expect(cellColor(tester, '2026-10-24'), Colors.blue[800]);
       await select(tester, 'linux');
       expect(
         cellColor(tester, '2026-10-22'),
         daymarkTheme().colorScheme.surfaceContainerHighest,
       );
-      expect(cellColor(tester, '2026-10-24'), Colors.blue[900]);
+      expect(cellColor(tester, '2026-10-24'), Colors.blue[800]);
       await tester.tap(find.text('时间轴'));
       await tester.pumpAndSettle();
       expect(find.byType(Timeline), findsOneWidget);
