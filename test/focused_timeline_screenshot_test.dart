@@ -8,10 +8,13 @@ import 'package:daymark/data/appearance_store.dart';
 import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/appearance.dart';
+import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
+import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/screenshot_fonts.dart';
@@ -134,6 +137,61 @@ void main() {
     await tester.pumpAndSettle();
     await screenshot('journal-full-day');
     expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+    await appearance.setJournalView(
+      JournalViewPreferences.focused.copyWith(showUnclassified: false),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('journal-display')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-hidden-events')));
+    await tester.pumpAndSettle();
+    await screenshot('journal-hidden-events');
+    expect(find.byType(DataTable), findsOneWidget);
+    final verticalScroll = find.descendant(
+      of: find.byKey(const ValueKey('hidden-events-dialog')),
+      matching: find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.vertical,
+      ),
+    );
+    await tester.drag(verticalScroll, const Offset(0, -400));
+    await tester.pumpAndSettle();
+    final lastStart = find.text('2026-10-24 22:30:00').last;
+    expect(
+      tester.getCenter(lastStart).dy,
+      lessThan(tester.getTopLeft(find.text('关闭')).dy),
+    );
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    final timeline = tester.state<TimelineState>(find.byType(Timeline));
+    final fold = timeline.axis.folds.first;
+    final origin = tester.getTopLeft(find.byType(Timeline));
+    await tester.tapAt(origin + Offset(24 + fold.left + fold.width / 2, 100));
+    await tester.pumpAndSettle();
+    await screenshot('journal-fold-details');
+    expect(find.text('显示完整一天'), findsNothing);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const ValueKey('day-input')))
+          .controller!
+          .text,
+      '2026-10-25',
+    );
+    await tester.tap(find.byKey(const ValueKey('journal-display')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('view-hidden-events')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<DataTable>(find.byType(DataTable)).rows.length, 1);
+    await screenshot('journal-hidden-day');
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
     debugDisableShadows = previousShadows;
     expect(tester.takeException(), isNull);
   });

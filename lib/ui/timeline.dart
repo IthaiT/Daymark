@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Interval;
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
@@ -12,6 +12,7 @@ import '../domain/journal_view_preferences.dart';
 import '../domain/model.dart';
 import '../domain/timeline_interaction.dart';
 import '../domain/timeline_axis.dart';
+import 'hidden_events_dialog.dart';
 import 'theme.dart';
 
 class Timeline extends StatefulWidget {
@@ -25,7 +26,6 @@ class Timeline extends StatefulWidget {
     this.editorEventId,
     this.titleEditor,
     this.presentation,
-    this.onShowFullDay,
     this.onShowAll,
   });
   final JournalController journal;
@@ -36,7 +36,6 @@ class Timeline extends StatefulWidget {
   final String? editorEventId;
   final Widget? titleEditor;
   final JournalPresentation? presentation;
-  final Future<void> Function()? onShowFullDay;
   final Future<void> Function()? onShowAll;
   @override
   State<Timeline> createState() => TimelineState();
@@ -157,70 +156,30 @@ class TimelineState extends State<Timeline> {
       value == dayEnd(widget.journal.day) ? '24:00' : clockText(value);
 
   String _foldDescription(TimelineAxisSpan span) {
-    final hidden = _allDisplayEvents.where(
-      (event) =>
-          !_presentation.includes(event) &&
-          event.intervalOn(widget.journal.day) != null &&
-          event.start.isBefore(span.end) &&
-          event.end!.isAfter(span.start),
-    );
-    final names = hidden
-        .map((event) => event.title.trim().isEmpty ? '未定义' : event.title)
-        .toSet();
     return '${_clock(span.start)} — ${_clock(span.end)} · ${durationText(span.duration)}\n'
-        '${names.isEmpty ? '未记录的时段' : names.join('、')}';
+        '单击查看隐藏事项';
   }
 
-  Future<void> showFoldedPeriods() async {
+  Future<void> showHiddenEvents() async {
     if (!await widget.beforeAction() || !mounted) return;
-    final current = TimelineAxis(
-      day: widget.journal.day,
-      width: _dayWidth,
-      events: _displayEvents,
-      foldEmptyTime: _presentation.foldsEmptyTime,
-    );
-    await _showFoldDetails(current.folds.toList());
+    await _showHiddenEvents();
   }
 
-  Future<void> _showFoldDetails(List<TimelineAxisSpan> spans) async {
+  Future<void> _showHiddenEvents({TimelineAxisSpan? span}) async {
     if (_foldDialogOpen || !mounted) return;
     _foldDialogOpen = true;
     try {
-      await showDialog<void>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('折叠的时段'),
-          scrollable: true,
-          content: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (spans.isEmpty) const Text('当前没有折叠的时段。'),
-                for (final span in spans)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 14),
-                    child: Text(_foldDescription(span)),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            if (widget.onShowFullDay != null)
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(dialogContext);
-                  unawaited(widget.onShowFullDay!());
-                },
-                child: const Text('显示完整一天'),
-              ),
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('关闭'),
-            ),
-          ],
+      final within = span == null ? null : Interval(span.start, span.end);
+      await showHiddenEventsDialog(
+        context,
+        store: widget.journal.store,
+        day: widget.journal.day,
+        events: _presentation.hiddenEvents(
+          _allDisplayEvents,
+          widget.journal.day,
+          within: within,
         ),
+        within: within,
       );
     } finally {
       _foldDialogOpen = false;
@@ -285,7 +244,7 @@ class TimelineState extends State<Timeline> {
     if (fold != null && handle == null) {
       if (!await widget.beforeAction() || !mounted) return;
       widget.journal.clearSelection();
-      await _showFoldDetails([fold]);
+      await _showHiddenEvents(span: fold);
       return;
     }
     final hit = handle?.$1 ?? _hit(content);
@@ -512,7 +471,7 @@ class TimelineState extends State<Timeline> {
     if (fold != null) {
       unawaited(() async {
         if (await widget.beforeAction() && mounted) {
-          await _showFoldDetails([fold]);
+          await _showHiddenEvents(span: fold);
         }
       }());
       return;
@@ -722,12 +681,6 @@ class TimelineState extends State<Timeline> {
                             TextButton(
                               onPressed: widget.onShowAll,
                               child: const Text('显示全部事项'),
-                            )
-                          else if (hiddenCount > 0 &&
-                              widget.onShowFullDay != null)
-                            TextButton(
-                              onPressed: widget.onShowFullDay,
-                              child: const Text('显示完整一天'),
                             ),
                         ],
                       ),
@@ -924,7 +877,6 @@ class _TimelinePainter extends CustomPainter {
       canvas.clipRect(
         Rect.fromLTRB(24 + span.left, 30, 24 + span.right, bottom),
       );
-      _text(canvas, '//', Offset(center - 6, 31), color: scheme.outline);
       _text(
         canvas,
         '⋯',
@@ -1026,7 +978,7 @@ class _TimelinePainter extends CustomPainter {
     if (axis.isFolded) {
       _text(
         canvas,
-        '已折叠 ${axis.folds.length} 段 · 可见覆盖 ${durationText(axis.visibleDuration)} · // 为折叠时段',
+        '可见覆盖 ${durationText(axis.visibleDuration)}',
         Offset(24, size.height - 21),
         width: size.width - 48,
         color: scheme.onSurfaceVariant,

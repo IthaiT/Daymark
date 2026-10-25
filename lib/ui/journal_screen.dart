@@ -24,7 +24,7 @@ import 'theme.dart';
 
 enum JournalChartMode { timeline, activity }
 
-enum _DisplayAction { focused, fullDay, unclassified, folds, all }
+enum _DisplayAction { focused, fullDay, unclassified, hidden, all }
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({
@@ -83,8 +83,8 @@ class JournalScreenState extends State<JournalScreen> {
   }
 
   Future<void> _setDisplay(_DisplayAction action) async {
-    if (action == _DisplayAction.folds) {
-      await _timeline.currentState?.showFoldedPeriods();
+    if (action == _DisplayAction.hidden) {
+      await _timeline.currentState?.showHiddenEvents();
       return;
     }
     if (_savingView || !await commit() || !mounted) return;
@@ -99,7 +99,7 @@ class JournalScreenState extends State<JournalScreen> {
       _DisplayAction.unclassified => _view.copyWith(
         showUnclassified: !_view.showUnclassified,
       ),
-      _DisplayAction.folds => _view,
+      _DisplayAction.hidden => _view,
     };
     _timeline.currentState?.cancelDrag();
     setState(() => _savingView = true);
@@ -148,9 +148,9 @@ class JournalScreenState extends State<JournalScreen> {
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(
-          key: ValueKey('view-folded-periods'),
-          value: _DisplayAction.folds,
-          child: Text('查看折叠内容…'),
+          key: ValueKey('view-hidden-events'),
+          value: _DisplayAction.hidden,
+          child: Text('查看隐藏事项…'),
         ),
       ],
       child: Padding(
@@ -787,8 +787,6 @@ class JournalScreenState extends State<JournalScreen> {
                                         key: _timeline,
                                         journal: widget.journal,
                                         presentation: _presentation,
-                                        onShowFullDay: () =>
-                                            _setDisplay(_DisplayAction.fullDay),
                                         onShowAll: () =>
                                             _setDisplay(_DisplayAction.all),
                                         beforeAction: commit,

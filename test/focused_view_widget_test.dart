@@ -97,6 +97,124 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  Future<void> hiddenEvents(WidgetTester tester) async {
+    await menu(tester);
+    await tester.tap(find.byKey(const ValueKey('view-hidden-events')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('all hidden records remain inspectable without any axis folds', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({
+      'sleep': Event('sleep', '睡觉', 'life', at(0), at(720)),
+      'meal': Event('meal', '早餐 买菜', null, at(720), at(900)),
+      'other': Event('other', '午餐 看番', null, at(900), at(960)),
+    });
+    final appearance = await open(tester);
+    final before = Map.of(journal.store.events);
+    for (final preset in JournalViewPreset.values) {
+      await appearance.setJournalView(
+        JournalViewPreferences(preset: preset, showUnclassified: false),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.state<TimelineState>(find.byType(Timeline)).axis.folds,
+        isEmpty,
+      );
+      await hiddenEvents(tester);
+      final dialog = find.byKey(const ValueKey('hidden-events-dialog'));
+      final table = tester.widget<DataTable>(
+        find.descendant(of: dialog, matching: find.byType(DataTable)),
+      );
+      final focused = preset == JournalViewPreset.focused;
+      expect(table.rows.length, focused ? 3 : 2);
+      expect(
+        find.descendant(of: dialog, matching: find.text('睡觉')),
+        focused ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('早餐 买菜')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('午餐 看番')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('2026-10-24 12:00:00')),
+        focused ? findsNWidgets(2) : findsOneWidget,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('生活')),
+        focused ? findsOneWidget : findsNothing,
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('未分类')),
+        findsNWidgets(2),
+      );
+      expect(
+        find.descendant(of: dialog, matching: find.text('显示完整一天')),
+        findsNothing,
+      );
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      expect(appearance.state.journalView.preset, preset);
+      expect(appearance.state.journalView.showUnclassified, isFalse);
+      expect(journal.store.events, before);
+    }
+  });
+
+  testWidgets(
+    'global hidden records include unclassified and overlapping background rows',
+    (tester) async {
+      await open(tester, namedGap: true);
+      await toggleUnclassified(tester);
+      await hiddenEvents(tester);
+      final table = tester.widget<DataTable>(find.byType(DataTable));
+      expect(table.rows.length, 4);
+      expect(find.text('日常睡眠'), findsOneWidget);
+      expect(find.text('已经填写的空档'), findsOneWidget);
+      expect(find.text('未分类的真实记录'), findsOneWidget);
+      for (final heading in ['名称', '标签', '开始时间', '结束时间', '本日用时']) {
+        expect(
+          find.descendant(
+            of: find.byType(DataTable),
+            matching: find.text(heading),
+          ),
+          findsOneWidget,
+        );
+      }
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'hidden detail rows retain duplicates, overnight dates and incomplete inputs in a small dialog',
+    (tester) async {
+      await journal.store.replaceEvents({
+        'sleep': Event('sleep', '同名事项', 'life', at(-60), at(60)),
+        'other': Event('other', '同名事项', null, at(600), at(660), '保留的备注'),
+        'pending': Event('pending', '待补时间', null, at(900), null),
+      });
+      await open(tester, auto: false);
+      await toggleUnclassified(tester);
+      await hiddenEvents(tester);
+      tester.view.physicalSize = const Size(1100, 700);
+      await tester.pumpAndSettle();
+      expect(find.byType(DataTable), findsOneWidget);
+      expect(tester.widget<DataTable>(find.byType(DataTable)).rows.length, 3);
+      expect(find.text('同名事项'), findsNWidgets(2));
+      expect(find.text('2026-10-23 23:00:00'), findsOneWidget);
+      expect(find.text('待补全'), findsNWidgets(2));
+      expect(find.text('保留的备注'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+    },
+  );
+
   testWidgets(
     'one unclassified choice filters both surfaces and survives mode changes',
     (tester) async {
@@ -282,9 +400,15 @@ void main() {
     final origin = tester.getTopLeft(find.byType(Timeline));
     await tester.tapAt(origin + Offset(24 + fold.left + fold.width / 2, 100));
     await tester.pumpAndSettle();
-    expect(find.text('折叠的时段'), findsOneWidget);
+    expect(find.text('折叠时段的事项'), findsOneWidget);
     expect(find.textContaining('11:00 — 13:00'), findsOneWidget);
-    await tester.tap(find.text('显示完整一天'));
+    expect(tester.widget<DataTable>(find.byType(DataTable)).rows.length, 2);
+    expect(find.text('显示完整一天'), findsNothing);
+    await tester.tap(find.text('关闭'));
+    await tester.pumpAndSettle();
+    expect(state.axis.isFolded, isTrue);
+    await menu(tester);
+    await tester.tap(find.byKey(const ValueKey('view-full-day')));
     await tester.pumpAndSettle();
     expect(state.axis.isFolded, isFalse);
     expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
