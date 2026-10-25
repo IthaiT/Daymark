@@ -9,6 +9,7 @@ import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/main.dart';
 import 'package:daymark/ui/event_table.dart';
+import 'package:daymark/ui/tag_sidebar.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -90,6 +91,97 @@ void main() {
       tester.getTopLeft(find.byType(Timeline)) +
       Offset(24 + state.axis.x(at(minute)) - state.horizontal.offset, 100);
 
+  Future<void> toggleUnclassified(WidgetTester tester) async {
+    await menu(tester);
+    await tester.tap(find.byKey(const ValueKey('view-unclassified')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'one unclassified choice filters both surfaces and survives mode changes',
+    (tester) async {
+      final appearance = await open(tester, namedGap: true);
+      final before = Map.of(journal.store.events);
+      final gap = journal.rows.firstWhere(
+        (event) => event.isUndefined && event.title == '已经填写的空档',
+      );
+      final timeline = tester.state<TimelineState>(find.byType(Timeline));
+      await menu(tester);
+      expect(find.text('显示日常背景'), findsNothing);
+      expect(find.text('显示未定义空档'), findsNothing);
+      expect(find.text('显示未分类事项'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('view-unclassified')));
+      await tester.pumpAndSettle();
+      expect(find.text('显示：关注事项'), findsOneWidget);
+      expect(appearance.state.journalView.showUnclassified, isFalse);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      expect(find.byKey(ValueKey('row-${gap.id}')), findsNothing);
+      expect(timeline.axis.visibleDuration, const Duration(minutes: 120));
+      expect(
+        find.descendant(
+          of: find.byType(TagSidebar),
+          matching: find.text('未分类'),
+        ),
+        findsNothing,
+      );
+      await menu(tester);
+      await tester.tap(find.byKey(const ValueKey('view-full-day')));
+      await tester.pumpAndSettle();
+      expect(find.text('显示：完整一天'), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      expect(timeline.axis.isFolded, isFalse);
+      expect(appearance.state.journalView.showUnclassified, isFalse);
+      expect(journal.store.events, before);
+      expect(journal.autoUndefined, isTrue);
+      await toggleUnclassified(tester);
+      expect(find.byKey(const ValueKey('row-free')), findsOneWidget);
+      expect(find.byKey(ValueKey('row-${gap.id}')), findsOneWidget);
+      await toggleUnclassified(tester);
+      await journal.shiftDay(1);
+      await tester.pumpAndSettle();
+      expect(appearance.state.journalView.showUnclassified, isFalse);
+      expect(find.text('显示：完整一天'), findsOneWidget);
+    },
+  );
+
+  testWidgets('unclassified drafts stay visible for editing when excluded', (
+    tester,
+  ) async {
+    final appearance = await open(tester);
+    await toggleUnclassified(tester);
+    await tester.tap(find.text('新增事件'));
+    await tester.pumpAndSettle();
+    final draft = journal.drafts.values.single;
+    expect(draft.tagId, isNull);
+    expect(appearance.state.journalView.showUnclassified, isFalse);
+    expect(find.byKey(ValueKey('row-${draft.id}')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(journal.drafts, isEmpty);
+  });
+
+  testWidgets('excluding parallel unclassified time preserves allocation', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({
+      'a': Event('a', '项目甲', 'work', at(600), at(660)),
+      'free': Event('free', '并行未分类', null, at(600), at(660)),
+    });
+    await open(tester, shared: true);
+    await toggleUnclassified(tester);
+    await tester.tap(find.text('汇总'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('row-free')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('row-a')),
+        matching: find.text('30 分钟'),
+      ),
+      findsOneWidget,
+    );
+  });
+
   testWidgets(
     'one display menu filters both surfaces without changing records',
     (tester) async {
@@ -118,11 +210,16 @@ void main() {
     (tester) async {
       await open(tester, auto: false);
       await menu(tester);
+      expect(find.text('显示日常背景'), findsNothing);
+      expect(find.text('显示未定义空档'), findsNothing);
       final item = tester.widget<PopupMenuItem<Object?>>(
-        find.byKey(const ValueKey('view-undefined')),
+        find.byKey(const ValueKey('view-unclassified')),
       );
-      expect(item.enabled, isFalse);
-      expect(find.text('自动生成已关闭'), findsOneWidget);
+      expect(item.enabled, isTrue);
+      await tester.tap(find.byKey(const ValueKey('view-unclassified')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      await menu(tester);
       await tester.tap(find.byKey(const ValueKey('view-full-day')));
       await tester.pumpAndSettle();
       expect(journal.autoUndefined, isFalse);
@@ -303,10 +400,30 @@ void main() {
   ) async {
     await journal.store.replaceEvents({'sleep': journal.event('sleep')!});
     await open(tester);
-    expect(find.text('当前没有关注事项，已隐藏 1 条记录。'), findsOneWidget);
-    await tester.tap(find.text('显示完整一天'));
+    expect(find.text('当前没有可显示的事项，已隐藏 1 条记录。'), findsOneWidget);
+    await tester.tap(find.text('显示全部事项'));
     await tester.pumpAndSettle();
     expect(find.text('显示：完整一天'), findsOneWidget);
     expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
   });
+
+  testWidgets(
+    'an empty unclassified filter can reveal all records in either mode',
+    (tester) async {
+      await journal.store.replaceEvents({'free': journal.event('free')!});
+      final appearance = await open(tester);
+      for (final preset in JournalViewPreset.values) {
+        await appearance.setJournalView(
+          JournalViewPreferences(preset: preset, showUnclassified: false),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('row-free')), findsNothing);
+        expect(find.text('当前没有可显示的事项，已隐藏 1 条记录。'), findsOneWidget);
+        await tester.tap(find.text('显示全部事项'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('row-free')), findsOneWidget);
+        expect(appearance.state.journalView, JournalViewPreferences.fullDay);
+      }
+    },
+  );
 }

@@ -41,16 +41,14 @@ class JournalPresentation {
       effectiveTagDisplay(tags, event.tagId, tagDisplays) == TagDisplay.routine;
 
   bool includes(Event event) {
+    if (event.isUndefined && !autoUndefined) return false;
+    if (revealedIds.contains(event.id)) return true;
+    if (event.tagId == null && !view.showUnclassified) return false;
     if (event.isUndefined) {
-      return autoUndefined &&
-          (revealedIds.contains(event.id) ||
-              view.showUndefined ||
-              !isUnfilledGap(event));
+      return view.preset == JournalViewPreset.fullDay || !isUnfilledGap(event);
     }
-    return revealedIds.contains(event.id) ||
-        view.showRoutine ||
-        !isRoutine(event);
+    return view.preset == JournalViewPreset.fullDay || !isRoutine(event);
   }
 
-  bool get foldsEmptyTime => view.foldsEmptyTime(autoUndefined: autoUndefined);
+  bool get foldsEmptyTime => view.foldsEmptyTime;
 }

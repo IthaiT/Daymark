@@ -1,63 +1,58 @@
-enum JournalViewPreset { focused, fullDay, custom }
+enum JournalViewPreset { focused, fullDay }
 
 /// Display choices do not change recording policy or stored events.
 class JournalViewPreferences {
   const JournalViewPreferences({
-    this.showRoutine = false,
-    this.showUndefined = false,
+    this.preset = JournalViewPreset.focused,
+    this.showUnclassified = true,
   });
 
   static const focused = JournalViewPreferences();
   static const fullDay = JournalViewPreferences(
-    showRoutine: true,
-    showUndefined: true,
+    preset: JournalViewPreset.fullDay,
   );
 
-  final bool showRoutine;
-  final bool showUndefined;
+  final JournalViewPreset preset;
+  final bool showUnclassified;
+  bool get foldsEmptyTime => preset == JournalViewPreset.focused;
 
-  JournalViewPreset preset({required bool autoUndefined}) {
-    if (!showRoutine && (!autoUndefined || !showUndefined)) {
-      return JournalViewPreset.focused;
-    }
-    if (showRoutine && (!autoUndefined || showUndefined)) {
-      return JournalViewPreset.fullDay;
-    }
-    return JournalViewPreset.custom;
-  }
-
-  bool foldsEmptyTime({required bool autoUndefined}) =>
-      !showRoutine || autoUndefined && !showUndefined;
-
-  JournalViewPreferences copyWith({bool? showRoutine, bool? showUndefined}) =>
-      JournalViewPreferences(
-        showRoutine: showRoutine ?? this.showRoutine,
-        showUndefined: showUndefined ?? this.showUndefined,
-      );
+  JournalViewPreferences copyWith({
+    JournalViewPreset? preset,
+    bool? showUnclassified,
+  }) => JournalViewPreferences(
+    preset: preset ?? this.preset,
+    showUnclassified: showUnclassified ?? this.showUnclassified,
+  );
 
   Map<String, Object> toJson() => {
-    'show_routine': showRoutine,
-    'show_undefined': showUndefined,
+    'preset': preset.name,
+    'show_unclassified': showUnclassified,
   };
 
   factory JournalViewPreferences.fromJson(Object? value) {
     if (value is! Map<String, Object?>) return focused;
+    // Legacy custom choices follow routine visibility, including the old
+    // full-day choice when automatic gap generation was disabled.
+    var preset = value['show_routine'] == true
+        ? JournalViewPreset.fullDay
+        : JournalViewPreset.focused;
+    for (final item in JournalViewPreset.values) {
+      if (value['preset'] == item.name) preset = item;
+    }
     return JournalViewPreferences(
-      showRoutine: value['show_routine'] is bool
-          ? value['show_routine']! as bool
-          : false,
-      showUndefined: value['show_undefined'] is bool
-          ? value['show_undefined']! as bool
-          : false,
+      preset: preset,
+      showUnclassified: value['show_unclassified'] is bool
+          ? value['show_unclassified']! as bool
+          : true,
     );
   }
 
   @override
   bool operator ==(Object other) =>
       other is JournalViewPreferences &&
-      showRoutine == other.showRoutine &&
-      showUndefined == other.showUndefined;
+      preset == other.preset &&
+      showUnclassified == other.showUnclassified;
 
   @override
-  int get hashCode => Object.hash(showRoutine, showUndefined);
+  int get hashCode => Object.hash(preset, showUnclassified);
 }

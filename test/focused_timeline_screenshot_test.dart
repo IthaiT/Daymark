@@ -20,6 +20,9 @@ void main() {
   testWidgets('synthetic screenshots preserve the timeline in both views', (
     tester,
   ) async {
+    final previousShadows = debugDisableShadows;
+    debugDisableShadows = false;
+    addTearDown(() => debugDisableShadows = previousShadows);
     await loadScreenshotFonts(tester);
     tester.view.physicalSize = const Size(1600, 1000);
     tester.view.devicePixelRatio = 1;
@@ -131,6 +134,7 @@ void main() {
     await tester.pumpAndSettle();
     await screenshot('journal-full-day');
     expect(find.byKey(const ValueKey('row-sleep')), findsOneWidget);
+    debugDisableShadows = previousShadows;
     expect(tester.takeException(), isNull);
   });
 }

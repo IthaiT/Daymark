@@ -155,4 +155,43 @@ void main() {
       expect(selected.includes(event('sleep', 0, 60, tag: 'sleep')), isTrue);
     },
   );
+
+  test('unclassified visibility covers ordinary, renamed and noted gaps', () {
+    final ordinary = event('ordinary', 0, 60);
+    final gap = Event('undefined:gap', '未定义', null, at(60), at(120));
+    final records = [
+      ordinary,
+      gap,
+      gap.copyWith(title: '买菜'),
+      gap.copyWith(notes: '已填写备注'),
+    ];
+    for (final preset in JournalViewPreset.values) {
+      final hidden = JournalPresentation(
+        tags: const {},
+        view: JournalViewPreferences(preset: preset, showUnclassified: false),
+      );
+      for (final record in records) {
+        expect(
+          hidden.includes(record),
+          isFalse,
+          reason: '${preset.name}: ${record.title}',
+        );
+      }
+      expect(hidden.includes(event('tagged', 0, 60, tag: 'work')), isTrue);
+      final revealed = JournalPresentation(
+        tags: const {},
+        view: hidden.view,
+        revealedIds: {ordinary.id, gap.id},
+      );
+      expect(revealed.includes(ordinary), isTrue);
+      expect(revealed.includes(gap.copyWith(title: '正在编辑')), isTrue);
+      final disabled = JournalPresentation(
+        tags: const {},
+        view: hidden.view,
+        autoUndefined: false,
+        revealedIds: {gap.id},
+      );
+      expect(disabled.includes(gap), isFalse);
+    }
+  });
 }

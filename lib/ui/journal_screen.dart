@@ -24,7 +24,7 @@ import 'theme.dart';
 
 enum JournalChartMode { timeline, activity }
 
-enum _DisplayAction { focused, fullDay, routine, undefined, folds }
+enum _DisplayAction { focused, fullDay, unclassified, folds, all }
 
 class JournalScreen extends StatefulWidget {
   const JournalScreen({
@@ -89,11 +89,15 @@ class JournalScreenState extends State<JournalScreen> {
     }
     if (_savingView || !await commit() || !mounted) return;
     final desired = switch (action) {
-      _DisplayAction.focused => JournalViewPreferences.focused,
-      _DisplayAction.fullDay => JournalViewPreferences.fullDay,
-      _DisplayAction.routine => _view.copyWith(showRoutine: !_view.showRoutine),
-      _DisplayAction.undefined => _view.copyWith(
-        showUndefined: !_view.showUndefined,
+      _DisplayAction.focused => _view.copyWith(
+        preset: JournalViewPreset.focused,
+      ),
+      _DisplayAction.fullDay => _view.copyWith(
+        preset: JournalViewPreset.fullDay,
+      ),
+      _DisplayAction.all => JournalViewPreferences.fullDay,
+      _DisplayAction.unclassified => _view.copyWith(
+        showUnclassified: !_view.showUnclassified,
       ),
       _DisplayAction.folds => _view,
     };
@@ -112,11 +116,10 @@ class JournalScreenState extends State<JournalScreen> {
   }
 
   Widget _displayMenu() {
-    final preset = _view.preset(autoUndefined: widget.journal.autoUndefined);
+    final preset = _view.preset;
     final label = switch (preset) {
       JournalViewPreset.focused => '关注事项',
       JournalViewPreset.fullDay => '完整一天',
-      JournalViewPreset.custom => '自定义',
     };
     return PopupMenuButton<_DisplayAction>(
       key: const ValueKey('journal-display'),
@@ -138,25 +141,10 @@ class JournalScreenState extends State<JournalScreen> {
         ),
         const PopupMenuDivider(),
         CheckedPopupMenuItem(
-          key: const ValueKey('view-routine'),
-          value: _DisplayAction.routine,
-          checked: _view.showRoutine,
-          child: const Text('显示日常背景'),
-        ),
-        CheckedPopupMenuItem(
-          key: const ValueKey('view-undefined'),
-          value: _DisplayAction.undefined,
-          checked: widget.journal.autoUndefined && _view.showUndefined,
-          enabled: widget.journal.autoUndefined,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('显示未定义空档'),
-              if (!widget.journal.autoUndefined)
-                const Text('自动生成已关闭', style: TextStyle(fontSize: 12)),
-            ],
-          ),
+          key: const ValueKey('view-unclassified'),
+          value: _DisplayAction.unclassified,
+          checked: _view.showUnclassified,
+          child: const Text('显示未分类事项'),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(
@@ -801,6 +789,8 @@ class JournalScreenState extends State<JournalScreen> {
                                         presentation: _presentation,
                                         onShowFullDay: () =>
                                             _setDisplay(_DisplayAction.fullDay),
+                                        onShowAll: () =>
+                                            _setDisplay(_DisplayAction.all),
                                         beforeAction: commit,
                                         onRename: (id) => unawaited(
                                           _startEdit(

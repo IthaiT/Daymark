@@ -26,6 +26,7 @@ class Timeline extends StatefulWidget {
     this.titleEditor,
     this.presentation,
     this.onShowFullDay,
+    this.onShowAll,
   });
   final JournalController journal;
   final Future<bool> Function() beforeAction;
@@ -36,6 +37,7 @@ class Timeline extends StatefulWidget {
   final Widget? titleEditor;
   final JournalPresentation? presentation;
   final Future<void> Function()? onShowFullDay;
+  final Future<void> Function()? onShowAll;
   @override
   State<Timeline> createState() => TimelineState();
 }
@@ -711,12 +713,18 @@ class TimelineState extends State<Timeline> {
                         children: [
                           Text(
                             hiddenCount > 0
-                                ? '当前没有关注事项，已隐藏 $hiddenCount 条记录。'
+                                ? '当前没有可显示的事项，已隐藏 $hiddenCount 条记录。'
                                 : events.isEmpty
                                 ? '这一天还没有记录。'
                                 : '补齐结束时间后，记录会显示在时间轴上。',
                           ),
-                          if (hiddenCount > 0 && widget.onShowFullDay != null)
+                          if (hiddenCount > 0 && widget.onShowAll != null)
+                            TextButton(
+                              onPressed: widget.onShowAll,
+                              child: const Text('显示全部事项'),
+                            )
+                          else if (hiddenCount > 0 &&
+                              widget.onShowFullDay != null)
                             TextButton(
                               onPressed: widget.onShowFullDay,
                               child: const Text('显示完整一天'),

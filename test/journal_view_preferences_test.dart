@@ -24,19 +24,35 @@ void main() {
       'journal_view': {'show_routine': true, 'show_undefined': 42},
     });
     expect(unknown.tagDisplays, {'work': TagDisplay.routine});
-    expect(unknown.journalView.showRoutine, isTrue);
-    expect(unknown.journalView.showUndefined, isFalse);
+    expect(unknown.journalView, JournalViewPreferences.fullDay);
   });
 
-  test('disabled gap generation does not create a contradictory preset', () {
-    const custom = JournalViewPreferences(showRoutine: true);
-    expect(custom.preset(autoUndefined: true), JournalViewPreset.custom);
-    expect(custom.preset(autoUndefined: false), JournalViewPreset.fullDay);
-    expect(custom.foldsEmptyTime(autoUndefined: true), isTrue);
-    expect(custom.foldsEmptyTime(autoUndefined: false), isFalse);
+  test('legacy custom choices normalize and new choices round trip', () {
+    for (final routine in [false, true]) {
+      for (final undefined in [false, true]) {
+        final migrated = JournalViewPreferences.fromJson({
+          'show_routine': routine,
+          'show_undefined': undefined,
+        });
+        expect(
+          migrated.preset,
+          routine ? JournalViewPreset.fullDay : JournalViewPreset.focused,
+        );
+        expect(migrated.showUnclassified, isTrue);
+      }
+    }
+    final hidden = JournalViewPreferences.fullDay.copyWith(
+      showUnclassified: false,
+    );
+    expect(JournalViewPreferences.fromJson(hidden.toJson()), hidden);
+    expect(hidden.foldsEmptyTime, isFalse);
+    expect(JournalViewPreferences.focused.foldsEmptyTime, isTrue);
     expect(
-      JournalViewPreferences.focused.foldsEmptyTime(autoUndefined: false),
-      isTrue,
+      JournalViewPreferences.fromJson({
+        'preset': 'future',
+        'show_unclassified': 42,
+      }),
+      JournalViewPreferences.focused,
     );
   });
 
@@ -53,18 +69,21 @@ void main() {
         TagColor.purple,
         TagDisplay.routine,
       );
-      await controller.setJournalView(JournalViewPreferences.fullDay);
+      final view = JournalViewPreferences.fullDay.copyWith(
+        showUnclassified: false,
+      );
+      await controller.setJournalView(view);
       await controller.setPalette(AppPalette.rose);
       final reopened = await AppearanceStore.open(directory);
       expect(reopened.state.tagDisplays, {'sleep': TagDisplay.routine});
       expect(reopened.state.tagColors, {'sleep': TagColor.purple});
-      expect(reopened.state.journalView, JournalViewPreferences.fullDay);
+      expect(reopened.state.journalView, view);
       expect(reopened.state.palette, AppPalette.rose);
       expect((await directory.list().toList()).length, 1);
       await controller.setTagStyle('sleep', null, null);
       expect(controller.state.tagDisplays, isEmpty);
       expect(controller.state.tagColors, isEmpty);
-      expect(controller.state.journalView, JournalViewPreferences.fullDay);
+      expect(controller.state.journalView, view);
     },
   );
 
@@ -98,5 +117,12 @@ void main() {
       throwsA(isA<FileSystemException>()),
     );
     expect(controller.state.journalView, JournalViewPreferences.focused);
+    await expectLater(
+      controller.setJournalView(
+        JournalViewPreferences.focused.copyWith(showUnclassified: false),
+      ),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(controller.state.journalView.showUnclassified, isTrue);
   });
 }
