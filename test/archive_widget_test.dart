@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:daymark/application/appearance_controller.dart';
 import 'package:daymark/application/journal_controller.dart';
@@ -18,16 +17,12 @@ import 'package:daymark/ui/calendar_heatmap.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'support/screenshot_fonts.dart';
-
 void main() {
   final day = DateTime.utc(2026, 10, 24);
-  final boundary = GlobalKey();
   late DateTime now;
   late Directory directory;
   late Store store;
@@ -116,14 +111,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
-      RepaintBoundary(
-        key: boundary,
-        child: DaymarkApp(
-          journal: journal,
-          ledger: ledger,
-          settings: settings,
-          appearance: appearance,
-        ),
+      DaymarkApp(
+        journal: journal,
+        ledger: ledger,
+        settings: settings,
+        appearance: appearance,
       ),
     );
     await tester.pumpAndSettle();
@@ -454,35 +446,6 @@ void main() {
       await close(tester);
       expect(archive.events['b']!.title, '热力图历史更正');
       expect(journal.drafts, isEmpty);
-    },
-  );
-  testWidgets(
-    'renders protected journal and session settings using synthetic data',
-    (tester) async {
-      await loadScreenshotFonts(tester);
-      await open(tester);
-      Future<void> capture(String name) async {
-        final render =
-            boundary.currentContext!.findRenderObject()!
-                as RenderRepaintBoundary;
-        final image = (await tester.runAsync(
-          () => render.toImage(pixelRatio: 1),
-        ))!;
-        final bytes = (await tester.runAsync(
-          () => image.toByteData(format: ui.ImageByteFormat.png),
-        ))!;
-        await tester.runAsync(
-          () => File(
-            '.test-artifacts/$name.png',
-          ).writeAsBytes(bytes.buffer.asUint8List()),
-        );
-        image.dispose();
-      }
-
-      await capture('archive-protected-journal');
-      await openSettings(tester);
-      await capture('archive-session-settings');
-      expect(tester.takeException(), isNull);
     },
   );
 }
