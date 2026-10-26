@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:daymark/application/appearance_controller.dart';
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/application/ledger_controller.dart';
 import 'package:daymark/application/settings_controller.dart';
@@ -10,7 +11,10 @@ import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/settings_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/appearance.dart';
+import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/main.dart';
+import 'package:daymark/ui/calendar_heatmap.dart';
 import 'package:daymark/ui/timeline.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -34,12 +38,14 @@ void main() {
   late LedgerController ledger;
   late SettingsController settings;
   bool failArchive = false;
+  var archiveWrites = 0;
   String? savedSettings;
   final windowCalls = <String>[];
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() async {
     now = day.add(const Duration(days: 1, hours: 9));
     failArchive = false;
+    archiveWrites = 0;
     savedSettings = null;
     windowCalls.clear();
     directory = await (await Directory(
@@ -66,6 +72,7 @@ void main() {
       directory,
       writer: (_, _) async {
         if (failArchive) throw const FileSystemException('模拟归档失败');
+        archiveWrites++;
       },
     );
     ledgerStore = await LedgerStore.open(directory, writer: (_, _) async {});
@@ -91,7 +98,10 @@ void main() {
         .setMockMethodCallHandler(const MethodChannel('window_manager'), null);
     await directory.delete(recursive: true);
   });
-  Future<void> open(WidgetTester tester) async {
+  Future<void> open(
+    WidgetTester tester, {
+    AppearanceController? appearance,
+  }) async {
     journal = JournalController(
       store,
       archive: archive,
@@ -108,7 +118,12 @@ void main() {
     await tester.pumpWidget(
       RepaintBoundary(
         key: boundary,
-        child: DaymarkApp(journal: journal, ledger: ledger, settings: settings),
+        child: DaymarkApp(
+          journal: journal,
+          ledger: ledger,
+          settings: settings,
+          appearance: appearance,
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -128,13 +143,18 @@ void main() {
 
   Future<void> drag(WidgetTester tester, double hour) async {
     final rect = tester.getRect(find.byType(Timeline));
-    final width = rect.width - 50;
+    final timeline = tester.state<TimelineState>(find.byType(Timeline));
+    final start = day.add(Duration(minutes: (hour * 60).round()));
+    final pixels = timeline.axis.pixelsPerMinute * 60;
     final gesture = await tester.startGesture(
-      Offset(rect.left + 24 + width * hour / 24, rect.top + 120),
+      Offset(
+        rect.left + 24 + timeline.axis.x(start) - timeline.horizontal.offset,
+        rect.top + 120,
+      ),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump();
-    await gesture.moveBy(Offset(width / 24, 0));
+    await gesture.moveBy(Offset(pixels, 0));
     await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
@@ -163,7 +183,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('input-a-title')), findsNothing);
       await drag(tester, 5);
-      await drag(tester, 10);
+      await drag(tester, 9.99);
       expect(store.events, before);
       await tester.tap(title, buttons: kSecondaryMouseButton);
       await tester.pumpAndSettle();
@@ -266,6 +286,176 @@ void main() {
     expect(windowCalls, contains('close'));
     expect(archive.days, {day, day.add(const Duration(days: 1))});
   });
+  testWidgets(
+    'focused hidden records stay archived and their details remain read-only',
+    (tester) async {
+      final unclassified = Event(
+        'free',
+        '隐藏未分类',
+        null,
+        day.add(const Duration(hours: 10)),
+        day.add(const Duration(hours: 12)),
+        '保留的合成备注',
+      );
+      await store.replaceEvents({
+        ...store.events,
+        unclassified.id: unclassified,
+      });
+      final appearance = AppearanceController();
+      addTearDown(appearance.dispose);
+      await appearance.setTagStyle('life', TagColor.orange, TagDisplay.routine);
+      await appearance.setJournalView(
+        const JournalViewPreferences(showUnclassified: false),
+      );
+      await open(tester, appearance: appearance);
+      final before = store.events;
+      final backup = archive.events;
+      expect(archive.days, {day});
+      expect(backup['b'], before['b']);
+      expect(backup['free'], unclassified);
+      expect(archiveWrites, 1);
+      expect(find.byKey(const ValueKey('row-a')), findsOneWidget);
+      expect(find.byKey(const ValueKey('row-b')), findsNothing);
+      expect(find.byKey(const ValueKey('row-free')), findsNothing);
+      final timeline = tester.state<TimelineState>(find.byType(Timeline));
+      final fold = timeline.axis.folds.single;
+      await tester.tapAt(
+        tester.getTopLeft(find.byType(Timeline)) +
+            Offset(
+              24 + fold.left + fold.width / 2 - timeline.horizontal.offset,
+              120,
+            ),
+      );
+      await tester.pumpAndSettle();
+      final dialog = find.byKey(const ValueKey('hidden-events-dialog'));
+      expect(dialog, findsOneWidget);
+      expect(
+        find.descendant(of: dialog, matching: find.byType(TextField)),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<DataTable>(
+              find.descendant(of: dialog, matching: find.byType(DataTable)),
+            )
+            .rows
+            .map((row) => row.key),
+        containsAll([
+          const ValueKey('hidden-event-b'),
+          const ValueKey('hidden-event-free'),
+        ]),
+      );
+      await tester.tap(find.text('关闭'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('journal-display')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('view-full-day')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-b')), findsOneWidget);
+      final title = find.byKey(const ValueKey('cell-b-title'));
+      await tester.tap(title);
+      await tester.tap(title);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('input-b-title')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('journal-display')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('view-unclassified')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('row-free')), findsOneWidget);
+      expect(store.events, before);
+      await close(tester);
+      expect(archive.events, backup);
+      expect(archiveWrites, 1);
+    },
+  );
+  testWidgets('full-day display does not archive incomplete saved coverage', (
+    tester,
+  ) async {
+    await store.replaceEvents({
+      'partial': Event(
+        'partial',
+        '未记满的一天',
+        'work',
+        day.add(const Duration(hours: 9)),
+        day.add(const Duration(hours: 18)),
+      ),
+    });
+    final appearance = AppearanceController();
+    addTearDown(appearance.dispose);
+    await appearance.setJournalView(JournalViewPreferences.fullDay);
+    await open(tester, appearance: appearance);
+    expect(find.text('显示：完整一天'), findsOneWidget);
+    expect(archive.days, isEmpty);
+    expect(archiveWrites, 0);
+    expect(journal.canEditEvent(store.events['partial']!), isTrue);
+    await close(tester);
+    expect(archive.days, isEmpty);
+    expect(archiveWrites, 0);
+  });
+  testWidgets(
+    'multi-tag heatmaps retain history protection and explicit corrections',
+    (tester) async {
+      await open(tester);
+      final before = store.events;
+      await tester.tap(find.text('活动热力图'));
+      await tester.pumpAndSettle();
+      final search = find.byKey(const ValueKey('activity-tag-picker'));
+      Future<void> addTag(String name) async {
+        await tester.enterText(search, name);
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+      }
+
+      await addTag('主业');
+      expect(find.byKey(const ValueKey('row-b')), findsNothing);
+      await addTag('生活');
+      expect(
+        tester
+            .widget<CalendarHeatmap>(find.byType(CalendarHeatmap))
+            .selection
+            .ids,
+        {'work', 'life'},
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      final title = find.byKey(const ValueKey('cell-b-title'));
+      await tester.tap(title);
+      await tester.tap(title);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('input-b-title')), findsNothing);
+      await tester.tap(title, buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<PopupMenuItem<String>>(
+              find.widgetWithText(PopupMenuItem<String>, '删除'),
+            )
+            .enabled,
+        isFalse,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+      expect(store.events, before);
+      await override(tester);
+      await tester.tap(title);
+      await tester.tap(title);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('input-b-title')),
+        '热力图历史更正',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(store.events['b']!.title, '热力图历史更正');
+      expect(archive.events['b'], before['b']);
+      await close(tester);
+      expect(archive.events['b']!.title, '热力图历史更正');
+      expect(journal.drafts, isEmpty);
+    },
+  );
   testWidgets(
     'renders protected journal and session settings using synthetic data',
     (tester) async {
