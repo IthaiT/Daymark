@@ -1,9 +1,13 @@
 import 'package:daymark/domain/item.dart';
+import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Map<String, Item> tree(List<Item> items) => {
   for (final item in items) item.id: item,
 };
+
+DateTime at(int minutes) =>
+    DateTime.utc(2026, 11, 4).add(Duration(minutes: minutes));
 
 void main() {
   test('sibling names must stay unique under the same parent', () {
@@ -180,6 +184,40 @@ void main() {
     expect(itemRoot(items, 'job')!.id, 'job');
     expect(itemRoot(items, 'missing'), isNull);
     expect(itemAncestors(items, 'job'), isEmpty);
+  });
+
+  test('duration rolls up from children and ignores unfinished records', () {
+    final items = tree([
+      const Item(id: 'job', name: '主业'),
+      const Item(id: 'hop', name: '跳槽', parentId: 'job'),
+      const Item(id: 'resume', name: '改简历', parentId: 'hop'),
+    ]);
+    final durations = itemDurations(items, [
+      Event('a', '调研', null, at(0), at(90), '', 'hop'),
+      Event('b', '改简历', null, at(120), at(150), '', 'resume'),
+      Event('c', '未结束', null, at(200), null, '', 'hop'),
+      Event('d', '无归属', null, at(240), at(300)),
+    ]);
+    expect(durations['missing'], isNull);
+    expect(durations['resume'], const Duration(minutes: 30));
+    expect(durations['hop'], const Duration(minutes: 120));
+    expect(durations['job'], const Duration(minutes: 120));
+  });
+
+  test('tree order keeps each root followed by its descendants', () {
+    final items = tree([
+      const Item(id: 'b', name: '副业'),
+      const Item(id: 'a', name: '主业'),
+      const Item(id: 'a2', name: '跳槽', parentId: 'a'),
+      const Item(id: 'a1', name: '嵌入式', parentId: 'a'),
+    ]);
+    expect(orderedItems(items).map((entry) => entry.$1.id), [
+      'a',
+      'a1',
+      'a2',
+      'b',
+    ]);
+    expect(orderedItems(items).map((entry) => entry.$2), [0, 1, 1, 0]);
   });
 
   test('copyWith can clear optional fields', () {

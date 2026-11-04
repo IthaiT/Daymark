@@ -33,6 +33,7 @@ class Item {
     this.status = ItemStatus.active,
     this.startedOn,
     this.endedOn,
+    this.objective = '',
     this.outcome = '',
   });
 
@@ -42,6 +43,10 @@ class Item {
   final ItemStatus status;
   final DateTime? startedOn;
   final DateTime? endedOn;
+
+  /// What finishing this item should achieve, written before any time is
+  /// booked against it.
+  final String objective;
 
   /// Result once finished, reason once abandoned; empty while open.
   final String outcome;
@@ -55,6 +60,7 @@ class Item {
     bool clearStartedOn = false,
     DateTime? endedOn,
     bool clearEndedOn = false,
+    String? objective,
     String? outcome,
   }) => Item(
     id: id,
@@ -63,6 +69,7 @@ class Item {
     status: status ?? this.status,
     startedOn: clearStartedOn ? null : startedOn ?? this.startedOn,
     endedOn: clearEndedOn ? null : endedOn ?? this.endedOn,
+    objective: objective ?? this.objective,
     outcome: outcome ?? this.outcome,
   );
 
@@ -73,6 +80,7 @@ class Item {
     'status': status.name,
     'started_on': startedOn == null ? null : dateText(startedOn!),
     'ended_on': endedOn == null ? null : dateText(endedOn!),
+    'objective': objective,
     'outcome': outcome,
   };
 
@@ -85,11 +93,20 @@ class Item {
       status == other.status &&
       startedOn == other.startedOn &&
       endedOn == other.endedOn &&
+      objective == other.objective &&
       outcome == other.outcome;
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, parentId, status, startedOn, endedOn, outcome);
+  int get hashCode => Object.hash(
+    id,
+    name,
+    parentId,
+    status,
+    startedOn,
+    endedOn,
+    objective,
+    outcome,
+  );
 }
 
 /// Rejects malformed trees before anything reaches disk.
@@ -174,4 +191,69 @@ List<Item> itemAncestors(Map<String, Item> items, String id) {
 Item? itemRoot(Map<String, Item> items, String id) {
   final chain = itemAncestors(items, id);
   return chain.isEmpty ? items[id] : chain.first;
+}
+
+int compareItemOrder(Item a, Item b) {
+  final result = compareUnicode(
+    caseFold(a.name.trim()),
+    caseFold(b.name.trim()),
+  );
+  return result != 0 ? result : compareUnicode(a.id, b.id);
+}
+
+/// Tree order shared by the project list and every picker: each root followed
+/// by its descendants, siblings in case-folded name order.
+List<(Item, int)> orderedItems(Map<String, Item> items) {
+  final children = <String?, List<Item>>{};
+  for (final item in items.values) {
+    (children[item.parentId] ??= []).add(item);
+  }
+  for (final siblings in children.values) {
+    siblings.sort(compareItemOrder);
+  }
+  final result = <(Item, int)>[];
+  void visit(String? parentId, int depth) {
+    for (final item in children[parentId] ?? const <Item>[]) {
+      result.add((item, depth));
+      visit(item.id, depth + 1);
+    }
+  }
+
+  visit(null, 0);
+  return result;
+}
+
+/// Whether [id] is [ancestorId] or sits below it.
+bool itemOwnedBy(Map<String, Item> items, String id, String ancestorId) {
+  String? cursor = id;
+  final seen = <String>{};
+  while (cursor != null && seen.add(cursor)) {
+    if (cursor == ancestorId) return true;
+    cursor = items[cursor]?.parentId;
+  }
+  return false;
+}
+
+/// Time booked on each item, including everything below it. Records without an
+/// end contribute nothing, matching every other duration in the journal.
+Map<String, Duration> itemDurations(
+  Map<String, Item> items,
+  Iterable<Event> events,
+) {
+  final direct = <String, Duration>{};
+  for (final event in events) {
+    final end = event.end;
+    final id = event.itemId;
+    if (end == null || id == null || !items.containsKey(id)) continue;
+    direct[id] = (direct[id] ?? Duration.zero) + end.difference(event.start);
+  }
+  final totals = <String, Duration>{};
+  for (final id in items.keys) {
+    var sum = Duration.zero;
+    for (final entry in direct.entries) {
+      if (itemOwnedBy(items, entry.key, id)) sum += entry.value;
+    }
+    totals[id] = sum;
+  }
+  return totals;
 }

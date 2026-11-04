@@ -228,6 +228,7 @@ class Store {
         'status',
         'started_on',
         'ended_on',
+        'objective',
         'outcome',
       };
       final items = <String, Item>{};
@@ -238,6 +239,7 @@ class Store {
             (row['parent_id'] != null && row['parent_id'] is! String) ||
             (row['started_on'] != null && row['started_on'] is! String) ||
             (row['ended_on'] != null && row['ended_on'] is! String) ||
+            (row['objective'] != null && row['objective'] is! String) ||
             (row['outcome'] != null && row['outcome'] is! String) ||
             row.keys.any((key) => !keys.contains(key))) {
           throw const FormatException('事项记录格式不正确。');
@@ -260,6 +262,7 @@ class Store {
           endedOn: row['ended_on'] == null
               ? null
               : parseDate(row['ended_on']! as String),
+          objective: row['objective'] as String? ?? '',
           outcome: row['outcome'] as String? ?? '',
         );
         if (items.containsKey(item.id)) {
