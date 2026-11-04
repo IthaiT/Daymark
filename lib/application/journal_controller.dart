@@ -348,6 +348,7 @@ class JournalController extends ChangeNotifier {
         start: civilTime(original.start).add(offset),
         end: original.end == null ? null : civilTime(original.end!).add(offset),
         clearTag: !store.tags.containsKey(original.tagId),
+        clearItem: !store.items.containsKey(original.itemId),
       );
       store.validateEvent(
         pasted.title.trim().isEmpty ? pasted.copyWith(title: '新事件') : pasted,

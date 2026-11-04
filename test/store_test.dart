@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/instance_lock.dart';
 import 'package:daymark/data/store.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -257,7 +258,113 @@ void main() {
     'maps exposed to callers cannot bypass validation or mutate saved state',
     () {
       expect(() => store.tags.clear(), throwsUnsupportedError);
+      expect(() => store.items.clear(), throwsUnsupportedError);
       expect(() => store.events.clear(), throwsUnsupportedError);
     },
   );
+
+  test(
+    'a legacy six-column CSV opens and is rewritten with the item column',
+    () async {
+      final legacy = [
+        legacyCsvFields.join(','),
+        'a,事件,work,2026-10-07T09:00:00,2026-10-07T10:00:00,',
+      ].join('\r\n');
+      await store.eventsFile.writeAsString('\uFEFF$legacy\r\n');
+      final reopened = await Store.open(directory);
+      expect(reopened.events['a']!.title, '事件');
+      expect(reopened.events['a']!.itemId, isNull);
+      await reopened.saveEvent(reopened.events['a']!);
+      expect(
+        (await reopened.eventsFile.readAsString()).split('\r\n').first,
+        csvFields.join(','),
+      );
+    },
+  );
+
+  test('items persist and events keep their node', () async {
+    await store.saveItem(
+      Item(id: 'job', name: '跳槽', startedOn: DateTime.utc(2026, 11, 1)),
+    );
+    await store.saveItem(
+      const Item(id: 'resume', name: '改简历', parentId: 'job'),
+    );
+    await store.saveEvent(
+      sample(id: 'a').copyWith(itemId: 'resume', clearTag: true),
+    );
+    final reopened = await Store.open(directory);
+    expect(reopened.items['job']!.startedOn, DateTime.utc(2026, 11, 1));
+    expect(reopened.items['resume']!.parentId, 'job');
+    expect(reopened.events['a']!.itemId, 'resume');
+  });
+
+  test('an event belongs to a tag or an item, never both', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽'));
+    await expectLater(
+      store.saveEvent(sample(id: 'a').copyWith(itemId: 'job')),
+      throwsA(isA<FormatException>()),
+    );
+    expect(store.events, isEmpty);
+  });
+
+  test('a missing item cannot be referenced', () async {
+    await expectLater(
+      store.saveEvent(
+        sample(id: 'a').copyWith(itemId: 'missing', clearTag: true),
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('a derived gap cannot own an item', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽'));
+    final gap = Event(
+      'undefined:x',
+      '空档',
+      null,
+      DateTime.utc(2026, 11, 4, 9),
+      DateTime.utc(2026, 11, 4, 10),
+      '',
+      'job',
+    );
+    await expectLater(
+      store.replaceEvents({'undefined:x': gap}),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test(
+    'deleting an item moves records to its parent and never deletes them',
+    () async {
+      await store.saveItem(const Item(id: 'job', name: '跳槽'));
+      await store.saveItem(
+        const Item(id: 'resume', name: '改简历', parentId: 'job'),
+      );
+      await store.saveEvent(
+        sample(id: 'a').copyWith(itemId: 'resume', clearTag: true),
+      );
+      await expectLater(
+        store.deleteItem('job'),
+        throwsA(isA<FormatException>()),
+      );
+      await store.deleteItem('resume');
+      expect(store.events['a']!.itemId, 'job');
+      await store.deleteItem('job');
+      expect(store.events['a']!.itemId, isNull);
+      expect((await Store.open(directory)).events.containsKey('a'), isTrue);
+      expect(store.items, isEmpty);
+    },
+  );
+
+  test('an item still in use cannot be dropped from the tree', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽'));
+    await store.saveEvent(
+      sample(id: 'a').copyWith(itemId: 'job', clearTag: true),
+    );
+    await expectLater(
+      store.replaceItems(const {}),
+      throwsA(isA<FormatException>()),
+    );
+    expect(store.items.containsKey('job'), isTrue);
+  });
 }

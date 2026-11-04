@@ -4,11 +4,15 @@ import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:uuid/uuid.dart';
 
+import '../domain/item.dart';
 import '../domain/model.dart';
 import '../domain/unicode.dart';
 import 'atomic_file.dart';
 
-const csvFields = ['id', 'title', 'tag_id', 'start', 'end', 'notes'];
+const csvFields = ['id', 'title', 'tag_id', 'start', 'end', 'notes', 'item_id'];
+
+/// Records written before projects existed keep the original six columns.
+const legacyCsvFields = ['id', 'title', 'tag_id', 'start', 'end', 'notes'];
 const defaultTags = [
   Tag('work', '主业'),
   Tag('embedded', '嵌入式', 'work'),
@@ -36,10 +40,13 @@ class Store {
   final Directory directory;
   final FileWriter _writer;
   Map<String, Tag> _tags = {};
+  Map<String, Item> _items = {};
   Map<String, Event> _events = {};
   Map<String, Tag> get tags => Map.unmodifiable(_tags);
+  Map<String, Item> get items => Map.unmodifiable(_items);
   Map<String, Event> get events => Map.unmodifiable(_events);
   File get tagsFile => File('${directory.path}/tags.json');
+  File get itemsFile => File('${directory.path}/items.json');
   File get eventsFile => File('${directory.path}/events.csv');
 
   static Future<Store> open(
@@ -49,13 +56,17 @@ class Store {
     await directory.create(recursive: true);
     final store = Store._(directory.absolute, writer);
     final hasTags = await store.tagsFile.exists();
+    final hasItems = await store.itemsFile.exists();
     final hasEvents = await store.eventsFile.exists();
     // Fully validate all existing data before creating either missing file.
+    // Items load before events, which are validated against them.
     store._tags = hasTags
         ? await store._readTags()
         : {for (final tag in defaultTags) tag.id: tag};
+    store._items = hasItems ? await store._readItems() : {};
     store._events = hasEvents ? await store._readEvents() : {};
     if (!hasTags) await store._writeTags(store._tags);
+    if (!hasItems) await store._writeItems(store._items);
     if (!hasEvents) await store._writeEvents(store._events);
     return store;
   }
@@ -125,17 +136,29 @@ class Store {
   }
 
   void validateEvent(Event event, {bool allowIncomplete = false}) =>
-      validateEventData(event, _tags, allowIncomplete: allowIncomplete);
+      validateEventData(
+        event,
+        _tags,
+        items: _items,
+        allowIncomplete: allowIncomplete,
+      );
 
   static void validateEventData(
     Event event,
     Map<String, Tag> tags, {
+    Map<String, Item> items = const {},
     bool allowIncomplete = false,
   }) {
     if (event.id.isEmpty) throw const FormatException('事件 ID 不能为空。');
     if (event.title.trim().isEmpty) throw const FormatException('请输入事件名称。');
     if (event.tagId != null && !tags.containsKey(event.tagId)) {
       throw const FormatException('所选标签不存在。');
+    }
+    if (event.tagId != null && event.itemId != null) {
+      throw const FormatException('一个事件只能关联标签或事项中的一项。');
+    }
+    if (event.itemId != null && !items.containsKey(event.itemId)) {
+      throw const FormatException('所选事项不存在。');
     }
     if (event.end == null && !allowIncomplete) {
       throw const FormatException('请填写事件的结束时间。');
@@ -149,8 +172,8 @@ class Store {
     if (event.end != null && !event.end!.isAfter(event.start)) {
       throw const FormatException('结束时间必须晚于开始时间；跨天事件请修改结束日期。');
     }
-    if (event.isUndefined && event.tagId != null) {
-      throw const FormatException('空档行不能关联标签，请将它转换为普通事件。');
+    if (event.isUndefined && (event.tagId != null || event.itemId != null)) {
+      throw const FormatException('空档行不能关联标签或事项，请将它转换为普通事件。');
     }
   }
 
@@ -188,13 +211,78 @@ class Store {
     }
   }
 
+  Future<Map<String, Item>> _readItems() async {
+    try {
+      final payload = jsonDecode(
+        (await itemsFile.readAsString()).replaceFirst(RegExp(r'^\uFEFF'), ''),
+      );
+      if (payload is! Map<String, Object?> ||
+          payload['version'] != 1 ||
+          payload['items'] is! List<Object?>) {
+        throw const FormatException('不支持的事项文件格式。');
+      }
+      final keys = {
+        'id',
+        'name',
+        'parent_id',
+        'status',
+        'started_on',
+        'ended_on',
+        'outcome',
+      };
+      final items = <String, Item>{};
+      for (final row in payload['items']! as List<Object?>) {
+        if (row is! Map<String, Object?> ||
+            row['id'] is! String ||
+            row['name'] is! String ||
+            (row['parent_id'] != null && row['parent_id'] is! String) ||
+            (row['started_on'] != null && row['started_on'] is! String) ||
+            (row['ended_on'] != null && row['ended_on'] is! String) ||
+            (row['outcome'] != null && row['outcome'] is! String) ||
+            row.keys.any((key) => !keys.contains(key))) {
+          throw const FormatException('事项记录格式不正确。');
+        }
+        final status = switch (row['status']) {
+          null || 'active' => ItemStatus.active,
+          'paused' => ItemStatus.paused,
+          'done' => ItemStatus.done,
+          'dropped' => ItemStatus.dropped,
+          _ => throw const FormatException('事项状态不正确。'),
+        };
+        final item = Item(
+          id: row['id']! as String,
+          name: row['name']! as String,
+          parentId: row['parent_id'] as String?,
+          status: status,
+          startedOn: row['started_on'] == null
+              ? null
+              : parseDate(row['started_on']! as String),
+          endedOn: row['ended_on'] == null
+              ? null
+              : parseDate(row['ended_on']! as String),
+          outcome: row['outcome'] as String? ?? '',
+        );
+        if (items.containsKey(item.id)) {
+          throw const FormatException('事项 ID 重复。');
+        }
+        items[item.id] = item;
+      }
+      validateItems(items);
+      return items;
+    } on FormatException catch (error) {
+      throw DataError('无法读取 ${itemsFile.path}：${error.message}');
+    }
+  }
+
   Future<Map<String, Event>> _readEvents() async {
     try {
       final source = (await eventsFile.readAsString()).replaceFirst(
         RegExp(r'^\uFEFF'),
         '',
       );
-      final eol = source.startsWith('${csvFields.join(',')}\r\n')
+      final eol =
+          source.startsWith('${csvFields.join(',')}\r\n') ||
+              source.startsWith('${legacyCsvFields.join(',')}\r\n')
           ? '\r\n'
           : '\n';
       final rows = CsvToListConverter(
@@ -202,18 +290,22 @@ class Store {
         allowInvalid: false,
         eol: eol,
       ).convert(source);
-      if (rows.isEmpty ||
-          rows.first.length != csvFields.length ||
-          !Iterable<int>.generate(
-            csvFields.length,
-          ).every((i) => rows.first[i] == csvFields[i])) {
+      if (rows.isEmpty) throw const FormatException('CSV 列名不匹配。');
+      final header = rows.first;
+      bool matches(List<String> fields) =>
+          header.length == fields.length &&
+          Iterable<int>.generate(
+            fields.length,
+          ).every((i) => header[i] == fields[i]);
+      final legacy = matches(legacyCsvFields);
+      if (!legacy && !matches(csvFields)) {
         throw const FormatException('CSV 列名不匹配。');
       }
+      final width = header.length;
       final events = <String, Event>{};
       for (final (index, row) in rows.skip(1).indexed) {
         try {
-          if (row.length != csvFields.length ||
-              row.any((field) => field is! String)) {
+          if (row.length != width || row.any((field) => field is! String)) {
             throw const FormatException('CSV 列数不匹配。');
           }
           final fields = row.cast<String>();
@@ -224,6 +316,7 @@ class Store {
             parseTimestamp(fields[3]),
             fields[4].isEmpty ? null : parseTimestamp(fields[4]),
             fields[5],
+            !legacy && fields[6].isNotEmpty ? fields[6] : null,
           );
           validateEvent(event, allowIncomplete: true);
           if (events.containsKey(event.id)) {
@@ -246,6 +339,20 @@ class Store {
       '${const JsonEncoder.withIndent('  ').convert({'version': 1, 'tags': tags.values.map((tag) => tag.toJson()).toList()})}\n',
     ),
   );
+  Future<void> _writeItems(Map<String, Item> items) {
+    final sorted = items.values.toList()
+      ..sort((a, b) {
+        final name = compareUnicode(caseFold(a.name), caseFold(b.name));
+        return name != 0 ? name : compareUnicode(a.id, b.id);
+      });
+    return _writer(
+      itemsFile,
+      utf8.encode(
+        '${const JsonEncoder.withIndent('  ').convert({'version': 1, 'items': sorted.map((item) => item.toJson()).toList()})}\n',
+      ),
+    );
+  }
+
   Future<void> _writeEvents(Map<String, Event> events) {
     final sorted = events.values.toList()..sort(compareEvents);
     final rows = <List<String>>[
@@ -258,6 +365,7 @@ class Store {
           timestampText(event.start),
           event.end == null ? '' : timestampText(event.end!),
           event.notes,
+          event.itemId ?? '',
         ],
     ];
     return _writer(
@@ -313,6 +421,61 @@ class Store {
     final desired = {for (final tag in tags.values) tag.id: tag};
     await _writeTags(desired);
     _tags = desired;
+  }
+
+  /// Replaces the complete project tree in one atomic write.
+  Future<void> replaceItems(Map<String, Item> items) async {
+    for (final entry in items.entries) {
+      if (entry.key != entry.value.id) {
+        throw const FormatException('事项 ID 与记录键不匹配。');
+      }
+    }
+    validateItems(items);
+    for (final removed in _items.keys.where((id) => !items.containsKey(id))) {
+      if (_events.values.any((event) => event.itemId == removed)) {
+        throw FormatException('事项「${_items[removed]!.name}」还有事件，请先移动这些事件。');
+      }
+    }
+    final desired = {for (final item in items.values) item.id: item};
+    await _writeItems(desired);
+    _items = desired;
+  }
+
+  Future<Item> saveItem(Item item) async {
+    final desired = {..._items, item.id: item};
+    validateItems(desired);
+    await _writeItems(desired);
+    _items = desired;
+    return item;
+  }
+
+  /// Removes one leaf node. Its records move to the parent node, so time is
+  /// never lost together with a project; only a root project sends its records
+  /// back to the unclassified state.
+  Future<void> deleteItem(String id) async {
+    final item = _items[id];
+    if (item == null) throw const FormatException('事项不存在。');
+    if (_items.values.any((child) => child.parentId == id)) {
+      throw const FormatException('此事项还有子事项，请先移动或删除子事项。');
+    }
+    final parentId = item.parentId;
+    final nextItems = {..._items}..remove(id);
+    final nextEvents = {
+      for (final event in _events.values)
+        event.id: event.itemId == id
+            ? event.copyWith(itemId: parentId, clearItem: parentId == null)
+            : event,
+    };
+    validateItems(nextItems);
+    for (final event in nextEvents.values) {
+      validateEventData(event, _tags, items: nextItems, allowIncomplete: true);
+    }
+    // Events first: a failed write then leaves an unused node, never a record
+    // pointing at a node that no longer exists.
+    await _writeEvents(nextEvents);
+    await _writeItems(nextItems);
+    _events = nextEvents;
+    _items = nextItems;
   }
 
   Future<void> replaceEvents(Map<String, Event> events) async {

@@ -112,6 +112,7 @@ class Event {
     this.start,
     this.end, [
     this.notes = '',
+    this.itemId,
   ]);
   final String id;
   final String title;
@@ -119,6 +120,10 @@ class Event {
   final DateTime start;
   final DateTime? end;
   final String notes;
+
+  /// Node of the project tree that owns this record. Mutually exclusive with
+  /// [tagId]: a record belongs either to a tag or to a project item.
+  final String? itemId;
   bool get isUndefined => id.startsWith(undefinedIdPrefix);
   Event copyWith({
     String? id,
@@ -128,6 +133,8 @@ class Event {
     DateTime? start,
     DateTime? end,
     String? notes,
+    String? itemId,
+    bool clearItem = false,
   }) => Event(
     id ?? this.id,
     title ?? this.title,
@@ -135,6 +142,7 @@ class Event {
     start ?? this.start,
     end ?? this.end,
     notes ?? this.notes,
+    clearItem ? null : itemId ?? this.itemId,
   );
   Interval? intervalOn(DateTime day) {
     if (end == null) return null;
@@ -151,9 +159,10 @@ class Event {
       tagId == other.tagId &&
       start == other.start &&
       end == other.end &&
-      notes == other.notes;
+      notes == other.notes &&
+      itemId == other.itemId;
   @override
-  int get hashCode => Object.hash(id, title, tagId, start, end, notes);
+  int get hashCode => Object.hash(id, title, tagId, start, end, notes, itemId);
 }
 
 class Interval {
