@@ -1928,7 +1928,7 @@ void main() {
 
       for (var mode = 0; mode < 3; mode++) {
         if (mode == 1) {
-          await tester.tap(find.byKey(const ValueKey('mode-1')));
+          await tester.tap(find.byKey(const ValueKey('mode-2')));
           await tester.pumpAndSettle();
           await tester.tap(find.byKey(const ValueKey('mode-0')));
           await tester.pumpAndSettle();

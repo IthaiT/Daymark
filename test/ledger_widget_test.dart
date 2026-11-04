@@ -630,7 +630,7 @@ void main() {
       final journalTheme = Theme.of(
         tester.element(find.byKey(const ValueKey('day-input'))),
       );
-      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.tap(find.byKey(const ValueKey('mode-2')));
       await tester.pumpAndSettle();
       final ledgerTheme = Theme.of(tester.element(quick('lunch')));
       expect(ledgerTheme.colorScheme, journalTheme.colorScheme);
@@ -650,7 +650,7 @@ void main() {
         ).colorScheme,
         changedTheme.colorScheme,
       );
-      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.tap(find.byKey(const ValueKey('mode-2')));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(quick('lunch')).controller!.text, '28');
       await tester.tap(quick('lunch'));
@@ -658,13 +658,13 @@ void main() {
       expect(store.state.records.length, 1);
       await tester.tap(find.byKey(const ValueKey('mode-0')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.tap(find.byKey(const ValueKey('mode-2')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('palette-pine')));
       await tester.pumpAndSettle();
       await shortcut(tester, LogicalKeyboardKey.keyZ);
       expect(store.state.records, isEmpty);
-      await tester.tap(find.byKey(const ValueKey('mode-1')));
+      await tester.tap(find.byKey(const ValueKey('mode-2')));
       await tester.pumpAndSettle();
       await shortcut(tester, LogicalKeyboardKey.keyY);
       expect(store.state.records.length, 1);
@@ -700,7 +700,7 @@ void main() {
     journal.clearSelection();
     await tester.pumpAndSettle();
     expect(appearanceWrites, 1, reason: '选择变化不应重复尝试失败的自动配色写入');
-    await tester.tap(find.byKey(const ValueKey('mode-1')));
+    await tester.tap(find.byKey(const ValueKey('mode-2')));
     await tester.pumpAndSettle();
     await tester.enterText(quick('lunch'), '31');
     await tester.tap(find.byKey(const ValueKey('palette-pine')));
@@ -808,7 +808,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('mode-1')));
+    await tester.tap(find.byKey(const ValueKey('mode-2')));
     await tester.pumpAndSettle();
     await ledger.saveInputs([
       expense(2800, 'lunch', notes: '工作日午餐'),
@@ -884,7 +884,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('mode-0')));
     await tester.pumpAndSettle();
     await screenshot('workspace-journal');
-    await tester.tap(find.byKey(const ValueKey('mode-1')));
+    await tester.tap(find.byKey(const ValueKey('mode-2')));
     await tester.pumpAndSettle();
     await ledger.saveInputs([
       expense(10000, 'housing'),

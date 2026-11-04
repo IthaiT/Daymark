@@ -12,6 +12,7 @@ import '../domain/journal_view_preferences.dart';
 import 'palette_picker.dart';
 import 'journal_screen.dart';
 import 'ledger_screen.dart';
+import 'project_screen.dart';
 import 'settings_dialog.dart';
 import 'statistics_screen.dart';
 import 'tag_map_screen.dart';
@@ -49,6 +50,7 @@ class AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
   final _tagMapScreen = GlobalKey<TagMapScreenState>();
   final _ledgerFocus = FocusNode();
+  final _projectFocus = FocusNode();
   final _journalScope = FocusScopeNode(debugLabel: 'journal-workspace');
   final _statisticsScope = FocusScopeNode(debugLabel: 'statistics-workspace');
   late final TagMapController _tagMap = TagMapController(widget.journal);
@@ -62,20 +64,24 @@ class AppScreenState extends State<AppScreen> {
   void dispose() {
     _tagMap.dispose();
     _ledgerFocus.dispose();
+    _projectFocus.dispose();
     _journalScope.dispose();
     _statisticsScope.dispose();
     super.dispose();
   }
 
   void _focusPage() {
-    if (_page == 3) {
-      _statisticsScope.requestFocus();
-    } else if (_page == 2) {
-      _tagMapScreen.currentState?.focus();
-    } else if (_page == 1) {
-      _ledgerFocus.requestFocus();
-    } else {
-      _journalScope.requestFocus();
+    switch (_page) {
+      case 1:
+        _projectFocus.requestFocus();
+      case 2:
+        _ledgerFocus.requestFocus();
+      case 3:
+        _tagMapScreen.currentState?.focus();
+      case 4:
+        _statisticsScope.requestFocus();
+      default:
+        _journalScope.requestFocus();
     }
   }
 
@@ -89,7 +95,7 @@ class AppScreenState extends State<AppScreen> {
       return;
     }
     if (!mounted) return;
-    if (page == 2) {
+    if (page == 3) {
       final screen = _tagMapScreen.currentState;
       if (screen == null) {
         _tagMap.syncFromStore();
@@ -99,9 +105,9 @@ class AppScreenState extends State<AppScreen> {
     }
     setState(() {
       _page = page;
-      if (page == 1) _visitedLedger = true;
-      if (page == 2) _visitedTagMap = true;
-      if (page == 3) _visitedStatistics = true;
+      if (page == 2) _visitedLedger = true;
+      if (page == 3) _visitedTagMap = true;
+      if (page == 4) _visitedStatistics = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusPage();
@@ -195,16 +201,18 @@ class AppScreenState extends State<AppScreen> {
                       const SizedBox(height: 16),
                       _mode(context, 0, '时间记录', Icons.schedule),
                       const SizedBox(height: 8),
+                      _mode(context, 1, '项目', Icons.workspaces_outline),
+                      const SizedBox(height: 8),
                       _mode(
                         context,
-                        1,
+                        2,
                         '记账',
                         Icons.account_balance_wallet_outlined,
                       ),
                       const SizedBox(height: 8),
-                      _mode(context, 2, '标签导图', Icons.account_tree_outlined),
+                      _mode(context, 3, '标签导图', Icons.account_tree_outlined),
                       const SizedBox(height: 8),
-                      _mode(context, 3, '统计', Icons.insights_outlined),
+                      _mode(context, 4, '统计', Icons.insights_outlined),
                       const Spacer(),
                       _settingsButton(context),
                       const SizedBox(height: 16),
@@ -237,6 +245,15 @@ class AppScreenState extends State<AppScreen> {
                       canRequestFocus: _page == 1,
                       descendantsAreFocusable: _page == 1,
                       descendantsAreTraversable: _page == 1,
+                      child: ProjectScreen(
+                        journal: widget.journal,
+                        focusNode: _projectFocus,
+                      ),
+                    ),
+                    FocusScope(
+                      canRequestFocus: _page == 2,
+                      descendantsAreFocusable: _page == 2,
+                      descendantsAreTraversable: _page == 2,
                       child: _visitedLedger
                           ? LedgerScreen(
                               ledger: widget.ledger,
@@ -245,9 +262,9 @@ class AppScreenState extends State<AppScreen> {
                           : const SizedBox.shrink(),
                     ),
                     FocusScope(
-                      canRequestFocus: _page == 2,
-                      descendantsAreFocusable: _page == 2,
-                      descendantsAreTraversable: _page == 2,
+                      canRequestFocus: _page == 3,
+                      descendantsAreFocusable: _page == 3,
+                      descendantsAreTraversable: _page == 3,
                       child: _visitedTagMap
                           ? TagMapScreen(
                               key: _tagMapScreen,
@@ -257,9 +274,9 @@ class AppScreenState extends State<AppScreen> {
                     ),
                     FocusScope(
                       node: _statisticsScope,
-                      canRequestFocus: _page == 3,
-                      descendantsAreFocusable: _page == 3,
-                      descendantsAreTraversable: _page == 3,
+                      canRequestFocus: _page == 4,
+                      descendantsAreFocusable: _page == 4,
+                      descendantsAreTraversable: _page == 4,
                       child: _visitedStatistics
                           ? StatisticsScreen(journal: widget.journal)
                           : const SizedBox.shrink(),

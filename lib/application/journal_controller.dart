@@ -5,6 +5,7 @@ import '../data/archive_store.dart';
 import '../data/store.dart';
 import '../domain/event_clipboard.dart';
 import '../domain/history.dart';
+import '../domain/item.dart';
 import '../domain/journal_archive.dart';
 import '../domain/model.dart';
 import '../domain/settings.dart';
@@ -562,4 +563,22 @@ class JournalController extends ChangeNotifier {
   });
   Future<void> moveTag(String id, String? parentId) =>
       saveTag(store.tags[id]!.name, parentId, id: id);
+
+  Future<Item> saveItem(Item item) => _run(() async {
+    final saved = await store.saveItem(item);
+    notifyListeners();
+    return saved;
+  });
+
+  /// Identifier for an item that has not been saved yet, so dialogs can build
+  /// a complete node before the store sees it.
+  String newItemId() => const Uuid().v4().replaceAll('-', '');
+
+  Future<Item> createItem(String name, String? parentId) =>
+      saveItem(Item(id: newItemId(), name: name.trim(), parentId: parentId));
+
+  Future<void> deleteItem(String id) => _run(() async {
+    await store.deleteItem(id);
+    notifyListeners();
+  });
 }
