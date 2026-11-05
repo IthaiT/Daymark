@@ -12,7 +12,7 @@ class AppSettings {
     this.splitOverlap = false,
   }) : assert(dragMinutes > 0);
 
-  /// Whether the empty spans between events become derived “未定义” records.
+  /// Whether the empty spans between events become derived “空档” records.
   final bool autoUndefined;
 
   /// Step used when dragging or resizing an event on the timeline.

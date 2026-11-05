@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../application/journal_controller.dart';
 import '../data/store.dart';
 import '../domain/event_stats.dart';
+import '../domain/item.dart';
 import '../domain/model.dart';
 import 'dialogs.dart' show errorText;
 import 'pickers.dart' show TagField;
@@ -22,6 +23,10 @@ class StatisticsScreen extends StatefulWidget {
 
 enum _StatsPeriod { week, month, custom }
 
+/// Records belong either to a tag or to a project item, so the two views are
+/// built and totalled independently instead of being summed together.
+enum _StatsDimension { tag, item }
+
 const _unclassifiedId = '__stats_unclassified__';
 const _undefinedId = '__stats_undefined__';
 const _weekdayNames = ['一', '二', '三', '四', '五', '六', '日'];
@@ -30,6 +35,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
   late DateTime _from;
   late DateTime _to;
   _StatsPeriod _period = _StatsPeriod.week;
+  _StatsDimension _dimension = _StatsDimension.tag;
   String? _selectedId;
   final _expanded = <String>{};
   final _hidden = <String>{};
@@ -220,7 +226,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       var parent = node.parentId;
       while (parent != null) {
         _expanded.add(parent);
-        parent = widget.journal.store.tags[parent]?.parentId;
+        parent = model.nodes[parent]?.parentId;
       }
       if (node.children.any((child) => child.duration > Duration.zero)) {
         _expanded.add(node.id);
@@ -422,9 +428,28 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            _compositionTitle,
-            style: Theme.of(context).textTheme.titleSmall,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _compositionTitle,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+              AppSegmentedButton<_StatsDimension>(
+                segments: const [
+                  ButtonSegment(value: _StatsDimension.tag, label: Text('标签')),
+                  ButtonSegment(value: _StatsDimension.item, label: Text('项目')),
+                ],
+                selected: {_dimension},
+                onSelectionChanged: (values) => setState(() {
+                  _dimension = values.single;
+                  _selectedId = null;
+                  _selectedEvents.clear();
+                  _hidden.clear();
+                }),
+              ),
+            ],
           ),
           const SizedBox(height: 9),
           if (visible.isEmpty)
@@ -906,7 +931,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '全部标签${isChild ? ' › ${_pathOf(model, node)}' : ' › ${node.name}'}',
+          '${_dimension == _StatsDimension.item ? '全部项目' : '全部标签'}${isChild ? ' › ${_pathOf(model, node)}' : ' › ${node.name}'}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(
@@ -1421,9 +1446,16 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final previousProfile = ConcurrencyProfile.of(window.previous, allEvents);
     final nodes = <String, _StatsNode>{};
     final byTag = <String, List<Event>>{};
+    final byItem = <String, List<Event>>{};
     for (final event in store.events.values) {
-      if (event.isUndefined || event.tagId == null) continue;
-      (byTag[event.tagId!] ??= <Event>[]).add(event);
+      if (event.isUndefined) continue;
+      final owner = event.owner;
+      if (owner == null) continue;
+      if (owner.isItem) {
+        (byItem[owner.id] ??= <Event>[]).add(event);
+      } else {
+        (byTag[owner.id] ??= <Event>[]).add(event);
+      }
     }
     _StatsNode buildTag(Tag tag) {
       final children = <_StatsNode>[
@@ -1456,6 +1488,38 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       return node;
     }
 
+    _StatsNode buildItem(Item item) {
+      final children = <_StatsNode>[
+        for (final child in store.items.values)
+          if (child.parentId == item.id) buildItem(child),
+      ];
+      final direct = byItem[item.id] ?? const <Event>[];
+      final events = <Event>[
+        ...direct,
+        for (final child in children) ...child.events,
+      ];
+      final id = 'item:${item.id}';
+      final node = _StatsNode(
+        id: id,
+        name: item.name,
+        parentId: item.parentId == null ? null : 'item:${item.parentId}',
+        color: Colors.brown.shade400,
+        duration: splitOverlap
+            ? profile.durationOf(events)
+            : durationIn(window, events),
+        previous: splitOverlap
+            ? previousProfile.durationOf(events)
+            : durationIn(window.previous, events),
+        children: children,
+        events: events,
+        directEvents: direct,
+        isGap: false,
+        isUnclassified: false,
+      );
+      nodes[id] = node;
+      return node;
+    }
+
     final tagRoots =
         <_StatsNode>[
             for (final tag in store.tags.values)
@@ -1463,8 +1527,18 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           ]
           ..removeWhere((node) => node.duration == Duration.zero)
           ..sort((a, b) => b.duration.compareTo(a.duration));
+    final itemRoots =
+        <_StatsNode>[
+            for (final item in store.items.values)
+              if (item.parentId == null) buildItem(item),
+          ]
+          ..removeWhere((node) => node.duration == Duration.zero)
+          ..sort((a, b) => b.duration.compareTo(a.duration));
+    final dimensionRoots = _dimension == _StatsDimension.item
+        ? itemRoots
+        : tagRoots;
     final unclassifiedEvents = store.events.values
-        .where((event) => !event.isUndefined && event.tagId == null)
+        .where((event) => !event.isUndefined && event.owner == null)
         .toList();
     final undefinedEvents = store.events.values
         .where((event) => event.isUndefined)
@@ -1488,7 +1562,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
     final undefined = _StatsNode(
       id: _undefinedId,
-      name: '未定义',
+      name: '空档',
       parentId: null,
       color: Colors.grey.shade500,
       duration: splitOverlap
@@ -1509,7 +1583,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       if (unclassified.duration > Duration.zero) unclassified,
       if (undefined.duration > Duration.zero) undefined,
     ]..sort((a, b) => b.duration.compareTo(a.duration));
-    final roots = [...tagRoots, ...pseudo];
+    final roots = [...dimensionRoots, ...pseudo];
     final visibleTotal = roots
         .where((root) => !_hidden.contains(root.id))
         .fold(Duration.zero, (sum, node) => sum + node.duration);

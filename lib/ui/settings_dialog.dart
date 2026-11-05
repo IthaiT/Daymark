@@ -84,7 +84,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               SwitchListTile(
                 key: const ValueKey('setting-auto-undefined'),
                 contentPadding: EdgeInsets.zero,
-                title: const Text('自动生成未定义事件'),
+                title: const Text('自动生成空档'),
                 subtitle: const Text(
                   '自动补全事件之间的空档；可在时间轴的「显示」菜单中折叠。关闭后不再生成或显示，已有名称和备注保留，重新开启后恢复。',
                 ),
