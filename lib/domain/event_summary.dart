@@ -1,7 +1,7 @@
 import 'event_stats.dart';
 import 'model.dart';
 
-typedef EventGroupKey = ({String? tagId, String? draftId});
+typedef EventGroupKey = ({String? tagId, String? itemId, String? draftId});
 
 class EventGroup {
   /// [profile] decides how overlapped time is counted. Without it the group
@@ -40,7 +40,8 @@ class EventGroup {
   late final Duration duration;
   late final bool hasOverlap;
   bool get isDraft => key.draftId != null;
-  bool get isUnclassified => key.tagId == null && !isDraft;
+  bool get isUnclassified =>
+      key.tagId == null && key.itemId == null && !isDraft;
   bool get hasSummary => !isDraft && (isUnclassified || events.length > 1);
   int get incompleteCount => events.where((event) => event.end == null).length;
 }
@@ -67,9 +68,11 @@ List<EventGroup> eventGroups(
         ..sort(compareEvents);
   for (final event in ordered) {
     final draft = draftIds.contains(event.id);
-    final unclassified = event.isUndefined || event.tagId == null;
+    final owner = event.owner;
+    final unclassified = event.isUndefined || owner == null;
     final key = (
-      tagId: draft || unclassified ? null : event.tagId,
+      tagId: draft || unclassified || owner.isItem ? null : owner.id,
+      itemId: draft || unclassified || !owner.isItem ? null : owner.id,
       draftId: draft ? event.id : null,
     );
     (buckets[key] ??= []).add(event);

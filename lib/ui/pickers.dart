@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/store.dart';
+import '../domain/item.dart';
 import '../domain/model.dart';
 import '../domain/unicode.dart';
 import 'tag_tree_tile.dart';
@@ -294,6 +295,184 @@ class TagChoicesState extends State<TagChoices> {
       for (final id in visibleIds) _tile(id),
     ],
   );
+}
+
+/// Owners matching [query]: tags first, then project items, both searched by
+/// their full path so repeated leaf names stay distinguishable. A null entry
+/// means "no owner", so typing the empty label clears the owner.
+List<OwnerRef?> matchingOwners(Store store, String query) {
+  final needle = caseFold(query.trim());
+  return [
+    if (caseFold('未归类').contains(needle)) null,
+    for (final tag in store.orderedTags())
+      if (caseFold(
+        store.ancestors(tag.id).map((item) => item.name).join(' / '),
+      ).contains(needle))
+        (id: tag.id, isItem: false),
+    for (final (item, _) in orderedItems(store.items))
+      if (caseFold(store.itemPath(item.id)).contains(needle))
+        (id: item.id, isItem: true),
+  ];
+}
+
+/// One list containing tags and project items, so a record's owner is chosen
+/// in a single search instead of two separate pickers.
+class OwnerChoices extends StatefulWidget {
+  const OwnerChoices({
+    super.key,
+    required this.store,
+    required this.onChoose,
+    this.selected,
+    this.query = '',
+  });
+  final Store store;
+  final ValueChanged<OwnerRef?> onChoose;
+  final OwnerRef? selected;
+  final String query;
+  @override
+  State<OwnerChoices> createState() => OwnerChoicesState();
+}
+
+class OwnerChoicesState extends State<OwnerChoices> {
+  final _collapsed = <String>{};
+
+  bool _selected(OwnerRef owner) {
+    final selected = widget.selected;
+    return selected != null &&
+        selected.id == owner.id &&
+        selected.isItem == owner.isItem;
+  }
+
+  bool _hidden(String id) => widget.store
+      .ancestors(id)
+      .take(widget.store.ancestors(id).length - 1)
+      .any((parent) => _collapsed.contains(parent.id));
+
+  bool _hiddenItem(String id) => itemAncestors(
+    widget.store.items,
+    id,
+  ).any((parent) => _collapsed.contains(parent.id));
+
+  /// Rows the arrow keys walk through, in display order.
+  List<OwnerRef?> get visibleOwners {
+    final query = widget.query.trim();
+    if (query.isNotEmpty) return matchingOwners(widget.store, query);
+    return [
+      null,
+      for (final tag in widget.store.orderedTags())
+        if (!_hidden(tag.id)) (id: tag.id, isItem: false),
+      for (final (item, _) in orderedItems(widget.store.items))
+        if (!_hiddenItem(item.id)) (id: item.id, isItem: true),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = widget.query.trim();
+    final noneMatches =
+        query.isEmpty || caseFold('未归类').contains(caseFold(query));
+    final owners = visibleOwners.whereType<OwnerRef>().toList();
+    final tags = owners.where((owner) => !owner.isItem).toList();
+    final items = owners.where((owner) => owner.isItem).toList();
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (noneMatches)
+          TagTreeTile(
+            key: const ValueKey('tag-choice-unclassified'),
+            store: widget.store,
+            selected: widget.selected == null,
+            label: '未归类',
+            onTap: () => widget.onChoose(null),
+          ),
+        for (final owner in tags) _tagTile(owner, query),
+        if (query.isEmpty && items.isNotEmpty) ...[
+          const Divider(height: 16),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+            child: Text('项目', style: Theme.of(context).textTheme.labelMedium),
+          ),
+        ],
+        for (final owner in items) _itemTile(owner, query),
+        if (!noneMatches && owners.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text('没有匹配的标签或项目', style: TextStyle(color: scheme.outline)),
+          ),
+      ],
+    );
+  }
+
+  Widget _tagTile(OwnerRef owner, String query) => TagTreeTile(
+    key: ValueKey('tag-choice-${owner.id}'),
+    store: widget.store,
+    tagId: owner.id,
+    label: query.isEmpty
+        ? widget.store.tagName(owner.id)
+        : widget.store.ancestors(owner.id).map((tag) => tag.name).join(' / '),
+    depth: query.isEmpty ? widget.store.ancestors(owner.id).length - 1 : 0,
+    selected: _selected(owner),
+    collapsed: _collapsed.contains(owner.id),
+    onToggle:
+        query.isEmpty &&
+            widget.store.tags.values.any((tag) => tag.parentId == owner.id)
+        ? () => _toggle(owner.id)
+        : null,
+    onTap: () => widget.onChoose(owner),
+  );
+
+  Widget _itemTile(OwnerRef owner, String query) {
+    final item = widget.store.items[owner.id];
+    if (item == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final selected = _selected(owner);
+    final depth = query.isEmpty
+        ? itemAncestors(widget.store.items, owner.id).length
+        : 0;
+    final label = query.isEmpty ? item.name : widget.store.itemPath(owner.id);
+    return Material(
+      color: selected ? scheme.secondaryContainer : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: ValueKey('owner-item-${owner.id}'),
+        onTap: () => widget.onChoose(owner),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(12 + depth * 16, 8, 12, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.workspaces_outline,
+                size: 14,
+                color: item.status.isOpen ? scheme.primary : scheme.outline,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              ),
+              Text(
+                item.status.label,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _toggle(String id) {
+    setState(() {
+      if (!_collapsed.add(id)) _collapsed.remove(id);
+    });
+  }
 }
 
 /// Search input using the same paths, tree and popup as event tag completion.

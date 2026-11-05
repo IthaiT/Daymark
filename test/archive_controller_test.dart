@@ -93,7 +93,7 @@ void main() {
         await expectLater(action(), throwsFormatException);
         expect(store.events, original);
       }
-      await journal.editCell('a', EventColumn.tag, 'life');
+      await journal.editCell('a', EventColumn.tag, (id: 'life', isItem: false));
       expect(store.events['a']!.tagId, 'life');
       expect(store.events['a']!.title, 'a');
       await journal.setEventTag(['a', 'b'], 'rest');
@@ -159,7 +159,10 @@ void main() {
         journal.editCell(gap.id, EventColumn.title, '改名'),
         throwsFormatException,
       );
-      final id = await journal.editCell(gap.id, EventColumn.tag, 'life');
+      final id = await journal.editCell(gap.id, EventColumn.tag, (
+        id: 'life',
+        isItem: false,
+      ));
       final promoted = store.events[id]!;
       expect(promoted.title, gap.title);
       expect(promoted.start, gap.start);

@@ -6,6 +6,10 @@ import 'unicode.dart';
 
 const undefinedIdPrefix = 'undefined:';
 
+/// Default titles of derived gaps. Rows written before the rename keep the old
+/// wording, so both spellings still count as unfilled until someone edits them.
+const gapPlaceholders = {'未定义', '空档'};
+
 /// Local calendar fields stored in a zone-neutral container. Never convert
 /// these values with toLocal/toUtc: persisted timestamps have no time zone.
 DateTime civilTime(DateTime value) => DateTime.utc(
@@ -165,6 +169,28 @@ class Event {
   int get hashCode => Object.hash(id, title, tagId, start, end, notes, itemId);
 }
 
+/// A record's single owner: a tag or a node of the project tree, never both.
+typedef OwnerRef = ({String id, bool isItem});
+
+extension EventOwner on Event {
+  OwnerRef? get owner => itemId != null
+      ? (id: itemId!, isItem: true)
+      : tagId != null
+      ? (id: tagId!, isItem: false)
+      : null;
+
+  /// Replaces the owner, clearing whichever side the new value does not use.
+  Event withOwner(OwnerRef? value) => Event(
+    id,
+    title,
+    value != null && !value.isItem ? value.id : null,
+    start,
+    end,
+    notes,
+    value != null && value.isItem ? value.id : null,
+  );
+}
+
 class Interval {
   const Interval(this.start, this.end);
   final DateTime start;
@@ -276,7 +302,7 @@ List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
       gaps.add(
         Event(
           _gapId(['daymark:undefined', previousId!, item.id]),
-          '未定义',
+          '空档',
           null,
           end,
           left,

@@ -83,7 +83,12 @@ class JournalController extends ChangeNotifier {
       }
       if (previous != null &&
           next != null &&
-          previous.copyWith(tagId: next.tagId, clearTag: next.tagId == null) ==
+          previous.copyWith(
+                tagId: next.tagId,
+                clearTag: next.tagId == null,
+                itemId: next.itemId,
+                clearItem: next.itemId == null,
+              ) ==
               next) {
         continue;
       }
@@ -382,10 +387,7 @@ class JournalController extends ChangeNotifier {
     }
     var changed = switch (column) {
       EventColumn.title => current.copyWith(title: (value! as String).trim()),
-      EventColumn.tag => current.copyWith(
-        tagId: value as String?,
-        clearTag: value == null,
-      ),
+      EventColumn.tag => current.withOwner(value as OwnerRef?),
       EventColumn.start => current.copyWith(start: value! as DateTime),
       EventColumn.end => current.copyWith(end: value! as DateTime),
     };
@@ -396,20 +398,27 @@ class JournalController extends ChangeNotifier {
         end: changed.start.add(current.end!.difference(current.start)),
       );
     }
-    if (changed.tagId != null &&
+    final owner = changed.owner;
+    if (owner != null &&
         (changed.title.trim().isEmpty ||
-            current.isUndefined && current.title == '未定义') &&
+            current.isUndefined && gapPlaceholders.contains(current.title)) &&
         canEditEvent(current)) {
-      changed = changed.copyWith(title: store.tagName(changed.tagId));
+      changed = changed.copyWith(title: store.ownerTitle(owner));
+    } else if (owner == null && changed.title.trim().isNotEmpty) {
+      // Typing a planned item's name attaches the record without a second step.
+      final itemId = store.itemIdForTitle(changed.title);
+      if (itemId != null) {
+        changed = changed.withOwner((id: itemId, isItem: true));
+      }
     }
     final events = {...store.events};
     final drafts = {..._drafts};
     if (current.isUndefined) {
-      if (changed.tagId != null) {
+      if (changed.owner != null) {
         changed = changed.copyWith(id: const Uuid().v4().replaceAll('-', ''));
         events.remove(current.id);
       } else if (changed.title.isEmpty) {
-        changed = changed.copyWith(title: '未定义');
+        changed = changed.copyWith(title: '空档');
       }
       store.validateEvent(changed);
       events[changed.id] = changed;
@@ -440,7 +449,7 @@ class JournalController extends ChangeNotifier {
       tagConversionIds:
           current.isUndefined &&
               column == EventColumn.tag &&
-              changed.tagId != null
+              changed.owner != null
           ? {current.id, changed.id}
           : const {},
     );
@@ -451,8 +460,14 @@ class JournalController extends ChangeNotifier {
   Future<void> updateEvent(Event changed) => _run(() async {
     final current = event(changed.id);
     if (current == null || current.isUndefined) return;
-    if (changed.title.trim().isEmpty && changed.tagId != null) {
-      changed = changed.copyWith(title: store.tagName(changed.tagId));
+    final owner = changed.owner;
+    if (changed.title.trim().isEmpty && owner != null) {
+      changed = changed.copyWith(title: store.ownerTitle(owner));
+    } else if (owner == null && changed.title.trim().isNotEmpty) {
+      final itemId = store.itemIdForTitle(changed.title);
+      if (itemId != null) {
+        changed = changed.withOwner((id: itemId, isItem: true));
+      }
     }
     final drafts = {..._drafts};
     final events = {...store.events};

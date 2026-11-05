@@ -341,7 +341,7 @@ void main() {
       await tester.tap(find.text('汇总'));
       await tester.pumpAndSettle();
       expect(rows(), ['overnight', 'unfinished', 'work-2', 'rest-day']);
-      expect(find.text('未分类 / 未定义'), findsNothing);
+      expect(find.text('未归类 / 空档'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('activity-day-2026-10-23')));
       await tester.pumpAndSettle();
       expect(rows(), ['work-1', 'overnight']);

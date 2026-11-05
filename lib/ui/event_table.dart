@@ -229,20 +229,33 @@ class EventTableState extends State<EventTable> {
       widget.journal.store,
       event,
     );
+    final owner = event.owner;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(10),
       ),
-      child: Text(
-        widget.journal.store.tagName(event.tagId),
-        maxLines: 1,
-        style: TextStyle(
-          color: foreground,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (owner != null && owner.isItem) ...[
+            Icon(Icons.workspaces_outline, size: 12, color: foreground),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              widget.journal.store.ownerName(event),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: foreground,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -254,7 +267,7 @@ class EventTableState extends State<EventTable> {
       event.title.isEmpty ? '填写事件名称…' : event.title,
       _clock(event.start),
       event.end == null ? '待补全' : _clock(event.end!),
-      widget.journal.store.tagName(event.tagId),
+      widget.journal.store.ownerName(event),
       shared != null
           ? durationText(shared)
           : interval == null
@@ -317,9 +330,14 @@ class EventTableState extends State<EventTable> {
   }
 
   Widget _summaryRow(EventGroup group, List<double> widths) {
+    final owner = group.key.itemId != null
+        ? (id: group.key.itemId!, isItem: true)
+        : group.key.tagId != null
+        ? (id: group.key.tagId!, isItem: false)
+        : null;
     final title = group.isUnclassified
-        ? '未分类 / 未定义'
-        : widget.journal.store.tagName(group.key.tagId);
+        ? '未归类 / 空档'
+        : widget.journal.store.ownerLabel(owner);
     final expanded = _expanded.contains(group.key);
     final selected = group.events
         .where((event) => widget.journal.selected.contains(event.id))

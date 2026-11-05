@@ -144,7 +144,7 @@ class JournalScreenState extends State<JournalScreen> {
           key: const ValueKey('view-unclassified'),
           value: _DisplayAction.unclassified,
           checked: _view.showUnclassified,
-          child: const Text('显示未分类事项'),
+          child: const Text('显示未归类事项'),
         ),
         const PopupMenuDivider(),
         const PopupMenuItem(

@@ -193,7 +193,7 @@ void main() {
   }
 
   Finder group(String tagId) {
-    final EventGroupKey groupKey = (tagId: tagId, draftId: null);
+    final EventGroupKey groupKey = (tagId: tagId, itemId: null, draftId: null);
     return find.byKey(ValueKey(('event-group', groupKey)));
   }
 
@@ -767,7 +767,7 @@ void main() {
       await tester.enterText(input('a', 'tag'), '主业 / 重复');
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, tag.id);
-      await tester.enterText(input('a', 'tag'), '未分类');
+      await tester.enterText(input('a', 'tag'), '未归类');
       await key(tester, LogicalKeyboardKey.enter);
       expect(journal.event('a')!.tagId, isNull);
     },
@@ -891,7 +891,7 @@ void main() {
         expect(field.focusNode!.hasPrimaryFocus, isTrue);
         expect(field.controller!.text, '嵌入式');
         expect(field.controller!.selection, TextSelection.collapsed(offset: 3));
-        expect(find.byType(TagChoices), findsNothing);
+        expect(find.byType(OwnerChoices), findsNothing);
       }
     },
   );
@@ -1211,17 +1211,20 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(cell('a', 'tag'));
     await tester.pumpAndSettle();
-    expect(find.byType(TagChoices), findsOneWidget);
+    expect(find.byType(OwnerChoices), findsOneWidget);
     await tester.tap(
-      find.descendant(of: find.byType(TagChoices), matching: find.text('主业')),
+      find.descendant(of: find.byType(OwnerChoices), matching: find.text('主业')),
     );
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagId, 'work');
-    expect(find.byType(TagChoices), findsNothing);
+    expect(find.byType(OwnerChoices), findsNothing);
     await tester.tap(input('a', 'tag'));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.descendant(of: find.byType(TagChoices), matching: find.text('未分类')),
+      find.descendant(
+        of: find.byType(OwnerChoices),
+        matching: find.text('未归类'),
+      ),
     );
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagId, isNull);
@@ -1287,7 +1290,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('tag-choice-linux')), findsNothing);
-    expect(find.byType(TagChoices), findsOneWidget);
+    expect(find.byType(OwnerChoices), findsOneWidget);
     expect(journal.store.events['b']!.tagId, 'work');
     await tester.tap(
       find.descendant(
@@ -1300,7 +1303,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('tag-choice-linux')));
     await tester.pumpAndSettle();
     expect(journal.store.events['b']!.tagId, 'linux');
-    expect(find.byType(TagChoices), findsNothing);
+    expect(find.byType(OwnerChoices), findsNothing);
   });
 
   testWidgets('new draft follows the last end and choosing a tag names it', (
@@ -1315,10 +1318,10 @@ void main() {
     await key(tester, LogicalKeyboardKey.tab);
     await key(tester, LogicalKeyboardKey.tab);
     await key(tester, LogicalKeyboardKey.tab);
-    expect(find.byType(TagChoices), findsOneWidget);
+    expect(find.byType(OwnerChoices), findsOneWidget);
     failWrites = true;
     await tester.tap(
-      find.descendant(of: find.byType(TagChoices), matching: find.text('主业')),
+      find.descendant(of: find.byType(OwnerChoices), matching: find.text('主业')),
     );
     await tester.pumpAndSettle();
     expect(input(id, 'tag'), findsOneWidget);
@@ -1556,7 +1559,7 @@ void main() {
       await tester.tap(cell('a', 'tag'));
       await tester.pumpAndSettle();
       expect(journal.store.events['a']!.title, '先保存');
-      expect(find.byType(TagChoices), findsOneWidget);
+      expect(find.byType(OwnerChoices), findsOneWidget);
       await tester.tap(cell('b', 'title'));
       await tester.pumpAndSettle();
       expect(journal.selected, {'b'});
@@ -1881,7 +1884,7 @@ void main() {
       await tester.tap(find.text('设置标签'));
       await tester.pumpAndSettle();
       final choice = find.descendant(
-        of: find.byType(TagChoices),
+        of: find.byType(OwnerChoices),
         matching: find.text('生活'),
       );
       await tester.ensureVisible(choice);

@@ -88,6 +88,52 @@ class Store {
           for (final (index, tag) in ancestors(id).indexed)
             '${List.filled(index, '  ').join()}${tag.name}',
         ].join('\n');
+  String itemPath(String id) {
+    final item = _items[id];
+    if (item == null) return '';
+    return [
+      for (final node in itemAncestors(_items, id)) node.name,
+      item.name,
+    ].join(' / ');
+  }
+
+  /// Full path of an owner, used while editing so siblings stay
+  /// distinguishable.
+  String ownerLabel(OwnerRef? owner) {
+    if (owner == null) return '未归类';
+    return owner.isItem ? itemPath(owner.id) : tagName(owner.id);
+  }
+
+  /// Leaf name of an owner, used as a default record title.
+  String ownerTitle(OwnerRef owner) =>
+      owner.isItem ? (_items[owner.id]?.name ?? '') : tagName(owner.id);
+
+  /// The single project item whose name matches [title], if exactly one does.
+  /// Typing a planned item's name therefore attaches the record without a
+  /// second step, and repeated names stay unassigned instead of guessing.
+  String? itemIdForTitle(String title) {
+    final needle = caseFold(title.trim());
+    if (needle.isEmpty) return null;
+    String? found;
+    for (final item in _items.values) {
+      if (caseFold(item.name.trim()) != needle) continue;
+      if (found != null) return null;
+      found = item.id;
+    }
+    return found;
+  }
+
+  /// Label used by the owner column. An item shows the project it belongs to,
+  /// so a sub-item never repeats the name already printed in the title column.
+  String ownerName(Event event) {
+    final itemId = event.itemId;
+    if (itemId != null) {
+      final root = itemRoot(_items, itemId);
+      return root?.name ?? ownerLabel((id: itemId, isItem: true));
+    }
+    return event.tagId == null ? '未归类' : tagName(event.tagId);
+  }
+
   List<Tag> orderedTags() => _tags.values.toList()
     ..sort((a, b) {
       final left = ancestors(a.id).map((tag) => caseFold(tag.name)).toList();

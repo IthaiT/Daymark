@@ -262,7 +262,7 @@ void main() {
       await menu(tester);
       expect(find.text('显示日常背景'), findsNothing);
       expect(find.text('显示未定义空档'), findsNothing);
-      expect(find.text('显示未分类事项'), findsOneWidget);
+      expect(find.text('显示未归类事项'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('view-unclassified')));
       await tester.pumpAndSettle();
       expect(find.text('显示：关注事项'), findsOneWidget);

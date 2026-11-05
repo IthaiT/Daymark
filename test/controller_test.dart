@@ -4,6 +4,7 @@ import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -254,7 +255,10 @@ void main() {
     'tag supplies a blank title, persists the draft and undoes atomically',
     () async {
       final id = await controller.addDraft();
-      await controller.editCell(id, EventColumn.tag, 'linux');
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'linux',
+        isItem: false,
+      ));
       expect(store.events[id]!.title, store.tagName('linux'));
       expect(controller.drafts, isEmpty);
       expect((await Store.open(directory)).events[id], store.events[id]);
@@ -263,7 +267,10 @@ void main() {
       expect(controller.drafts[id]!.tagId, isNull);
       await controller.redo();
       await controller.editCell(id, EventColumn.title, '自定义名称');
-      await controller.editCell(id, EventColumn.tag, 'work');
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'work',
+        isItem: false,
+      ));
       expect(store.events[id]!.title, '自定义名称');
       await controller.editCell(id, EventColumn.tag, null);
       expect(store.events[id]!.title, '自定义名称');
@@ -274,7 +281,10 @@ void main() {
     'suggested end follows start after naming, including midnight and undo',
     () async {
       final id = await controller.addDraft();
-      await controller.editCell(id, EventColumn.tag, 'work');
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'work',
+        isItem: false,
+      ));
       final beforeWrites = writes;
       await controller.editCell(
         id,
@@ -393,7 +403,10 @@ void main() {
     await store.replaceEvents({'a': item('a', 9, 10), 'b': item('b', 12, 13)});
     await controller.initialize();
     final gap = controller.rows.singleWhere((event) => event.isUndefined);
-    final promoted = await controller.editCell(gap.id, EventColumn.tag, 'work');
+    final promoted = await controller.editCell(gap.id, EventColumn.tag, (
+      id: 'work',
+      isItem: false,
+    ));
     expect(store.events[promoted]!.title, store.tagName('work'));
   });
 
@@ -404,7 +417,7 @@ void main() {
       final before = await store.eventsFile.readAsBytes();
       failWrites = true;
       await expectLater(
-        controller.editCell(id, EventColumn.tag, 'work'),
+        controller.editCell(id, EventColumn.tag, (id: 'work', isItem: false)),
         throwsFileSystemException,
       );
       expect(controller.drafts[id]!.title, '');
@@ -412,7 +425,10 @@ void main() {
       expect(controller.selected, {id});
       expect(await store.eventsFile.readAsBytes(), before);
       failWrites = false;
-      await controller.editCell(id, EventColumn.tag, 'work');
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'work',
+        isItem: false,
+      ));
       expect(store.events[id]!.title, store.tagName('work'));
     },
   );
@@ -449,11 +465,10 @@ void main() {
       expect(controller.event(gap.id)!.title, '煮饭');
       expect(controller.event(gap.id)!.start.hour, 11);
       expect((await Store.open(directory)).events[gap.id]!.title, '煮饭');
-      final promoted = await controller.editCell(
-        gap.id,
-        EventColumn.tag,
-        'work',
-      );
+      final promoted = await controller.editCell(gap.id, EventColumn.tag, (
+        id: 'work',
+        isItem: false,
+      ));
       expect(promoted.startsWith(undefinedIdPrefix), isFalse);
       expect(store.events[promoted]!.tagId, 'work');
       expect(controller.event(gap.id), isNull);
@@ -723,11 +738,10 @@ void main() {
       expect(controller.event(gap.id)!.title, '睡前空闲');
       expect(controller.rows.any((row) => row.id == gap.id), isTrue);
       await controller.setDay(morning);
-      final promoted = await controller.editCell(
-        gap.id,
-        EventColumn.tag,
-        'life',
-      );
+      final promoted = await controller.editCell(gap.id, EventColumn.tag, (
+        id: 'life',
+        isItem: false,
+      ));
       expect(store.events[promoted]!.start, video.end);
       expect(store.events[promoted]!.end, sleep.start);
       expect(controller.event(gap.id), isNull);
@@ -784,6 +798,41 @@ void main() {
       expect(controller.rows, isEmpty);
       await controller.undo();
       expect(controller.event(gap.id)!.title, '跨天空档');
+    },
+  );
+
+  test(
+    'typing a planned item name attaches the record to that project',
+    () async {
+      await store.saveItem(const Item(id: 'job', name: '跳槽'));
+      await store.saveItem(
+        const Item(id: 'resume', name: '改简历', parentId: 'job'),
+      );
+      final id = await controller.addDraft();
+      await controller.editCell(id, EventColumn.title, '改简历');
+      expect(store.events[id]!.itemId, 'resume');
+      expect(store.events[id]!.tagId, isNull);
+      expect(store.ownerName(store.events[id]!), '跳槽');
+    },
+  );
+
+  test('an ambiguous item name stays unassigned', () async {
+    await store.saveItem(const Item(id: 'a', name: '调研'));
+    await store.saveItem(const Item(id: 'b', name: '调研', parentId: 'a'));
+    final id = await controller.addDraft();
+    await controller.editCell(id, EventColumn.title, '调研');
+    expect(store.events[id]!.itemId, isNull);
+  });
+
+  test(
+    'choosing a project item sets the owner and keeps the tag empty',
+    () async {
+      await store.saveItem(const Item(id: 'job', name: '跳槽'));
+      final id = await controller.addDraft();
+      await controller.editCell(id, EventColumn.tag, (id: 'job', isItem: true));
+      expect(store.events[id]!.itemId, 'job');
+      expect(store.events[id]!.tagId, isNull);
+      expect(store.events[id]!.title, '跳槽');
     },
   );
 }

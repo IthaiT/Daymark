@@ -18,7 +18,8 @@ TagDisplay effectiveTagDisplay(
 
 bool isUnfilledGap(Event event) =>
     event.isUndefined &&
-    (event.title.trim().isEmpty || event.title.trim() == '未定义') &&
+    (event.title.trim().isEmpty ||
+        gapPlaceholders.contains(event.title.trim())) &&
     event.notes.trim().isEmpty;
 
 /// One filter shared by the timeline and table; accounting uses full records.
@@ -43,7 +44,7 @@ class JournalPresentation {
   bool includes(Event event) {
     if (event.isUndefined && !autoUndefined) return false;
     if (revealedIds.contains(event.id)) return true;
-    if (event.tagId == null && !view.showUnclassified) return false;
+    if (event.owner == null && !view.showUnclassified) return false;
     if (event.isUndefined) {
       return view.preset == JournalViewPreset.fullDay || !isUnfilledGap(event);
     }

@@ -131,7 +131,7 @@ void main() {
     await openSettings(tester);
     expect(autoUndefinedSwitch(tester), isTrue);
     expect(chipSelected(tester, 1), isTrue);
-    expect(find.text('自动生成未定义事件'), findsOneWidget);
+    expect(find.text('自动生成空档'), findsOneWidget);
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
     expect(find.text('设置'), findsNothing);

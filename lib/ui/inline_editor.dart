@@ -18,7 +18,7 @@ class EditSession {
             '${dateText(event.end ?? event.start.add(const Duration(hours: 1)))} ${clockText(event.end ?? event.start.add(const Duration(hours: 1)))}',
         },
       ),
-      tagId = event.tagId,
+      owner = event.owner,
       pickerOpen = column != EventColumn.title;
   final Event event;
   final EventColumn column;
@@ -26,17 +26,17 @@ class EditSession {
   final TextEditingController text;
   final focus = FocusNode();
   String? committedId;
-  String? tagId;
-  bool tagInputValid = true;
+  OwnerRef? owner;
+  bool ownerInputValid = true;
   bool pickerOpen;
   bool closed = false;
   String? error;
   Object? get value => switch (column) {
     EventColumn.title => text.text,
     EventColumn.tag =>
-      tagInputValid
-          ? tagId
-          : throw const FormatException('没有匹配的标签，请修改搜索内容或选择已有标签。'),
+      ownerInputValid
+          ? owner
+          : throw const FormatException('没有匹配的标签或项目，请修改搜索内容或选择已有项。'),
     EventColumn.start => parseEditorTime(text.text, event.start),
     EventColumn.end => parseEditorTime(
       text.text,
@@ -74,8 +74,8 @@ class InlineEditor extends StatefulWidget {
 }
 
 class _InlineEditorState extends State<InlineEditor> {
-  final _tagChoices = GlobalKey<TagChoicesState>();
-  String _tagQuery = '';
+  final _ownerChoices = GlobalKey<OwnerChoicesState>();
+  String _ownerQuery = '';
   bool get _composing {
     final range = widget.session.text.value.composing;
     return range.isValid && !range.isCollapsed;
@@ -95,7 +95,7 @@ class _InlineEditorState extends State<InlineEditor> {
     super.initState();
     widget.session.focus.onKeyEvent = _handleKey;
     if (widget.session.column == EventColumn.tag) {
-      widget.session.text.text = widget.store.tagName(widget.session.tagId);
+      widget.session.text.text = widget.store.ownerLabel(widget.session.owner);
     }
   }
 
@@ -115,19 +115,26 @@ class _InlineEditorState extends State<InlineEditor> {
         !keyboard.isShiftPressed &&
         (event.logicalKey == LogicalKeyboardKey.arrowUp ||
             event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+      final current = session.owner;
       final options =
-          _tagChoices.currentState?.visibleIds ??
-          matchingTagIds(widget.store, _tagQuery);
+          _ownerChoices.currentState?.visibleOwners ??
+          <OwnerRef?>[...matchingOwners(widget.store, _ownerQuery)];
       if (options.isNotEmpty) {
-        final index = options.indexOf(session.tagId);
+        final index = options.indexWhere(
+          (owner) => owner == null
+              ? current == null
+              : current != null &&
+                    current.id == owner.id &&
+                    current.isItem == owner.isItem,
+        );
         final next = index < 0
             ? 0
             : (index +
                       (event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1))
                   .clamp(0, options.length - 1);
         setState(() {
-          session.tagId = options[next];
-          session.tagInputValid = true;
+          session.owner = options[next];
+          session.ownerInputValid = true;
           session.error = null;
           session.pickerOpen = true;
         });
@@ -194,7 +201,7 @@ class _InlineEditorState extends State<InlineEditor> {
           autofocus: true,
           decoration: InputDecoration(
             hintText: switch (session.column) {
-              EventColumn.tag => '输入标签名称搜索',
+              EventColumn.tag => '输入标签或项目搜索',
               EventColumn.start || EventColumn.end => '例如 2021 或 20:21',
               EventColumn.title => null,
             },
@@ -216,10 +223,10 @@ class _InlineEditorState extends State<InlineEditor> {
           onChanged: (text) => setState(() {
             session.error = null;
             if (session.column == EventColumn.tag) {
-              _tagQuery = text;
-              final options = matchingTagIds(widget.store, text);
-              session.tagInputValid = options.isNotEmpty;
-              if (options.isNotEmpty) session.tagId = options.first;
+              _ownerQuery = text;
+              final options = matchingOwners(widget.store, text);
+              session.ownerInputValid = options.isNotEmpty;
+              if (options.isNotEmpty) session.owner = options.first;
               session.pickerOpen = true;
             }
           }),
@@ -233,15 +240,15 @@ class _InlineEditorState extends State<InlineEditor> {
           },
         ),
         builder: (context, close) => session.column == EventColumn.tag
-            ? TagChoices(
-                key: _tagChoices,
+            ? OwnerChoices(
+                key: _ownerChoices,
                 store: widget.store,
-                selected: session.tagId,
-                query: _tagQuery,
+                selected: session.owner,
+                query: _ownerQuery,
                 onChoose: (value) {
-                  session.tagId = value;
-                  session.tagInputValid = true;
-                  session.text.text = widget.store.tagName(value);
+                  session.owner = value;
+                  session.ownerInputValid = true;
+                  session.text.text = widget.store.ownerLabel(value);
                   close();
                   widget.onCompleteTag();
                 },
