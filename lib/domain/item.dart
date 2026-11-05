@@ -1,3 +1,4 @@
+import 'event_stats.dart';
 import 'model.dart';
 import 'unicode.dart';
 
@@ -35,6 +36,10 @@ class Item {
     this.endedOn,
     this.objective = '',
     this.outcome = '',
+    this.tagIds = const [],
+    this.excludedTagIds = const [],
+    this.links = const [],
+    this.log = const [],
   });
 
   final String id;
@@ -51,6 +56,60 @@ class Item {
   /// Result once finished, reason once abandoned; empty while open.
   final String outcome;
 
+  /// Tags this node adds. Children inherit them unless they exclude them.
+  final List<String> tagIds;
+
+  /// Inherited tags this node deliberately drops for itself and its children.
+  final List<String> excludedTagIds;
+
+  /// External results: Obsidian URIs, web pages or local files.
+  final List<String> links;
+
+  /// Short trail of what happened to the item: created, split, repurposed or
+  /// abandoned, with the moment it happened.
+  final List<ItemLog> log;
+
+  /// Reads one node from `items.json` or an archive backup.
+  factory Item.fromJson(Map<String, Object?> row) {
+    List<String> strings(Object? value) =>
+        (value as List<Object?>? ?? const []).cast<String>().toList();
+    final log = <ItemLog>[];
+    for (final entry in (row['log'] as List<Object?>? ?? const [])) {
+      final item = entry! as Map<String, Object?>;
+      log.add(
+        ItemLog(
+          parseTimestamp(item['at']! as String),
+          item['kind']! as String,
+          item['text']! as String,
+        ),
+      );
+    }
+    return Item(
+      id: row['id']! as String,
+      name: row['name']! as String,
+      parentId: row['parent_id'] as String?,
+      status: switch (row['status']) {
+        null || 'active' => ItemStatus.active,
+        'paused' => ItemStatus.paused,
+        'done' => ItemStatus.done,
+        'dropped' => ItemStatus.dropped,
+        _ => throw const FormatException('事项状态不正确。'),
+      },
+      startedOn: row['started_on'] == null
+          ? null
+          : parseDate(row['started_on']! as String),
+      endedOn: row['ended_on'] == null
+          ? null
+          : parseDate(row['ended_on']! as String),
+      objective: row['objective'] as String? ?? '',
+      outcome: row['outcome'] as String? ?? '',
+      tagIds: strings(row['tag_ids']),
+      excludedTagIds: strings(row['excluded_tag_ids']),
+      links: strings(row['links']),
+      log: log,
+    );
+  }
+
   Item copyWith({
     String? name,
     String? parentId,
@@ -62,6 +121,10 @@ class Item {
     bool clearEndedOn = false,
     String? objective,
     String? outcome,
+    List<String>? tagIds,
+    List<String>? excludedTagIds,
+    List<String>? links,
+    List<ItemLog>? log,
   }) => Item(
     id: id,
     name: name ?? this.name,
@@ -71,6 +134,10 @@ class Item {
     endedOn: clearEndedOn ? null : endedOn ?? this.endedOn,
     objective: objective ?? this.objective,
     outcome: outcome ?? this.outcome,
+    tagIds: tagIds ?? this.tagIds,
+    excludedTagIds: excludedTagIds ?? this.excludedTagIds,
+    links: links ?? this.links,
+    log: log ?? this.log,
   );
 
   Map<String, Object?> toJson() => {
@@ -82,6 +149,10 @@ class Item {
     'ended_on': endedOn == null ? null : dateText(endedOn!),
     'objective': objective,
     'outcome': outcome,
+    'tag_ids': tagIds,
+    'excluded_tag_ids': excludedTagIds,
+    'links': links,
+    'log': [for (final entry in log) entry.toJson()],
   };
 
   @override
@@ -94,7 +165,11 @@ class Item {
       startedOn == other.startedOn &&
       endedOn == other.endedOn &&
       objective == other.objective &&
-      outcome == other.outcome;
+      outcome == other.outcome &&
+      sameValues(tagIds, other.tagIds) &&
+      sameValues(excludedTagIds, other.excludedTagIds) &&
+      sameValues(links, other.links) &&
+      sameValues(log, other.log);
 
   @override
   int get hashCode => Object.hash(
@@ -106,7 +181,46 @@ class Item {
     endedOn,
     objective,
     outcome,
+    Object.hashAll(tagIds),
+    Object.hashAll(excludedTagIds),
+    Object.hashAll(links),
+    Object.hashAll(log),
   );
+}
+
+/// Order-sensitive list equality for persisted small lists.
+bool sameValues<T>(List<T> left, List<T> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
+/// One entry of an item's short trail.
+class ItemLog {
+  const ItemLog(this.at, this.kind, this.text);
+  final DateTime at;
+
+  /// `created`, `status`, `parent` or `note`.
+  final String kind;
+  final String text;
+
+  Map<String, Object?> toJson() => {
+    'at': timestampText(at),
+    'kind': kind,
+    'text': text,
+  };
+
+  @override
+  bool operator ==(Object other) =>
+      other is ItemLog &&
+      at == other.at &&
+      kind == other.kind &&
+      text == other.text;
+
+  @override
+  int get hashCode => Object.hash(at, kind, text);
 }
 
 /// Rejects malformed trees before anything reaches disk.
@@ -234,26 +348,71 @@ bool itemOwnedBy(Map<String, Item> items, String id, String ancestorId) {
   return false;
 }
 
-/// Time booked on each item, including everything below it. Records without an
+/// Tags a node inherits from its ancestors plus its own, minus the ones a
+/// level explicitly dropped. A deeper node may add a tag back by listing it.
+List<String> itemEffectiveTagIds(Map<String, Item> items, String id) {
+  final node = items[id];
+  if (node == null) return const [];
+  final tags = <String>[];
+  for (final item in [...itemAncestors(items, id), node]) {
+    for (final tag in item.tagIds) {
+      if (!tags.contains(tag)) tags.add(tag);
+    }
+    tags.removeWhere(item.excludedTagIds.contains);
+  }
+  return List.unmodifiable(tags);
+}
+
+Duration _mergedDuration(Iterable<Event> events) {
+  final intervals = [
+    for (final event in events)
+      if (event.end != null) Interval(event.start, event.end!),
+  ];
+  return mergedIntervals(
+    intervals,
+  ).fold(Duration.zero, (sum, interval) => sum + interval.duration);
+}
+
+/// Time booked on each item, including everything below it.
+///
+/// Overlapping records are counted once, exactly like the statistics screen:
+/// without shared accounting the union of the intervals is used, and with it
+/// the same concurrency profile splits parallel records. Records without an
 /// end contribute nothing, matching every other duration in the journal.
 Map<String, Duration> itemDurations(
   Map<String, Item> items,
-  Iterable<Event> events,
-) {
-  final direct = <String, Duration>{};
-  for (final event in events) {
-    final end = event.end;
+  Iterable<Event> events, {
+  bool splitOverlap = false,
+}) {
+  final completed = [
+    for (final event in events)
+      if (event.end != null) event,
+  ];
+  final direct = <String, List<Event>>{};
+  for (final event in completed) {
     final id = event.itemId;
-    if (end == null || id == null || !items.containsKey(id)) continue;
-    direct[id] = (direct[id] ?? Duration.zero) + end.difference(event.start);
+    if (id == null || !items.containsKey(id)) continue;
+    (direct[id] ??= []).add(event);
   }
+  final profile = splitOverlap
+      ? ConcurrencyProfile.of(
+          StatsWindow(
+            DateTime.utc(1),
+            DateTime.utc(9999, 12, 31, 23, 59, 59, 999, 999),
+          ),
+          completed,
+        )
+      : null;
   final totals = <String, Duration>{};
   for (final id in items.keys) {
-    var sum = Duration.zero;
-    for (final entry in direct.entries) {
-      if (itemOwnedBy(items, entry.key, id)) sum += entry.value;
-    }
-    totals[id] = sum;
+    final records = <String, Event>{
+      for (final entry in direct.entries)
+        if (itemOwnedBy(items, entry.key, id))
+          for (final event in entry.value) event.id: event,
+    }.values;
+    totals[id] = profile != null
+        ? profile.durationOf(records)
+        : _mergedDuration(records);
   }
   return totals;
 }

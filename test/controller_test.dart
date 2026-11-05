@@ -117,7 +117,7 @@ void main() {
     () async {
       final removed = await controller.saveTag('临时标签', null);
       final clipboard = EventClipboard(day, [
-        item('old', 9, 10).copyWith(tagId: removed.id),
+        item('old', 9, 10).copyWith(tagIds: [removed.id]),
         Event(
           'draft',
           '',
@@ -801,27 +801,29 @@ void main() {
     },
   );
 
-  test(
-    'typing a planned item name attaches the record to that project',
-    () async {
-      await store.saveItem(const Item(id: 'job', name: '跳槽'));
-      await store.saveItem(
-        const Item(id: 'resume', name: '改简历', parentId: 'job'),
-      );
-      final id = await controller.addDraft();
-      await controller.editCell(id, EventColumn.title, '改简历');
-      expect(store.events[id]!.itemId, 'resume');
-      expect(store.events[id]!.tagId, isNull);
-      expect(store.ownerName(store.events[id]!), '跳槽');
-    },
-  );
-
-  test('an ambiguous item name stays unassigned', () async {
-    await store.saveItem(const Item(id: 'a', name: '调研'));
-    await store.saveItem(const Item(id: 'b', name: '调研', parentId: 'a'));
+  test('a title alone never attaches a project', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽'));
+    await store.saveItem(
+      const Item(id: 'resume', name: '改简历', parentId: 'job'),
+    );
     final id = await controller.addDraft();
-    await controller.editCell(id, EventColumn.title, '调研');
+    await controller.editCell(id, EventColumn.title, '改简历');
+    // Choosing a suggestion is what attaches; typing the same words is not a
+    // selection, otherwise clearing an owner could never stick.
     expect(store.events[id]!.itemId, isNull);
+    expect(store.events[id]!.tagIds, isEmpty);
+  });
+
+  test('a chosen suggestion carries the title and the project', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽'));
+    final id = await controller.addDraft();
+    await controller.editCell(id, EventColumn.title, (
+      title: '跳槽',
+      itemId: 'job',
+      tagIds: const <String>[],
+    ));
+    expect(store.events[id]!.title, '跳槽');
+    expect(store.events[id]!.itemId, 'job');
   });
 
   test(

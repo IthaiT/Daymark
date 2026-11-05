@@ -290,7 +290,7 @@ void main() {
       const Item(id: 'resume', name: '改简历', parentId: 'job'),
     );
     await store.saveEvent(
-      sample(id: 'a').copyWith(itemId: 'resume', clearTag: true),
+      sample(id: 'a').copyWith(itemId: 'resume', clearTags: true),
     );
     final reopened = await Store.open(directory);
     expect(reopened.items['job']!.startedOn, DateTime.utc(2026, 11, 1));
@@ -298,19 +298,23 @@ void main() {
     expect(reopened.events['a']!.itemId, 'resume');
   });
 
-  test('an event belongs to a tag or an item, never both', () async {
-    await store.saveItem(const Item(id: 'job', name: '跳槽'));
-    await expectLater(
-      store.saveEvent(sample(id: 'a').copyWith(itemId: 'job')),
-      throwsA(isA<FormatException>()),
+  test('an event may carry a project and tags at once', () async {
+    await store.saveItem(const Item(id: 'job', name: '跳槽', tagIds: ['work']));
+    await store.saveEvent(
+      sample(id: 'a').copyWith(itemId: 'job', tagIds: ['work', 'life']),
     );
-    expect(store.events, isEmpty);
+    expect(store.events['a']!.itemId, 'job');
+    expect(store.events['a']!.tagIds, ['work', 'life']);
+
+    final reopened = await Store.open(directory);
+    expect(reopened.events['a']!.tagIds, ['work', 'life']);
+    expect(reopened.items['job']!.tagIds, ['work']);
   });
 
   test('a missing item cannot be referenced', () async {
     await expectLater(
       store.saveEvent(
-        sample(id: 'a').copyWith(itemId: 'missing', clearTag: true),
+        sample(id: 'a').copyWith(itemId: 'missing', clearTags: true),
       ),
       throwsA(isA<FormatException>()),
     );
@@ -341,7 +345,7 @@ void main() {
         const Item(id: 'resume', name: '改简历', parentId: 'job'),
       );
       await store.saveEvent(
-        sample(id: 'a').copyWith(itemId: 'resume', clearTag: true),
+        sample(id: 'a').copyWith(itemId: 'resume', clearTags: true),
       );
       await expectLater(
         store.deleteItem('job'),
@@ -359,7 +363,7 @@ void main() {
   test('an item still in use cannot be dropped from the tree', () async {
     await store.saveItem(const Item(id: 'job', name: '跳槽'));
     await store.saveEvent(
-      sample(id: 'a').copyWith(itemId: 'job', clearTag: true),
+      sample(id: 'a').copyWith(itemId: 'job', clearTags: true),
     );
     await expectLater(
       store.replaceItems(const {}),

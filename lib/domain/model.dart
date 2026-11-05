@@ -108,32 +108,67 @@ class Tag {
   int get hashCode => Object.hash(id, name, parentId);
 }
 
+/// Tags of one record, in a stable order without duplicates.
+///
+/// The third positional argument keeps accepting a single tag id so every
+/// existing call site keeps working, and it also accepts a list once a record
+/// carries several tags.
+List<String> normalizeTagIds(Object? value) {
+  final result = <String>[];
+  void add(Object? id) {
+    if (id is String && id.isNotEmpty && !result.contains(id)) result.add(id);
+  }
+
+  if (value is Iterable) {
+    for (final id in value) {
+      add(id);
+    }
+  } else {
+    add(value);
+  }
+  return List.unmodifiable(result);
+}
+
+bool sameTagIds(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
+}
+
 class Event {
-  const Event(
+  Event(
     this.id,
     this.title,
-    this.tagId,
+    Object? tags,
     this.start,
     this.end, [
     this.notes = '',
     this.itemId,
-  ]);
+  ]) : tagIds = normalizeTagIds(tags);
   final String id;
   final String title;
-  final String? tagId;
+
+  /// Every tag this record was filed under. A record keeps its own copy so a
+  /// later change to a project's defaults never rewrites history.
+  final List<String> tagIds;
   final DateTime start;
   final DateTime? end;
   final String notes;
 
-  /// Node of the project tree that owns this record. Mutually exclusive with
-  /// [tagId]: a record belongs either to a tag or to a project item.
+  /// Node of the project tree this record belongs to. Independent from
+  /// [tagIds]: a record may belong to a project and carry tags at once.
   final String? itemId;
   bool get isUndefined => id.startsWith(undefinedIdPrefix);
+
+  /// First tag, for call sites that only need one label.
+  String? get tagId => tagIds.isEmpty ? null : tagIds.first;
   Event copyWith({
     String? id,
     String? title,
-    String? tagId,
-    bool clearTag = false,
+    List<String>? tagIds,
+    bool clearTags = false,
     DateTime? start,
     DateTime? end,
     String? notes,
@@ -142,7 +177,7 @@ class Event {
   }) => Event(
     id ?? this.id,
     title ?? this.title,
-    clearTag ? null : tagId ?? this.tagId,
+    clearTags ? const <String>[] : tagIds ?? this.tagIds,
     start ?? this.start,
     end ?? this.end,
     notes ?? this.notes,
@@ -160,35 +195,36 @@ class Event {
       other is Event &&
       id == other.id &&
       title == other.title &&
-      tagId == other.tagId &&
+      sameTagIds(tagIds, other.tagIds) &&
       start == other.start &&
       end == other.end &&
       notes == other.notes &&
       itemId == other.itemId;
   @override
-  int get hashCode => Object.hash(id, title, tagId, start, end, notes, itemId);
+  int get hashCode =>
+      Object.hash(id, title, Object.hashAll(tagIds), start, end, notes, itemId);
 }
 
-/// A record's single owner: a tag or a node of the project tree, never both.
+/// A tag or a project node, used while choosing where a record belongs.
 typedef OwnerRef = ({String id, bool isItem});
 
 extension EventOwner on Event {
+  /// True when the record is filed somewhere, by project or by tag.
   OwnerRef? get owner => itemId != null
       ? (id: itemId!, isItem: true)
-      : tagId != null
-      ? (id: tagId!, isItem: false)
-      : null;
+      : tagIds.isEmpty
+      ? null
+      : (id: tagIds.first, isItem: false);
 
-  /// Replaces the owner, clearing whichever side the new value does not use.
-  Event withOwner(OwnerRef? value) => Event(
-    id,
-    title,
-    value != null && !value.isItem ? value.id : null,
-    start,
-    end,
-    notes,
-    value != null && value.isItem ? value.id : null,
-  );
+  /// Adds [value] without removing the other side. Clearing passes null.
+  Event withOwner(OwnerRef? value) {
+    if (value == null) {
+      return copyWith(clearTags: true, clearItem: true);
+    }
+    return value.isItem
+        ? copyWith(itemId: value.id)
+        : copyWith(tagIds: [value.id]);
+  }
 }
 
 class Interval {

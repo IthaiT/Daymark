@@ -84,8 +84,7 @@ class JournalController extends ChangeNotifier {
       if (previous != null &&
           next != null &&
           previous.copyWith(
-                tagId: next.tagId,
-                clearTag: next.tagId == null,
+                tagIds: next.tagIds,
                 itemId: next.itemId,
                 clearItem: next.itemId == null,
               ) ==
@@ -179,7 +178,8 @@ class JournalController extends ChangeNotifier {
             id: gap.id,
             start: gap.start,
             end: gap.end,
-            clearTag: true,
+            clearTags: true,
+            clearItem: true,
           ) ??
           gap;
     }
@@ -353,7 +353,10 @@ class JournalController extends ChangeNotifier {
         id: id,
         start: civilTime(original.start).add(offset),
         end: original.end == null ? null : civilTime(original.end!).add(offset),
-        clearTag: !store.tags.containsKey(original.tagId),
+        tagIds: [
+          for (final id in original.tagIds)
+            if (store.tags.containsKey(id)) id,
+        ],
         clearItem: !store.items.containsKey(original.itemId),
       );
       store.validateEvent(
@@ -387,12 +390,33 @@ class JournalController extends ChangeNotifier {
     }
     var changed = switch (column) {
       EventColumn.title => switch (value) {
-        // A name suggestion carries the owner chosen with it.
-        (title: String title, owner: OwnerRef? owner) =>
-          current.copyWith(title: title.trim()).withOwner(owner),
+        // A name suggestion carries the classification chosen with it.
+        (
+          title: String title,
+          itemId: String? itemId,
+          tagIds: List<String> tagIds,
+        ) =>
+          current.copyWith(
+            title: title.trim(),
+            itemId: itemId,
+            clearItem: itemId == null,
+            tagIds: tagIds,
+          ),
         _ => current.copyWith(title: (value! as String).trim()),
       },
-      EventColumn.tag => current.withOwner(value as OwnerRef?),
+      // The editor sends the whole classification; a bare owner keeps working
+      // for older callers.
+      EventColumn.tag => switch (value) {
+        (itemId: String? itemId, tagIds: List<String> tagIds) =>
+          current.copyWith(
+            itemId: itemId,
+            clearItem: itemId == null,
+            tagIds: tagIds,
+          ),
+        OwnerRef owner => current.withOwner(owner),
+        null => current.copyWith(clearTags: true, clearItem: true),
+        _ => throw const FormatException('归属格式不正确。'),
+      },
       EventColumn.start => current.copyWith(start: value! as DateTime),
       EventColumn.end => current.copyWith(end: value! as DateTime),
     };
@@ -409,12 +433,6 @@ class JournalController extends ChangeNotifier {
             current.isUndefined && gapPlaceholders.contains(current.title)) &&
         canEditEvent(current)) {
       changed = changed.copyWith(title: store.ownerTitle(owner));
-    } else if (owner == null && changed.title.trim().isNotEmpty) {
-      // Typing a planned item's name attaches the record without a second step.
-      final itemId = store.itemIdForTitle(changed.title);
-      if (itemId != null) {
-        changed = changed.withOwner((id: itemId, isItem: true));
-      }
     }
     final events = {...store.events};
     final drafts = {..._drafts};
@@ -468,11 +486,6 @@ class JournalController extends ChangeNotifier {
     final owner = changed.owner;
     if (changed.title.trim().isEmpty && owner != null) {
       changed = changed.copyWith(title: store.ownerTitle(owner));
-    } else if (owner == null && changed.title.trim().isNotEmpty) {
-      final itemId = store.itemIdForTitle(changed.title);
-      if (itemId != null) {
-        changed = changed.withOwner((id: itemId, isItem: true));
-      }
     }
     final drafts = {..._drafts};
     final events = {...store.events};
@@ -495,10 +508,15 @@ class JournalController extends ChangeNotifier {
   /// Moves regular events to [tagId] in one transaction: a single atomic
   /// write and a single undo entry. Undefined gap rows cannot carry a tag and
   /// are skipped, as are ids that are not stored events.
-  Future<void> setEventTag(Iterable<String> ids, String? tagId) =>
+  /// Replaces the tags of [ids]. The project association is left alone, so a
+  /// tag may be added to or removed from records that belong to a project.
+  Future<void> setEventTags(Iterable<String> ids, List<String> tagIds) =>
       _run(() async {
-        if (tagId != null && !store.tags.containsKey(tagId)) {
-          throw const FormatException('目标标签不存在。');
+        final tags = normalizeTagIds(tagIds);
+        for (final id in tags) {
+          if (!store.tags.containsKey(id)) {
+            throw const FormatException('目标标签不存在。');
+          }
         }
         final wanted = ids.toSet();
         if (wanted.isEmpty) return;
@@ -506,16 +524,77 @@ class JournalController extends ChangeNotifier {
         var changed = false;
         for (final id in wanted) {
           final event = events[id];
-          if (event == null || event.isUndefined || event.tagId == tagId) {
-            continue;
-          }
-          final next = event.copyWith(tagId: tagId, clearTag: tagId == null);
+          if (event == null || event.isUndefined) continue;
+          if (sameTagIds(event.tagIds, tags)) continue;
+          final next = event.copyWith(tagIds: tags);
           store.validateEvent(next, allowIncomplete: event.end == null);
           events[id] = next;
           changed = true;
         }
         if (changed) await _apply(events, _drafts);
       });
+
+  Future<void> setEventTag(Iterable<String> ids, String? tagId) =>
+      setEventTags(ids, tagId == null ? const [] : [tagId]);
+
+  /// Associates [ids] with a project node, or clears it when [itemId] is null.
+  /// The tags the item inherits are added and tags the user set by hand are
+  /// kept, so choosing a project never silently unfiles a record.
+  Future<void> setEventItem(Iterable<String> ids, String? itemId) =>
+      _run(() async {
+        if (itemId != null && !store.items.containsKey(itemId)) {
+          throw const FormatException('目标事项不存在。');
+        }
+        final defaults = itemId == null
+            ? const <String>[]
+            : store.effectiveItemTagIds(itemId);
+        final wanted = ids.toSet();
+        if (wanted.isEmpty) return;
+        final events = {...store.events};
+        var changed = false;
+        for (final id in wanted) {
+          final event = events[id];
+          if (event == null || event.isUndefined) continue;
+          final next = event.copyWith(
+            itemId: itemId,
+            clearItem: itemId == null,
+            tagIds: normalizeTagIds([...event.tagIds, ...defaults]),
+          );
+          if (next == event) continue;
+          store.validateEvent(next, allowIncomplete: event.end == null);
+          events[id] = next;
+          changed = true;
+        }
+        if (changed) await _apply(events, _drafts);
+      });
+
+  /// Batch classification used by the statistics screen. A tag replaces the
+  /// tags, an item is added together with its inherited tags, and null files
+  /// the records as unclassified again.
+  Future<void> assignOwner(Iterable<String> ids, OwnerRef? owner) {
+    if (owner == null) {
+      return _run(() async {
+        final wanted = ids.toSet();
+        if (wanted.isEmpty) return;
+        final events = {...store.events};
+        var changed = false;
+        for (final id in wanted) {
+          final event = events[id];
+          if (event == null || event.isUndefined || event.owner == null) {
+            continue;
+          }
+          final next = event.copyWith(clearTags: true, clearItem: true);
+          store.validateEvent(next, allowIncomplete: event.end == null);
+          events[id] = next;
+          changed = true;
+        }
+        if (changed) await _apply(events, _drafts);
+      });
+    }
+    return owner.isItem
+        ? setEventItem(ids, owner.id)
+        : setEventTag(ids, owner.id);
+  }
 
   Future<void> deleteSelected() => _run(() async {
     final ids = {..._selected};
@@ -527,10 +606,32 @@ class JournalController extends ChangeNotifier {
   });
 
   Future<void> _restore(JournalSnapshot snapshot) async {
-    Event normalize(Event event) =>
-        event.tagId == null || store.tags.containsKey(event.tagId)
-        ? event
-        : event.copyWith(clearTag: true);
+    // A restored snapshot may point at a tag or project removed afterwards.
+    // Dropping only the missing references keeps undo/redo usable instead of
+    // failing validation for the rest of the session.
+    Event normalize(Event event) {
+      final tags = [
+        for (final id in event.tagIds)
+          if (store.tags.containsKey(id)) id,
+      ];
+      final itemId =
+          event.itemId != null && store.items.containsKey(event.itemId)
+          ? event.itemId
+          : null;
+      if (itemId == event.itemId && sameTagIds(tags, event.tagIds)) {
+        return event;
+      }
+      return Event(
+        event.id,
+        event.title,
+        tags,
+        event.start,
+        event.end,
+        event.notes,
+        itemId,
+      );
+    }
+
     final restored = {
       for (final item in snapshot.events.values) item.id: normalize(item),
     };
@@ -547,8 +648,9 @@ class JournalController extends ChangeNotifier {
         if (previous.isUndefined != next.isUndefined &&
             previous.copyWith(
                   id: next.id,
-                  tagId: next.tagId,
-                  clearTag: next.tagId == null,
+                  tagIds: next.tagIds,
+                  itemId: next.itemId,
+                  clearItem: next.itemId == null,
                 ) ==
                 next) {
           tagConversions.addAll([previous.id, next.id]);
@@ -577,7 +679,14 @@ class JournalController extends ChangeNotifier {
     await store.deleteTag(id);
     _drafts = {
       for (final item in _drafts.values)
-        item.id: item.tagId == id ? item.copyWith(clearTag: true) : item,
+        item.id: item.tagIds.contains(id)
+            ? item.copyWith(
+                tagIds: [
+                  for (final tag in item.tagIds)
+                    if (tag != id) tag,
+                ],
+              )
+            : item,
     };
     notifyListeners();
   });
@@ -585,7 +694,30 @@ class JournalController extends ChangeNotifier {
       saveTag(store.tags[id]!.name, parentId, id: id);
 
   Future<Item> saveItem(Item item) => _run(() async {
-    final saved = await store.saveItem(item);
+    // The trail keeps what happened to an item, not just its final state. It
+    // is owned here because callers rebuild an item from a form and would
+    // otherwise drop the entries written by earlier saves.
+    final previous = store.items[item.id];
+    final trail = previous?.log ?? const <ItemLog>[];
+    var next = item;
+    if (previous == null) {
+      next = item.copyWith(
+        log: [...trail, ItemLog(civilTime(clock()), 'created', item.name)],
+      );
+    } else if (previous.status != item.status) {
+      final note = item.outcome.trim().isEmpty ? '' : '：${item.outcome.trim()}';
+      next = item.copyWith(
+        log: [
+          ...trail,
+          ItemLog(
+            civilTime(clock()),
+            'status',
+            '${previous.status.label} → ${item.status.label}$note',
+          ),
+        ],
+      );
+    }
+    final saved = await store.saveItem(next);
     notifyListeners();
     return saved;
   });

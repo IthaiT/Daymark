@@ -108,6 +108,13 @@ class Store {
   String ownerTitle(OwnerRef owner) =>
       owner.isItem ? (_items[owner.id]?.name ?? '') : tagName(owner.id);
 
+  /// Tags an item inherits from its ancestors plus its own, minus the ones a
+  /// level dropped, filtered to tags that still exist.
+  List<String> effectiveItemTagIds(String id) => [
+    for (final tag in itemEffectiveTagIds(_items, id))
+      if (_tags.containsKey(tag)) tag,
+  ];
+
   /// The single project item whose name matches [title], if exactly one does.
   /// Typing a planned item's name therefore attaches the record without a
   /// second step, and repeated names stay unassigned instead of guessing.
@@ -123,15 +130,21 @@ class Store {
     return found;
   }
 
-  /// Label used by the owner column. An item shows the project it belongs to,
-  /// so a sub-item never repeats the name already printed in the title column.
+  /// Labels shown in a record's owner column: the project it belongs to first,
+  /// then every tag it carries. A sub-item shows its root project, so the name
+  /// already printed in the title column is not repeated.
+  List<String> ownerLabels(Event event) => [
+    if (event.itemId != null)
+      itemRoot(_items, event.itemId!)?.name ??
+          ownerLabel((id: event.itemId!, isItem: true)),
+    for (final id in event.tagIds)
+      if (_tags.containsKey(id)) tagName(id),
+  ];
+
+  /// Single-line form of [ownerLabels].
   String ownerName(Event event) {
-    final itemId = event.itemId;
-    if (itemId != null) {
-      final root = itemRoot(_items, itemId);
-      return root?.name ?? ownerLabel((id: itemId, isItem: true));
-    }
-    return event.tagId == null ? '未归类' : tagName(event.tagId);
+    final labels = ownerLabels(event);
+    return labels.isEmpty ? '未归类' : labels.join(' · ');
   }
 
   List<Tag> orderedTags() => _tags.values.toList()
@@ -197,11 +210,8 @@ class Store {
   }) {
     if (event.id.isEmpty) throw const FormatException('事件 ID 不能为空。');
     if (event.title.trim().isEmpty) throw const FormatException('请输入事件名称。');
-    if (event.tagId != null && !tags.containsKey(event.tagId)) {
-      throw const FormatException('所选标签不存在。');
-    }
-    if (event.tagId != null && event.itemId != null) {
-      throw const FormatException('一个事件只能关联标签或事项中的一项。');
+    for (final id in event.tagIds) {
+      if (!tags.containsKey(id)) throw const FormatException('所选标签不存在。');
     }
     if (event.itemId != null && !items.containsKey(event.itemId)) {
       throw const FormatException('所选事项不存在。');
@@ -276,6 +286,10 @@ class Store {
         'ended_on',
         'objective',
         'outcome',
+        'tag_ids',
+        'excluded_tag_ids',
+        'links',
+        'log',
       };
       final items = <String, Item>{};
       for (final row in payload['items']! as List<Object?>) {
@@ -287,36 +301,21 @@ class Store {
             (row['ended_on'] != null && row['ended_on'] is! String) ||
             (row['objective'] != null && row['objective'] is! String) ||
             (row['outcome'] != null && row['outcome'] is! String) ||
+            !_stringList(row['tag_ids']) ||
+            !_stringList(row['excluded_tag_ids']) ||
+            !_stringList(row['links']) ||
+            !_logList(row['log']) ||
             row.keys.any((key) => !keys.contains(key))) {
           throw const FormatException('事项记录格式不正确。');
         }
-        final status = switch (row['status']) {
-          null || 'active' => ItemStatus.active,
-          'paused' => ItemStatus.paused,
-          'done' => ItemStatus.done,
-          'dropped' => ItemStatus.dropped,
-          _ => throw const FormatException('事项状态不正确。'),
-        };
-        final item = Item(
-          id: row['id']! as String,
-          name: row['name']! as String,
-          parentId: row['parent_id'] as String?,
-          status: status,
-          startedOn: row['started_on'] == null
-              ? null
-              : parseDate(row['started_on']! as String),
-          endedOn: row['ended_on'] == null
-              ? null
-              : parseDate(row['ended_on']! as String),
-          objective: row['objective'] as String? ?? '',
-          outcome: row['outcome'] as String? ?? '',
-        );
+        final item = Item.fromJson(row);
         if (items.containsKey(item.id)) {
           throw const FormatException('事项 ID 重复。');
         }
         items[item.id] = item;
       }
       validateItems(items);
+      _checkItemTags(items);
       return items;
     } on FormatException catch (error) {
       throw DataError('无法读取 ${itemsFile.path}：${error.message}');
@@ -361,7 +360,7 @@ class Store {
           final event = Event(
             fields[0],
             fields[1],
-            fields[2].isEmpty ? null : fields[2],
+            fields[2].isEmpty ? null : fields[2].split(','),
             parseTimestamp(fields[3]),
             fields[4].isEmpty ? null : parseTimestamp(fields[4]),
             fields[5],
@@ -410,7 +409,7 @@ class Store {
         [
           event.id,
           event.title,
-          event.tagId ?? '',
+          event.tagIds.join(','),
           timestampText(event.start),
           event.end == null ? '' : timestampText(event.end!),
           event.notes,
@@ -444,8 +443,13 @@ class Store {
     if (_tags.values.any((tag) => tag.parentId == id)) {
       throw const FormatException('此标签还有子标签，请先移动或删除子标签。');
     }
-    if (_events.values.any((event) => event.tagId == id)) {
+    if (_events.values.any((event) => event.tagIds.contains(id))) {
       throw const FormatException('此标签还有事件，请先给这些事件更换标签。');
+    }
+    if (_items.values.any(
+      (item) => item.tagIds.contains(id) || item.excludedTagIds.contains(id),
+    )) {
+      throw const FormatException('此标签还有事项在用，请先调整这些事项的标签。');
     }
     final desired = {..._tags}..remove(id);
     await _writeTags(desired);
@@ -463,8 +467,15 @@ class Store {
     }
     validateTags(tags);
     for (final removed in _tags.keys.where((id) => !tags.containsKey(id))) {
-      if (_events.values.any((event) => event.tagId == removed)) {
+      if (_events.values.any((event) => event.tagIds.contains(removed))) {
         throw FormatException('标签「${_tags[removed]!.name}」还有事件，请先给这些事件更换标签。');
+      }
+      if (_items.values.any(
+        (item) =>
+            item.tagIds.contains(removed) ||
+            item.excludedTagIds.contains(removed),
+      )) {
+        throw FormatException('标签「${_tags[removed]!.name}」还有事项在用，请先调整这些事项的标签。');
       }
     }
     final desired = {for (final tag in tags.values) tag.id: tag};
@@ -480,6 +491,7 @@ class Store {
       }
     }
     validateItems(items);
+    _checkItemTags(items);
     for (final removed in _items.keys.where((id) => !items.containsKey(id))) {
       if (_events.values.any((event) => event.itemId == removed)) {
         throw FormatException('事项「${_items[removed]!.name}」还有事件，请先移动这些事件。');
@@ -493,9 +505,22 @@ class Store {
   Future<Item> saveItem(Item item) async {
     final desired = {..._items, item.id: item};
     validateItems(desired);
+    _checkItemTags(desired);
     await _writeItems(desired);
     _items = desired;
     return item;
+  }
+
+  /// Rejects tags an item no longer has, so a deleted tag cannot leave a
+  /// dangling reference on disk.
+  void _checkItemTags(Map<String, Item> items) {
+    for (final item in items.values) {
+      for (final tag in [...item.tagIds, ...item.excludedTagIds]) {
+        if (!_tags.containsKey(tag)) {
+          throw FormatException('事项「${item.name}」引用了不存在的标签。');
+        }
+      }
+    }
   }
 
   /// Removes one leaf node. Its records move to the parent node, so time is
@@ -519,10 +544,16 @@ class Store {
     for (final event in nextEvents.values) {
       validateEventData(event, _tags, items: nextItems, allowIncomplete: true);
     }
-    // Events first: a failed write then leaves an unused node, never a record
-    // pointing at a node that no longer exists.
+    // Two files are involved, so the first write is rolled back when the
+    // second fails: a failed delete must leave disk and memory unchanged.
+    final previousEvents = _events;
     await _writeEvents(nextEvents);
-    await _writeItems(nextItems);
+    try {
+      await _writeItems(nextItems);
+    } on Object {
+      await _writeEvents(previousEvents);
+      rethrow;
+    }
     _events = nextEvents;
     _items = nextItems;
   }
@@ -553,3 +584,18 @@ class Store {
           .toList()
         ..sort(compareEvents);
 }
+
+bool _stringList(Object? value) =>
+    value == null ||
+    (value is List<Object?> && value.every((item) => item is String));
+
+bool _logList(Object? value) =>
+    value == null ||
+    (value is List<Object?> &&
+        value.every(
+          (entry) =>
+              entry is Map<String, Object?> &&
+              entry['at'] is String &&
+              entry['kind'] is String &&
+              entry['text'] is String,
+        ));

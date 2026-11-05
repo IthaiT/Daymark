@@ -22,7 +22,7 @@ class EventClipboard {
             for (final event in events)
               {
                 'title': event.title,
-                'tag_id': event.tagId,
+                'tag_ids': event.tagIds,
                 'item_id': event.itemId,
                 'start': timestamp(event.start),
                 'end': event.end == null ? null : timestamp(event.end!),
@@ -47,6 +47,7 @@ class EventClipboard {
         if (row is! Map<String, Object?> ||
             row['title'] is! String ||
             (row['tag_id'] != null && row['tag_id'] is! String) ||
+            (row['tag_ids'] != null && row['tag_ids'] is! List<Object?>) ||
             (row['item_id'] != null && row['item_id'] is! String) ||
             row['start'] is! String ||
             (row['end'] != null && row['end'] is! String) ||
@@ -64,7 +65,9 @@ class EventClipboard {
           Event(
             events.length.toString(),
             row['title']! as String,
-            row['tag_id'] as String?,
+            row['tag_ids'] is List<Object?>
+                ? (row['tag_ids']! as List<Object?>).cast<String>()
+                : row['tag_id'] as String?,
             start,
             end,
             row['notes']! as String,

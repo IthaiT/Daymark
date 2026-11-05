@@ -24,11 +24,15 @@ class ActivityTagSelection {
   bool includes(Event event, Map<String, Tag> tags) {
     if (event.isUndefined) return false;
     if (isAll) return true;
-    var id = event.tagId;
-    if (id == null) return ids.contains(null);
-    while (id != null) {
-      if (ids.contains(id)) return true;
-      id = tags[id]?.parentId;
+    if (event.tagIds.isEmpty) return ids.contains(null);
+    for (final start in event.tagIds) {
+      var id = start;
+      while (true) {
+        if (ids.contains(id)) return true;
+        final parent = tags[id]?.parentId;
+        if (parent == null) break;
+        id = parent;
+      }
     }
     return false;
   }
