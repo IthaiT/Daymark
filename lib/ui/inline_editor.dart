@@ -6,6 +6,8 @@ import '../data/store.dart';
 import '../domain/model.dart';
 import 'pickers.dart';
 
+/// Where one record is filed while it is being edited: an optional project and
+/// any number of tags. The two are independent, so a record may carry both.
 class EditSession {
   EditSession(this.event, this.column, {this.inTimeline = false})
     : text = TextEditingController(
@@ -18,7 +20,8 @@ class EditSession {
             '${dateText(event.end ?? event.start.add(const Duration(hours: 1)))} ${clockText(event.end ?? event.start.add(const Duration(hours: 1)))}',
         },
       ),
-      owner = event.owner,
+      itemId = event.itemId,
+      tagIds = event.tagIds,
       pickerOpen = column != EventColumn.title;
   final Event event;
   final EventColumn column;
@@ -26,7 +29,8 @@ class EditSession {
   final TextEditingController text;
   final focus = FocusNode();
   String? committedId;
-  OwnerRef? owner;
+  String? itemId;
+  List<String> tagIds;
   bool ownerInputValid = true;
   bool pickerOpen;
   bool closed = false;
@@ -34,11 +38,14 @@ class EditSession {
 
   /// Highlighted row of the name-column suggestions.
   int titleIndex = 0;
+
+  /// Highlighted row of the owner list; -1 means nothing is highlighted.
+  int ownerIndex = -1;
   Object? get value => switch (column) {
-    EventColumn.title => (title: text.text, owner: owner),
+    EventColumn.title => (title: text.text, itemId: itemId, tagIds: tagIds),
     EventColumn.tag =>
       ownerInputValid
-          ? owner
+          ? (itemId: itemId, tagIds: tagIds)
           : throw const FormatException('没有匹配的标签或项目，请修改搜索内容或选择已有项。'),
     EventColumn.start => parseEditorTime(text.text, event.start),
     EventColumn.end => parseEditorTime(
@@ -79,17 +86,26 @@ class InlineEditor extends StatefulWidget {
 class _InlineEditorState extends State<InlineEditor> {
   final _ownerChoices = GlobalKey<OwnerChoicesState>();
   String _ownerQuery = '';
-  bool get _composing {
+  TextRange _composing = TextRange.empty;
+
+  /// One arrow press is handled inside a single frame; a second delivery of
+  /// the same press would otherwise move the highlight twice.
+  bool _arrowLatch = false;
+
+  bool get _isComposing {
     final range = widget.session.text.value.composing;
     return range.isValid && !range.isCollapsed;
   }
 
   void _submit() {
-    if (_composing) return;
+    if (_isComposing) return;
     final session = widget.session;
-    if (session.column == EventColumn.tag && session.pickerOpen) {
-      widget.onCompleteTag();
-      return;
+    if (session.column == EventColumn.tag) {
+      if (session.pickerOpen) {
+        _applyPendingOwner();
+        widget.onCompleteTag();
+        return;
+      }
     }
     if (session.column == EventColumn.title && session.pickerOpen) {
       final choices = titleChoices(widget.store, session.text.text);
@@ -101,8 +117,36 @@ class _InlineEditorState extends State<InlineEditor> {
     widget.onCommit();
   }
 
-  /// Chooses a suggestion: the title and its owner are committed together, so
-  /// one keystroke records both.
+  /// Applies what the owner list is pointing at.
+  ///
+  /// Arrows win when used; otherwise typing then Enter or Tab takes the first
+  /// match. An empty query points at nothing, so it never clears the owner.
+  void _applyPendingOwner() {
+    final session = widget.session;
+    if (session.column != EventColumn.tag || !session.pickerOpen) return;
+    final options = _ownerOptions();
+    final index = session.ownerIndex >= 0
+        ? session.ownerIndex.clamp(0, options.length - 1)
+        : _ownerQuery.trim().isEmpty
+        ? -1
+        : 0;
+    if (index < 0 || options.isEmpty) return;
+    final option = options[index];
+    // Enter can arrive from both the field and the wrapper; applying twice
+    // would toggle the same tag back off.
+    if (_isCurrent(option)) return;
+    _applyOwner(option);
+  }
+
+  bool _isCurrent(OwnerRef? owner) {
+    final session = widget.session;
+    if (owner == null) return session.itemId == null && session.tagIds.isEmpty;
+    if (owner.isItem) return session.itemId == owner.id;
+    return session.tagIds.contains(owner.id);
+  }
+
+  /// Chooses a suggestion: the title and the classification it carries are
+  /// committed together, so one keystroke records both.
   void _applyTitle(TitleChoice choice) {
     final session = widget.session;
     setState(() {
@@ -110,19 +154,97 @@ class _InlineEditorState extends State<InlineEditor> {
       session.text.selection = TextSelection.collapsed(
         offset: choice.title.length,
       );
-      session.owner = choice.owner;
+      if (choice.owner.isItem) {
+        session.itemId = choice.owner.id;
+        session.tagIds = normalizeTagIds([
+          ...session.tagIds,
+          ...widget.store.effectiveItemTagIds(choice.owner.id),
+        ]);
+      } else {
+        session.tagIds = normalizeTagIds([...session.tagIds, choice.owner.id]);
+      }
       session.pickerOpen = false;
       session.titleIndex = 0;
     });
     widget.onCommit();
   }
 
+  /// Options for the current query, computed from the live text rather than
+  /// the last built list: typing and pressing a key in the same frame must not
+  /// act on the previous query.
+  List<OwnerRef?> _ownerOptions() => matchingOwners(widget.store, _ownerQuery);
+
+  /// Applies one owner choice to the pending classification.
+  ///
+  /// An item is single-valued and brings the tags it inherits; a tag toggles,
+  /// so the same list both adds and removes. Nothing is written until commit.
+  void _applyOwner(OwnerRef? owner) {
+    final session = widget.session;
+    setState(() {
+      if (owner == null) {
+        session.itemId = null;
+        session.tagIds = const [];
+      } else if (owner.isItem) {
+        session.itemId = owner.id;
+        session.tagIds = normalizeTagIds([
+          ...session.tagIds,
+          ...widget.store.effectiveItemTagIds(owner.id),
+        ]);
+      } else {
+        // One tag is chosen at a time. Picking replaces the previous manual
+        // tag while the tags inherited from the project stay attached, and
+        // picking the same tag again falls back to just those defaults.
+        final inherited = session.itemId == null
+            ? const <String>[]
+            : widget.store.effectiveItemTagIds(session.itemId!);
+        session.tagIds = session.tagIds.contains(owner.id)
+            ? normalizeTagIds(inherited)
+            : normalizeTagIds([...inherited, owner.id]);
+      }
+      session.ownerInputValid = true;
+      session.error = null;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    widget.session.focus.onKeyEvent = _handleKey;
+    // The wrapper Focus below already receives key events from the field, so
+    // attaching the handler to the node as well would run it twice per press.
     if (widget.session.column == EventColumn.tag) {
-      widget.session.text.text = widget.store.ownerLabel(widget.session.owner);
+      widget.session.text.text = widget.store.ownerName(widget.session.event);
+    }
+    // Ending an IME composition may not change the text at all, so the value
+    // listener is what makes suggestions appear again after the candidate is
+    // confirmed.
+    widget.session.text.addListener(_onTextValueChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.session.text.removeListener(_onTextValueChanged);
+    super.dispose();
+  }
+
+  void _onTextValueChanged() {
+    final session = widget.session;
+    if (session.closed || !mounted) return;
+    final composing = session.text.value.composing;
+    final composingNow = composing.isValid && !composing.isCollapsed;
+    final wasComposing = _composing.isValid && !_composing.isCollapsed;
+    _composing = composing;
+    if (session.column != EventColumn.title) return;
+    if (wasComposing && !composingNow) {
+      final hasChoices = titleChoices(
+        widget.store,
+        session.text.text,
+      ).isNotEmpty;
+      if (session.pickerOpen != hasChoices) {
+        setState(() {
+          session.titleIndex = 0;
+          session.pickerOpen = hasChoices;
+        });
+      }
     }
   }
 
@@ -130,7 +252,7 @@ class _InlineEditorState extends State<InlineEditor> {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
-    if (_composing) return KeyEventResult.ignored;
+    if (_isComposing) return KeyEventResult.ignored;
     final session = widget.session;
     final keyboard = HardwareKeyboard.instance;
     final commandModifier =
@@ -160,35 +282,24 @@ class _InlineEditorState extends State<InlineEditor> {
     if (session.column == EventColumn.tag &&
         !commandModifier &&
         !keyboard.isShiftPressed &&
-        (event.logicalKey == LogicalKeyboardKey.arrowUp ||
-            event.logicalKey == LogicalKeyboardKey.arrowDown)) {
-      final current = session.owner;
-      final options =
-          _ownerChoices.currentState?.visibleOwners ??
-          <OwnerRef?>[...matchingOwners(widget.store, _ownerQuery)];
-      if (options.isNotEmpty) {
-        final index = options.indexWhere(
-          (owner) => owner == null
-              ? current == null
-              : current != null &&
-                    current.id == owner.id &&
-                    current.isItem == owner.isItem,
+        vertical) {
+      final options = _ownerOptions();
+      if (options.isNotEmpty && !_arrowLatch) {
+        _arrowLatch = true;
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _arrowLatch = false,
         );
-        final next = index < 0
-            ? 0
-            : (index +
-                      (event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1))
-                  .clamp(0, options.length - 1);
-        setState(() {
-          session.owner = options[next];
-          session.ownerInputValid = true;
-          session.error = null;
-          session.pickerOpen = true;
-        });
+        final delta = event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1;
+        // The first match is what typing alone would take, so the first arrow
+        // moves past it instead of landing on it again.
+        final start = session.ownerIndex >= 0 ? session.ownerIndex : 0;
+        session.ownerIndex = (start + delta).clamp(0, options.length - 1);
+        setState(() {});
       }
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.tab && !commandModifier) {
+      _applyPendingOwner();
       widget.onNext(keyboard.isShiftPressed);
       return KeyEventResult.handled;
     }
@@ -273,13 +384,13 @@ class _InlineEditorState extends State<InlineEditor> {
               _ownerQuery = text;
               final options = matchingOwners(widget.store, text);
               session.ownerInputValid = options.isNotEmpty;
-              if (options.isNotEmpty) session.owner = options.first;
+              session.ownerIndex = -1;
               session.pickerOpen = true;
             } else if (session.column == EventColumn.title) {
               session.titleIndex = 0;
               // Suggestions stay out of the way while an IME composes.
               session.pickerOpen =
-                  !_composing && titleChoices(widget.store, text).isNotEmpty;
+                  !_isComposing && titleChoices(widget.store, text).isNotEmpty;
             }
           }),
           onEditingComplete: () {},
@@ -306,12 +417,14 @@ class _InlineEditorState extends State<InlineEditor> {
           EventColumn.tag => OwnerChoices(
             key: _ownerChoices,
             store: widget.store,
-            selected: session.owner,
+            itemId: session.itemId,
+            tagIds: session.tagIds,
             query: _ownerQuery,
-            onChoose: (value) {
-              session.owner = value;
-              session.ownerInputValid = true;
-              session.text.text = widget.store.ownerLabel(value);
+            highlighted: session.ownerIndex,
+            onChoose: (OwnerRef? value) {
+              // Picking from the list closes and saves, so a single click is
+              // still enough; Enter and Tab go through the same path.
+              _applyOwner(value);
               close();
               widget.onCompleteTag();
             },

@@ -6,6 +6,7 @@ import '../application/journal_controller.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
+import 'link_launcher.dart';
 import 'workspace_style.dart';
 
 /// Project workspace: the tree of projects and planned items, separate from
@@ -22,10 +23,14 @@ class ProjectScreenState extends State<ProjectScreen> {
   String? _selected;
   bool _saving = false;
   late final _focus = widget.focusNode ?? FocusNode();
+  final _quickAdd = TextEditingController();
+  final _quickFocus = FocusNode();
 
   @override
   void dispose() {
     if (widget.focusNode == null) _focus.dispose();
+    _quickAdd.dispose();
+    _quickFocus.dispose();
     super.dispose();
   }
 
@@ -52,19 +57,33 @@ class ProjectScreenState extends State<ProjectScreen> {
     }
   }
 
+  /// The dialog saves before closing, so a failed write keeps the draft and
+  /// the error on screen instead of discarding what was typed.
   Future<void> _edit([Item? item, String? parentId]) async {
-    final result = await showDialog<Item>(
+    final saved = await showDialog<Item>(
       context: context,
       builder: (context) => _ItemDialog(
         journal: widget.journal,
         item: item,
         parentId: item?.parentId ?? parentId,
+        onSave: (value) => widget.journal.saveItem(value),
       ),
     );
-    if (result == null || !mounted) return;
+    if (saved == null || !mounted) return;
+    setState(() => _selected = saved.id);
+  }
+
+  /// Accepts several lines at once, so a brainstorm can be pasted in one go.
+  Future<void> _addChildren(Item parent, String text) async {
+    final names = [
+      for (final line in text.split('\n'))
+        if (line.trim().isNotEmpty) line.trim(),
+    ];
+    if (names.isEmpty) return;
     await _run(() async {
-      final saved = await widget.journal.saveItem(result);
-      if (mounted) setState(() => _selected = saved.id);
+      for (final name in names) {
+        await widget.journal.createItem(name, parent.id);
+      }
     });
   }
 
@@ -138,7 +157,11 @@ class ProjectScreenState extends State<ProjectScreen> {
 
   Widget _sidebar(Map<String, Item> items) {
     final ordered = orderedItems(items);
-    final durations = itemDurations(items, widget.journal.store.events.values);
+    final durations = itemDurations(
+      items,
+      widget.journal.store.events.values,
+      splitOverlap: widget.journal.settings.splitOverlap,
+    );
     return WorkspacePanel(
       padding: WorkspaceStyle.panelPadding,
       child: Column(
@@ -248,7 +271,11 @@ class ProjectScreenState extends State<ProjectScreen> {
             )
             .toList()
           ..sort((a, b) => b.start.compareTo(a.start));
-    final durations = itemDurations(items, widget.journal.store.events.values);
+    final durations = itemDurations(
+      items,
+      widget.journal.store.events.values,
+      splitOverlap: widget.journal.settings.splitOverlap,
+    );
     final children = orderedItems(
       items,
     ).where((entry) => entry.$1.parentId == item.id).toList();
@@ -309,6 +336,45 @@ class ProjectScreenState extends State<ProjectScreen> {
           const SizedBox(height: 12),
           _text('目标', item.objective, '写下完成时要达到什么'),
           _text('结果', item.outcome, '完成后记录结果，放弃时记录原因'),
+          if (widget.journal.store.effectiveItemTagIds(item.id).isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 10),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final id in widget.journal.store.effectiveItemTagIds(
+                    item.id,
+                  ))
+                    Chip(
+                      key: ValueKey('project-detail-tag-$id'),
+                      label: Text(widget.journal.store.tagName(id)),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                ],
+              ),
+            ),
+          if (item.links.isNotEmpty) ...[
+            Text('成果', style: Theme.of(context).textTheme.labelMedium),
+            const SizedBox(height: 2),
+            for (final link in item.links)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: ValueKey('project-link-$link'),
+                  onPressed: () => unawaited(openExternalLink(link)),
+                  icon: const Icon(Icons.open_in_new, size: 16),
+                  label: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Text(
+                      link,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -355,6 +421,36 @@ class ProjectScreenState extends State<ProjectScreen> {
                 ),
                 onTap: () => setState(() => _selected = child.id),
               ),
+          TextField(
+            key: const ValueKey('project-quick-add'),
+            controller: _quickAdd,
+            focusNode: _quickFocus,
+            decoration: const InputDecoration(
+              isDense: true,
+              hintText: '输入事项名，回车连续添加；可直接粘贴多行',
+            ),
+            onChanged: (value) {
+              if (!value.contains('\n')) return;
+              _quickAdd.clear();
+              unawaited(_addChildren(item, value));
+            },
+            onSubmitted: (value) {
+              if (value.trim().isEmpty) return;
+              _quickAdd.clear();
+              unawaited(_addChildren(item, value));
+              _quickFocus.requestFocus();
+            },
+          ),
+          if (item.log.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('过程', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            for (final entry in item.log.reversed.take(6))
+              Text(
+                '${dateText(entry.at)} ${clockText(entry.at)} · ${entry.text}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+          ],
           const SizedBox(height: 16),
           Text('记录', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
@@ -418,8 +514,14 @@ class ProjectScreenState extends State<ProjectScreen> {
 }
 
 class _ItemDialog extends StatefulWidget {
-  const _ItemDialog({required this.journal, this.item, this.parentId});
+  const _ItemDialog({
+    required this.journal,
+    required this.onSave,
+    this.item,
+    this.parentId,
+  });
   final JournalController journal;
+  final Future<Item> Function(Item item) onSave;
   final Item? item;
   final String? parentId;
   @override
@@ -440,9 +542,15 @@ class _ItemDialogState extends State<_ItemDialog> {
   late final _ended = TextEditingController(
     text: widget.item?.endedOn == null ? '' : dateText(widget.item!.endedOn!),
   );
+  late final _links = TextEditingController(
+    text: (widget.item?.links ?? const []).join('\n'),
+  );
   late ItemStatus _status = widget.item?.status ?? ItemStatus.active;
   late String? _parentId = widget.parentId;
+  late List<String> _tagIds = [...?widget.item?.tagIds];
+  late List<String> _excludedTagIds = [...?widget.item?.excludedTagIds];
   String? _error;
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -451,10 +559,16 @@ class _ItemDialogState extends State<_ItemDialog> {
     _outcome.dispose();
     _started.dispose();
     _ended.dispose();
+    _links.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
     try {
       final started = _started.text.trim().isEmpty
           ? null
@@ -469,15 +583,114 @@ class _ItemDialogState extends State<_ItemDialog> {
         endedOn: ended,
         objective: _objective.text.trim(),
         outcome: _outcome.text.trim(),
+        tagIds: _tagIds,
+        excludedTagIds: _excludedTagIds,
+        links: [
+          for (final line in _links.text.split('\n'))
+            if (line.trim().isNotEmpty) line.trim(),
+        ],
+        log: widget.item?.log ?? const [],
       );
-      // Validate against the tree the store will see, before closing.
-      final items = {...widget.journal.store.items, item.id: item};
-      validateItems(items);
-      if (!mounted) return;
-      Navigator.of(context).pop(item);
+      // Validate against the tree the store will see, before saving.
+      validateItems({...widget.journal.store.items, item.id: item});
+      final saved = await widget.onSave(item);
+      if (mounted) Navigator.of(context).pop(saved);
     } on FormatException catch (error) {
-      setState(() => _error = error.message);
+      if (mounted) setState(() => _error = error.message);
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = errorText(error));
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Widget _tagSection(BuildContext context) {
+    final store = widget.journal.store;
+    final inherited = _parentId == null
+        ? const <String>[]
+        : [
+            for (final id in itemEffectiveTagIds(store.items, _parentId!))
+              if (!_tagIds.contains(id) && !_excludedTagIds.contains(id)) id,
+          ];
+    final available = [
+      for (final tag in store.orderedTags())
+        if (!_tagIds.contains(tag.id) && !inherited.contains(tag.id)) tag,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text('标签', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButton<String>(
+                key: const ValueKey('project-tag-add'),
+                isExpanded: true,
+                hint: const Text('添加标签'),
+                items: [
+                  for (final tag in available)
+                    DropdownMenuItem(
+                      value: tag.id,
+                      child: Text(
+                        store
+                            .ancestors(tag.id)
+                            .map((item) => item.name)
+                            .join(' / '),
+                      ),
+                    ),
+                ],
+                onChanged: _saving
+                    ? null
+                    : (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _tagIds = [..._tagIds, value];
+                          _excludedTagIds = [
+                            for (final id in _excludedTagIds)
+                              if (id != value) id,
+                          ];
+                        });
+                      },
+              ),
+            ),
+          ],
+        ),
+        if (_tagIds.isNotEmpty || inherited.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final id in _tagIds)
+                  InputChip(
+                    key: ValueKey('project-tag-$id'),
+                    label: Text(store.tagName(id)),
+                    onDeleted: _saving
+                        ? null
+                        : () => setState(() {
+                            _tagIds = [
+                              for (final tag in _tagIds)
+                                if (tag != id) tag,
+                            ];
+                          }),
+                  ),
+                for (final id in inherited)
+                  InputChip(
+                    key: ValueKey('project-tag-inherited-$id'),
+                    label: Text('${store.tagName(id)}（继承）'),
+                    onDeleted: _saving
+                        ? null
+                        : () => setState(() {
+                            _excludedTagIds = [..._excludedTagIds, id];
+                          }),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
   }
 
   @override
@@ -590,6 +803,18 @@ class _ItemDialogState extends State<_ItemDialog> {
                         minLines: 1,
                         maxLines: 3,
                       ),
+                      const SizedBox(height: 14),
+                      _tagSection(context),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _links,
+                        decoration: const InputDecoration(
+                          labelText: '成果链接',
+                          helperText: '每行一个：Obsidian、网页或本地文件',
+                        ),
+                        minLines: 1,
+                        maxLines: 3,
+                      ),
                       if (_error != null) ...[
                         const SizedBox(height: 12),
                         Text(
@@ -608,13 +833,16 @@ class _ItemDialogState extends State<_ItemDialog> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _saving
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     child: const Text('取消'),
                   ),
                   const SizedBox(width: 8),
                   FilledButton(
-                    onPressed: () => unawaited(_save()),
-                    child: const Text('保存'),
+                    key: const ValueKey('project-save'),
+                    onPressed: _saving ? null : () => unawaited(_save()),
+                    child: Text(_saving ? '保存中…' : '保存'),
                   ),
                 ],
               ),

@@ -8,7 +8,7 @@ import '../domain/event_stats.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
 import 'dialogs.dart' show errorText;
-import 'pickers.dart' show TagField;
+import 'pickers.dart' show OwnerChoices;
 import 'theme.dart' show tagDot;
 import 'workspace_style.dart';
 
@@ -26,6 +26,16 @@ enum _StatsPeriod { week, month, custom }
 /// Records belong either to a tag or to a project item, so the two views are
 /// built and totalled independently instead of being summed together.
 enum _StatsDimension { tag, item }
+
+/// Keeps the first occurrence of every record, so a scope that is reached
+/// through several tags still counts each record once.
+List<Event> _uniqueEvents(Iterable<Event> events) {
+  final seen = <String>{};
+  return [
+    for (final event in events)
+      if (seen.add(event.id)) event,
+  ];
+}
 
 const _unclassifiedId = '__stats_unclassified__';
 const _undefinedId = '__stats_undefined__';
@@ -264,33 +274,42 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       );
   }
 
+  /// Owner behind a statistics row. Project rows carry an `item:` prefix so
+  /// the two dimensions cannot collide inside one node map.
+  OwnerRef? _ownerOf(_StatsNode node) {
+    if (node.isGap || node.isUnclassified) return null;
+    return node.id.startsWith('item:')
+        ? (id: node.id.substring('item:'.length), isItem: true)
+        : (id: node.id, isItem: false);
+  }
+
   Future<void> _moveSelected(_StatsNode node) async {
     if (_selectedEvents.isEmpty) return;
     final store = widget.journal.store;
     final ids = {..._selectedEvents};
-    final initial = node.isGap || node.isUnclassified ? null : node.id;
-    final result = await showDialog<(bool, String?)>(
+    final initial = _ownerOf(node);
+    final result = await showDialog<({OwnerRef? owner})>(
       context: context,
       builder: (_) => _MoveTargetDialog(
         store: store,
         count: ids.length,
-        initialTarget: initial,
+        initialOwner: initial,
       ),
     );
-    if (result == null || !result.$1 || !mounted) return;
+    if (result == null || !mounted) return;
     try {
-      await widget.journal.setEventTag(ids, result.$2);
+      await widget.journal.assignOwner(ids, result.owner);
       if (!mounted) return;
       setState(() {
         _editing = false;
         _selectedEvents.clear();
       });
-      final name = result.$2 == null ? '未分类' : store.tagName(result.$2);
+      final name = store.ownerLabel(result.owner);
       ScaffoldMessenger.of(context)
         ..removeCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text('已移动 ${ids.length} 条事件到「$name」'),
+            content: Text('已移动 ${ids.length} 条记录到「$name」'),
             behavior: SnackBarBehavior.floating,
             width: 480,
           ),
@@ -1428,7 +1447,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             onPressed: _selectedEvents.isEmpty
                 ? null
                 : () => _moveSelected(node),
-            child: const Text('移动到标签…'),
+            child: const Text('归类到…'),
           ),
         ],
       ),
@@ -1449,12 +1468,15 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final byItem = <String, List<Event>>{};
     for (final event in store.events.values) {
       if (event.isUndefined) continue;
-      final owner = event.owner;
-      if (owner == null) continue;
-      if (owner.isItem) {
-        (byItem[owner.id] ??= <Event>[]).add(event);
-      } else {
-        (byTag[owner.id] ??= <Event>[]).add(event);
+      // A record belongs to every tag it carries, and to its project. The
+      // same record is only ever counted once inside a scope.
+      for (final id in event.tagIds) {
+        if (!store.tags.containsKey(id)) continue;
+        (byTag[id] ??= <Event>[]).add(event);
+      }
+      final itemId = event.itemId;
+      if (itemId != null && store.items.containsKey(itemId)) {
+        (byItem[itemId] ??= <Event>[]).add(event);
       }
     }
     _StatsNode buildTag(Tag tag) {
@@ -1463,10 +1485,11 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           if (child.parentId == tag.id) buildTag(child),
       ];
       final direct = byTag[tag.id] ?? const <Event>[];
-      final events = <Event>[
+      // A record carrying both a parent and a child tag appears twice here.
+      final events = _uniqueEvents([
         ...direct,
         for (final child in children) ...child.events,
-      ];
+      ]);
       final node = _StatsNode(
         id: tag.id,
         name: tag.name,
@@ -1494,10 +1517,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
           if (child.parentId == item.id) buildItem(child),
       ];
       final direct = byItem[item.id] ?? const <Event>[];
-      final events = <Event>[
+      final events = _uniqueEvents([
         ...direct,
         for (final child in children) ...child.events,
-      ];
+      ]);
       final id = 'item:${item.id}';
       final node = _StatsNode(
         id: id,
@@ -1661,37 +1684,57 @@ class _MoveTargetDialog extends StatefulWidget {
   const _MoveTargetDialog({
     required this.store,
     required this.count,
-    this.initialTarget,
+    this.initialOwner,
   });
   final Store store;
   final int count;
-  final String? initialTarget;
+  final OwnerRef? initialOwner;
   @override
   State<_MoveTargetDialog> createState() => _MoveTargetDialogState();
 }
 
 class _MoveTargetDialogState extends State<_MoveTargetDialog> {
-  late String? _target = widget.initialTarget;
+  String _query = '';
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text('移动 ${widget.count} 条事件'),
+    title: Text('归类 ${widget.count} 条记录'),
     content: SizedBox(
       width: 380,
+      height: 420,
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            '只修改标签，事件的时间和标题保持不变。',
+            '只改变归属，事件的时间和标题保持不变。',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
           ),
-          const SizedBox(height: 12),
-          TagField(
-            store: widget.store,
-            value: _target,
-            onChanged: (value) => setState(() => _target = value),
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('move-target-search'),
+            autofocus: true,
+            decoration: const InputDecoration(hintText: '搜索标签或项目'),
+            onChanged: (value) => setState(() => _query = value),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: SingleChildScrollView(
+              child: OwnerChoices(
+                store: widget.store,
+                query: _query,
+                itemId: widget.initialOwner?.isItem == true
+                    ? widget.initialOwner!.id
+                    : null,
+                tagIds: [
+                  if (widget.initialOwner != null &&
+                      !widget.initialOwner!.isItem)
+                    widget.initialOwner!.id,
+                ],
+                onChoose: (OwnerRef? owner) =>
+                    Navigator.pop(context, (owner: owner)),
+              ),
+            ),
           ),
         ],
       ),
@@ -1700,12 +1743,6 @@ class _MoveTargetDialogState extends State<_MoveTargetDialog> {
       TextButton(
         onPressed: () => Navigator.pop(context),
         child: const Text('取消'),
-      ),
-      FilledButton(
-        onPressed: _target == widget.initialTarget
-            ? null
-            : () => Navigator.pop(context, (true, _target)),
-        child: const Text('移动'),
       ),
     ],
   );

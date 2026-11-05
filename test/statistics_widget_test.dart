@@ -103,21 +103,17 @@ void main() {
     await tester.tap(find.text('周会'));
     await tester.pumpAndSettle();
     expect(find.text('已选 1 条'), findsOneWidget);
-    await tester.tap(find.text('移动到标签…'));
+    await tester.tap(find.text('归类到…'));
     await tester.pumpAndSettle();
-    expect(find.text('移动 1 条事件'), findsOneWidget);
-    final dialog = find.byType(AlertDialog);
-    await tester.tap(find.descendant(of: dialog, matching: find.text('主业')));
-    await tester.pumpAndSettle();
+    expect(find.text('归类 1 条记录'), findsOneWidget);
+    // Picking a row applies it straight away, including the unfiled one.
     await tester.tap(find.byKey(const ValueKey('tag-choice-unclassified')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('移动'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
 
     expect(journal.store.events['work']!.tagId, isNull);
-    expect(find.textContaining('已移动 1 条事件'), findsOneWidget);
+    expect(find.textContaining('已移动 1 条记录'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

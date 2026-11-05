@@ -1225,7 +1225,8 @@ void main() {
 
     expect(journal.store.events['a']!.title, '改简历');
     expect(journal.store.events['a']!.itemId, 'resume');
-    expect(journal.store.events['a']!.tagId, isNull);
+    // Choosing a project adds its tags and keeps the ones set by hand.
+    expect(journal.store.events['a']!.tagIds, containsAll(['life']));
   });
 
   testWidgets('tag tree picker accepts parent and unclassified choices', (

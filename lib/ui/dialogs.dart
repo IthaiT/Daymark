@@ -302,8 +302,12 @@ class _EventEditorState extends State<_EventEditor> {
       await widget.journal.updateEvent(
         widget.event.copyWith(
           title: _title.text.trim(),
-          tagId: _tag,
-          clearTag: _tag == null,
+          // The dialog edits the leading tag; other tags stay attached.
+          tagIds: _tag == widget.event.tagId
+              ? widget.event.tagIds
+              : _tag == null
+              ? const <String>[]
+              : normalizeTagIds([_tag!, ...widget.event.tagIds.skip(1)]),
           start: start,
           end: end,
           notes: _notes.text,

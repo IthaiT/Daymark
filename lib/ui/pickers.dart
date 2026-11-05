@@ -437,13 +437,19 @@ class OwnerChoices extends StatefulWidget {
     super.key,
     required this.store,
     required this.onChoose,
-    this.selected,
+    this.itemId,
+    this.tagIds = const [],
     this.query = '',
+    this.highlighted = -1,
   });
   final Store store;
   final ValueChanged<OwnerRef?> onChoose;
-  final OwnerRef? selected;
+  final String? itemId;
+  final List<String> tagIds;
   final String query;
+
+  /// Index in [OwnerChoicesState.visibleOwners] moved with the arrow keys.
+  final int highlighted;
   @override
   State<OwnerChoices> createState() => OwnerChoicesState();
 }
@@ -451,12 +457,11 @@ class OwnerChoices extends StatefulWidget {
 class OwnerChoicesState extends State<OwnerChoices> {
   final _collapsed = <String>{};
 
-  bool _selected(OwnerRef owner) {
-    final selected = widget.selected;
-    return selected != null &&
-        selected.id == owner.id &&
-        selected.isItem == owner.isItem;
-  }
+  /// A record may carry several tags and one project at once, so every row
+  /// shows whether it is already attached.
+  bool _selected(OwnerRef owner) => owner.isItem
+      ? widget.itemId == owner.id
+      : widget.tagIds.contains(owner.id);
 
   bool _hidden(String id) => widget.store
       .ancestors(id)
@@ -490,19 +495,36 @@ class OwnerChoicesState extends State<OwnerChoices> {
     final tags = owners.where((owner) => !owner.isItem).toList();
     final items = owners.where((owner) => owner.isItem).toList();
     final scheme = Theme.of(context).colorScheme;
+    var row = 0;
+    final noneIndex = noneMatches ? row++ : -1;
+    final tagRows = <String, int>{};
+    for (final tag in tags) {
+      tagRows[tag.id] = row++;
+    }
+    final itemRows = <String, int>{};
+    for (final item in items) {
+      itemRows[item.id] = row++;
+    }
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (noneMatches)
-          TagTreeTile(
-            key: const ValueKey('tag-choice-unclassified'),
-            store: widget.store,
-            selected: widget.selected == null,
-            label: '未归类',
-            onTap: () => widget.onChoose(null),
+          _highlight(
+            noneIndex == widget.highlighted,
+            TagTreeTile(
+              key: const ValueKey('tag-choice-unclassified'),
+              store: widget.store,
+              selected: widget.itemId == null && widget.tagIds.isEmpty,
+              label: '未归类',
+              onTap: () => widget.onChoose(null),
+            ),
           ),
-        for (final owner in tags) _tagTile(owner, query),
+        for (final owner in tags)
+          _highlight(
+            tagRows[owner.id] == widget.highlighted,
+            _tagTile(owner, query),
+          ),
         if (query.isEmpty && items.isNotEmpty) ...[
           const Divider(height: 16),
           Padding(
@@ -510,7 +532,11 @@ class OwnerChoicesState extends State<OwnerChoices> {
             child: Text('项目', style: Theme.of(context).textTheme.labelMedium),
           ),
         ],
-        for (final owner in items) _itemTile(owner, query),
+        for (final owner in items)
+          _highlight(
+            itemRows[owner.id] == widget.highlighted,
+            _itemTile(owner, query),
+          ),
         if (!noneMatches && owners.isEmpty)
           Padding(
             padding: const EdgeInsets.all(12),
@@ -519,6 +545,13 @@ class OwnerChoicesState extends State<OwnerChoices> {
       ],
     );
   }
+
+  Widget _highlight(bool active, Widget child) => active
+      ? Material(
+          color: Theme.of(context).colorScheme.tertiaryContainer,
+          child: child,
+        )
+      : child;
 
   Widget _tagTile(OwnerRef owner, String query) => TagTreeTile(
     key: ValueKey('tag-choice-${owner.id}'),

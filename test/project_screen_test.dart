@@ -12,8 +12,10 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   late Directory directory;
   late JournalController journal;
+  var failWrites = false;
   final day = DateTime.utc(2026, 11, 4);
   setUp(() async {
+    failWrites = false;
     directory = await (await Directory(
       '.test-artifacts',
     ).create()).createTemp('projects-');
@@ -21,6 +23,7 @@ void main() {
     final store = await Store.open(
       directory,
       writer: (file, bytes) async {
+        if (failWrites) throw const FileSystemException('items write denied');
         // Real file IO never completes inside a widget test's fake async zone.
         if (initializing) await AtomicFile.write(file, bytes);
       },
@@ -41,6 +44,36 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('a failed save keeps the dialog and everything typed in it', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const ValueKey('project-add')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('project-name')),
+      '已经填写的项目',
+    );
+    failWrites = true;
+    await tester.tap(find.byKey(const ValueKey('project-save')));
+    await tester.runAsync(() async {});
+    await tester.pumpAndSettle();
+
+    expect(journal.store.items, isEmpty);
+    expect(find.byKey(const ValueKey('project-name')), findsOneWidget);
+    expect(find.text('已经填写的项目'), findsOneWidget);
+
+    failWrites = false;
+    final retry = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('project-save')),
+    );
+    expect(retry.onPressed, isNotNull);
+    await tester.tap(find.byKey(const ValueKey('project-save')));
+    await tester.runAsync(() async {});
+    await tester.pumpAndSettle();
+    expect(journal.store.items.length, 1);
+  });
 
   testWidgets('an empty name keeps the dialog open with an explanation', (
     tester,
