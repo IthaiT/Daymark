@@ -12,6 +12,7 @@ import 'package:daymark/data/ledger_store.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/event_clipboard.dart';
 import 'package:daymark/domain/event_summary.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/domain/journal_view_preferences.dart';
 import 'package:daymark/domain/settings.dart';
@@ -1202,6 +1203,30 @@ void main() {
       );
     },
   );
+
+  testWidgets('name column suggests planned items and applies their owner', (
+    tester,
+  ) async {
+    await journal.store.saveItem(const Item(id: 'job', name: '跳槽'));
+    await journal.store.saveItem(
+      const Item(id: 'resume', name: '改简历', parentId: 'job'),
+    );
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.enterText(input('a', 'title'), '改简');
+    await tester.pumpAndSettle();
+    expect(find.byType(TitleChoices), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('title-choice-item-resume')));
+    await tester.pumpAndSettle();
+
+    expect(journal.store.events['a']!.title, '改简历');
+    expect(journal.store.events['a']!.itemId, 'resume');
+    expect(journal.store.events['a']!.tagId, isNull);
+  });
 
   testWidgets('tag tree picker accepts parent and unclassified choices', (
     tester,

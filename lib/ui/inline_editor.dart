@@ -31,8 +31,11 @@ class EditSession {
   bool pickerOpen;
   bool closed = false;
   String? error;
+
+  /// Highlighted row of the name-column suggestions.
+  int titleIndex = 0;
   Object? get value => switch (column) {
-    EventColumn.title => text.text,
+    EventColumn.title => (title: text.text, owner: owner),
     EventColumn.tag =>
       ownerInputValid
           ? owner
@@ -83,11 +86,35 @@ class _InlineEditorState extends State<InlineEditor> {
 
   void _submit() {
     if (_composing) return;
-    if (widget.session.column == EventColumn.tag && widget.session.pickerOpen) {
+    final session = widget.session;
+    if (session.column == EventColumn.tag && session.pickerOpen) {
       widget.onCompleteTag();
-    } else {
-      widget.onCommit();
+      return;
     }
+    if (session.column == EventColumn.title && session.pickerOpen) {
+      final choices = titleChoices(widget.store, session.text.text);
+      if (choices.isNotEmpty) {
+        _applyTitle(choices[session.titleIndex.clamp(0, choices.length - 1)]);
+        return;
+      }
+    }
+    widget.onCommit();
+  }
+
+  /// Chooses a suggestion: the title and its owner are committed together, so
+  /// one keystroke records both.
+  void _applyTitle(TitleChoice choice) {
+    final session = widget.session;
+    setState(() {
+      session.text.text = choice.title;
+      session.text.selection = TextSelection.collapsed(
+        offset: choice.title.length,
+      );
+      session.owner = choice.owner;
+      session.pickerOpen = false;
+      session.titleIndex = 0;
+    });
+    widget.onCommit();
   }
 
   @override
@@ -110,6 +137,26 @@ class _InlineEditorState extends State<InlineEditor> {
         keyboard.isControlPressed ||
         keyboard.isAltPressed ||
         keyboard.isMetaPressed;
+    final vertical =
+        event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.arrowDown;
+    if (session.column == EventColumn.title &&
+        session.pickerOpen &&
+        !commandModifier &&
+        !keyboard.isShiftPressed &&
+        vertical) {
+      final choices = titleChoices(widget.store, session.text.text);
+      if (choices.isNotEmpty) {
+        final delta = event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 1;
+        setState(() {
+          session.titleIndex = (session.titleIndex + delta).clamp(
+            0,
+            choices.length - 1,
+          );
+        });
+      }
+      return KeyEventResult.handled;
+    }
     if (session.column == EventColumn.tag &&
         !commandModifier &&
         !keyboard.isShiftPressed &&
@@ -228,47 +275,64 @@ class _InlineEditorState extends State<InlineEditor> {
               session.ownerInputValid = options.isNotEmpty;
               if (options.isNotEmpty) session.owner = options.first;
               session.pickerOpen = true;
+            } else if (session.column == EventColumn.title) {
+              session.titleIndex = 0;
+              // Suggestions stay out of the way while an IME composes.
+              session.pickerOpen =
+                  !_composing && titleChoices(widget.store, text).isNotEmpty;
             }
           }),
           onEditingComplete: () {},
           onSubmitted: (_) => _submit(),
           onTap: session.column == EventColumn.title
-              ? null
+              ? () => setState(() {
+                  session.pickerOpen = titleChoices(
+                    widget.store,
+                    session.text.text,
+                  ).isNotEmpty;
+                })
               : () => setState(() => session.pickerOpen = true),
           onTapOutside: (_) {
             if (!session.pickerOpen) widget.onCommit();
           },
         ),
-        builder: (context, close) => session.column == EventColumn.tag
-            ? OwnerChoices(
-                key: _ownerChoices,
-                store: widget.store,
-                selected: session.owner,
-                query: _ownerQuery,
-                onChoose: (value) {
-                  session.owner = value;
-                  session.ownerInputValid = true;
-                  session.text.text = widget.store.ownerLabel(value);
-                  close();
-                  widget.onCompleteTag();
-                },
-              )
-            : DateTimeChoices(
-                value: pickerInitialTime(
-                  session.text.text,
-                  (session.column == EventColumn.start
-                          ? session.event.start
-                          : session.event.end) ??
-                      session.event.start.add(const Duration(hours: 1)),
-                ),
-                day: widget.day,
-                onCancel: close,
-                onChoose: (value) {
-                  session.text.text = '${dateText(value)} ${clockText(value)}';
-                  close();
-                  widget.onCommit();
-                },
-              ),
+        builder: (context, close) => switch (session.column) {
+          EventColumn.title => TitleChoices(
+            store: widget.store,
+            query: session.text.text,
+            selected: session.titleIndex,
+            onChoose: _applyTitle,
+          ),
+          EventColumn.tag => OwnerChoices(
+            key: _ownerChoices,
+            store: widget.store,
+            selected: session.owner,
+            query: _ownerQuery,
+            onChoose: (value) {
+              session.owner = value;
+              session.ownerInputValid = true;
+              session.text.text = widget.store.ownerLabel(value);
+              close();
+              widget.onCompleteTag();
+            },
+          ),
+          _ => DateTimeChoices(
+            value: pickerInitialTime(
+              session.text.text,
+              (session.column == EventColumn.start
+                      ? session.event.start
+                      : session.event.end) ??
+                  session.event.start.add(const Duration(hours: 1)),
+            ),
+            day: widget.day,
+            onCancel: close,
+            onChoose: (value) {
+              session.text.text = '${dateText(value)} ${clockText(value)}';
+              close();
+              widget.onCommit();
+            },
+          ),
+        },
       ),
     );
   }

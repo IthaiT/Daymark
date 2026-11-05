@@ -386,7 +386,12 @@ class JournalController extends ChangeNotifier {
       return id;
     }
     var changed = switch (column) {
-      EventColumn.title => current.copyWith(title: (value! as String).trim()),
+      EventColumn.title => switch (value) {
+        // A name suggestion carries the owner chosen with it.
+        (title: String title, owner: OwnerRef? owner) =>
+          current.copyWith(title: title.trim()).withOwner(owner),
+        _ => current.copyWith(title: (value! as String).trim()),
+      },
       EventColumn.tag => current.withOwner(value as OwnerRef?),
       EventColumn.start => current.copyWith(start: value! as DateTime),
       EventColumn.end => current.copyWith(end: value! as DateTime),

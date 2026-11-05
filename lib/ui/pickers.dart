@@ -315,6 +315,121 @@ List<OwnerRef?> matchingOwners(Store store, String query) {
   ];
 }
 
+/// A title offered while typing in the name column, together with the owner
+/// that will be attached when it is chosen.
+class TitleChoice {
+  const TitleChoice(this.title, this.owner, this.subtitle);
+  final String title;
+  final OwnerRef owner;
+
+  /// Where the owner sits: the parent path for an item, the full path for a tag.
+  final String subtitle;
+}
+
+String _titleSubtitle(Store store, OwnerRef owner) {
+  if (!owner.isItem) {
+    return store.ancestors(owner.id).map((tag) => tag.name).join(' / ');
+  }
+  final parents = itemAncestors(store.items, owner.id);
+  return parents.isEmpty ? '项目' : parents.map((item) => item.name).join(' / ');
+}
+
+/// Candidates for the name column.
+///
+/// Only closed vocabularies take part — project items and tags — so a freely
+/// typed phrase never turns yesterday's wording into a suggestion. Exact
+/// matches rank first, then prefixes, then anything containing the query.
+List<TitleChoice> titleChoices(Store store, String query, {int limit = 8}) {
+  final needle = caseFold(query.trim());
+  if (needle.isEmpty) return const [];
+  final exact = <TitleChoice>[];
+  final prefix = <TitleChoice>[];
+  final contains = <TitleChoice>[];
+  final seen = <String>{};
+
+  void add(String title, OwnerRef owner) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) return;
+    final folded = caseFold(trimmed);
+    final List<TitleChoice> bucket;
+    if (folded == needle) {
+      bucket = exact;
+    } else if (folded.startsWith(needle)) {
+      bucket = prefix;
+    } else if (folded.contains(needle)) {
+      bucket = contains;
+    } else {
+      return;
+    }
+    if (!seen.add('${owner.isItem ? 'item' : 'tag'}:${owner.id}')) return;
+    bucket.add(TitleChoice(trimmed, owner, _titleSubtitle(store, owner)));
+  }
+
+  for (final (item, _) in orderedItems(store.items)) {
+    add(item.name, (id: item.id, isItem: true));
+  }
+  for (final tag in store.orderedTags()) {
+    add(tag.name, (id: tag.id, isItem: false));
+  }
+  return [...exact, ...prefix, ...contains].take(limit).toList();
+}
+
+/// Name-column suggestions: choosing one fills both the title and its owner.
+class TitleChoices extends StatelessWidget {
+  const TitleChoices({
+    super.key,
+    required this.store,
+    required this.query,
+    required this.selected,
+    required this.onChoose,
+  });
+  final Store store;
+  final String query;
+  final int selected;
+  final ValueChanged<TitleChoice> onChoose;
+
+  @override
+  Widget build(BuildContext context) {
+    final choices = titleChoices(store, query);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var index = 0; index < choices.length; index++)
+              ListTile(
+                key: ValueKey(
+                  'title-choice-${choices[index].owner.isItem ? 'item' : 'tag'}-${choices[index].owner.id}',
+                ),
+                dense: true,
+                selected: index == selected,
+                leading: Icon(
+                  choices[index].owner.isItem
+                      ? Icons.workspaces_outline
+                      : Icons.label_outline,
+                  size: 18,
+                ),
+                title: Text(
+                  choices[index].title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  choices[index].subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => onChoose(choices[index]),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// One list containing tags and project items, so a record's owner is chosen
 /// in a single search instead of two separate pickers.
 class OwnerChoices extends StatefulWidget {
