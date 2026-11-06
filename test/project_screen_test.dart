@@ -45,81 +45,171 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('a failed save keeps the dialog and everything typed in it', (
+  Finder add() => find.byKey(const ValueKey('project-add'));
+  Finder addChild() => find.byKey(const ValueKey('project-add-child'));
+  Finder nameField() => find.byKey(const ValueKey('project-name'));
+  Finder descriptionField() =>
+      find.byKey(const ValueKey('project-description'));
+  Finder resultField() => find.byKey(const ValueKey('project-result'));
+
+  /// Lets the debounced write and the controller's queue finish.
+  Future<void> settleWrite(WidgetTester tester) async {
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.runAsync(() async {});
+    await tester.pumpAndSettle();
+  }
+
+  /// Typing a name and pressing Enter creates the node, no dialog involved.
+  Future<void> addRoot(WidgetTester tester, String name) async {
+    await tester.enterText(add(), '$name\n');
+    await settleWrite(tester);
+  }
+
+  Future<void> addChildNamed(WidgetTester tester, String name) async {
+    await tester.enterText(addChild(), '$name\n');
+    await settleWrite(tester);
+  }
+
+  testWidgets('typing a name creates a project without a dialog', (
     tester,
   ) async {
     await pump(tester);
-    await tester.tap(find.byKey(const ValueKey('project-add')));
+    expect(find.textContaining('还没有项目'), findsOneWidget);
+
+    await addRoot(tester, '跳槽');
+    expect(journal.store.items.length, 1);
+    final item = journal.store.items.values.single;
+    expect(item.name, '跳槽');
+    expect(find.text('跳槽'), findsOneWidget);
+
+    // The new node opens straight away, ready for its description.
+    await tester.tap(find.byKey(ValueKey('project-${item.id}')));
     await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('project-name')),
-      '已经填写的项目',
-    );
-    failWrites = true;
-    await tester.tap(find.byKey(const ValueKey('project-save')));
-    await tester.runAsync(() async {});
+    expect(nameField(), findsOneWidget);
+  });
+
+  testWidgets('children paste in as several nodes at any depth', (
+    tester,
+  ) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final root = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${root.id}')));
     await tester.pumpAndSettle();
 
-    expect(journal.store.items, isEmpty);
-    expect(find.byKey(const ValueKey('project-name')), findsOneWidget);
-    expect(find.text('已经填写的项目'), findsOneWidget);
+    await tester.enterText(addChild(), '改简历\n调研 A 公司\n复习算法');
+    await settleWrite(tester);
+    expect(journal.store.items.length, 4);
+
+    final child = journal.store.items.values.firstWhere(
+      (item) => item.name == '改简历',
+    );
+    // Drill down and add a grandchild, then one more level: no depth cap.
+    await tester.tap(find.byKey(ValueKey('project-child-${child.id}')));
+    await tester.pumpAndSettle();
+    await addChildNamed(tester, '改前两段');
+    final grandchild = journal.store.items.values.firstWhere(
+      (item) => item.name == '改前两段',
+    );
+    await tester.tap(find.byKey(ValueKey('project-child-${grandchild.id}')));
+    await tester.pumpAndSettle();
+    await addChildNamed(tester, '量化成果');
+
+    final deepest = journal.store.items.values.firstWhere(
+      (item) => item.name == '量化成果',
+    );
+    expect(itemAncestors(journal.store.items, deepest.id).length, 3);
+  });
+
+  testWidgets('description and result save themselves', (tester) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final item = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${item.id}')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(descriptionField(), '三月前拿到 offer');
+    await tester.enterText(resultField(), '拿到了两个');
+    await settleWrite(tester);
+
+    expect(journal.store.items[item.id]!.objective, '三月前拿到 offer');
+    expect(journal.store.items[item.id]!.outcome, '拿到了两个');
+  });
+
+  testWidgets('a failed write keeps what is typed on screen', (tester) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final item = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${item.id}')));
+    await tester.pumpAndSettle();
+
+    failWrites = true;
+    await tester.enterText(descriptionField(), '还没写进去的描述');
+    await settleWrite(tester);
+
+    expect(find.byKey(const ValueKey('project-error-toast')), findsOneWidget);
+    expect(find.text('还没写进去的描述'), findsOneWidget);
+    expect(journal.store.items[item.id]!.objective, isEmpty);
 
     failWrites = false;
-    final retry = tester.widget<FilledButton>(
-      find.byKey(const ValueKey('project-save')),
+  });
+
+  testWidgets('tags apply to a node and are inherited by its children', (
+    tester,
+  ) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final root = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${root.id}')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('project-tag-work')));
+    await settleWrite(tester);
+    expect(journal.store.items[root.id]!.tagIds, contains('work'));
+
+    await addChildNamed(tester, '改简历');
+    final child = journal.store.items.values.firstWhere(
+      (item) => item.name == '改简历',
     );
-    expect(retry.onPressed, isNotNull);
-    await tester.tap(find.byKey(const ValueKey('project-save')));
-    await tester.runAsync(() async {});
+    await tester.tap(find.byKey(ValueKey('project-child-${child.id}')));
     await tester.pumpAndSettle();
-    expect(journal.store.items.length, 1);
+    expect(find.text('主业（继承）'), findsOneWidget);
+
+    // Dropping the inherited tag is an explicit choice on the child.
+    await tester.tap(find.byKey(const ValueKey('project-tag-work')));
+    await settleWrite(tester);
+    expect(journal.store.items[child.id]!.excludedTagIds, contains('work'));
+    expect(find.text('主业（继承）'), findsNothing);
   });
 
-  testWidgets('an empty name keeps the dialog open with an explanation', (
-    tester,
-  ) async {
+  testWidgets('folding a branch hides its descendants', (tester) async {
     await pump(tester);
-    await tester.tap(find.byKey(const ValueKey('project-add')));
+    await addRoot(tester, '跳槽');
+    final root = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${root.id}')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
+    await addChildNamed(tester, '改简历');
+    final child = journal.store.items.values.firstWhere(
+      (item) => item.name == '改简历',
+    );
+    expect(find.byKey(ValueKey('project-${child.id}')), findsOneWidget);
 
-    expect(journal.store.items, isEmpty);
-    expect(find.text('事项 ID 和名称不能为空。'), findsOneWidget);
-    expect(find.byKey(const ValueKey('project-name')), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('project-toggle-${root.id}')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('project-${child.id}')), findsNothing);
+
+    await tester.tap(find.byKey(ValueKey('project-toggle-${root.id}')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(ValueKey('project-${child.id}')), findsOneWidget);
   });
 
-  testWidgets('lists planned items and shows the selected project', (
-    tester,
-  ) async {
-    await tester.runAsync(() async {
-      await journal.saveItem(
-        const Item(id: 'job', name: '跳槽', objective: '三月前拿到 offer'),
-      );
-      await journal.saveItem(
-        const Item(id: 'resume', name: '改简历', parentId: 'job'),
-      );
-    });
-    await pump(tester);
-
-    expect(find.text('改简历'), findsOneWidget);
-    expect(find.byKey(const ValueKey('project-child-resume')), findsNothing);
-
-    await tester.tap(find.byKey(const ValueKey('project-job')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('三月前拿到 offer'), findsOneWidget);
-    expect(find.text('还没有记录时间'), findsOneWidget);
-    expect(find.byKey(const ValueKey('project-child-resume')), findsOneWidget);
-  });
-
-  testWidgets('rolls recorded time from a child into its project', (
+  testWidgets('a parent lists its children with their rolled up time', (
     tester,
   ) async {
     await tester.runAsync(() async {
       await journal.saveItem(const Item(id: 'job', name: '跳槽'));
       await journal.saveItem(
-        const Item(id: 'resume', name: '改简历', parentId: 'job'),
+        const Item(id: 'resume', name: '改简历', parentId: 'job', objective: '两页'),
       );
       await journal.store.saveEvent(
         Event(
@@ -134,25 +224,14 @@ void main() {
       );
     });
     await pump(tester);
-
-    expect(find.text('1 小时 00 分'), findsWidgets);
     await tester.tap(find.byKey(const ValueKey('project-job')));
     await tester.pumpAndSettle();
 
-    expect(find.text('累计 1 小时 00 分 · 1 条记录'), findsOneWidget);
-  });
+    expect(find.text('1 小时 00 分'), findsWidgets);
+    expect(find.textContaining('两页'), findsOneWidget);
 
-  testWidgets('a deleted project disappears from the tree', (tester) async {
-    await tester.runAsync(
-      () => journal.saveItem(const Item(id: 'job', name: '跳槽')),
-    );
-    await pump(tester);
-    expect(find.byKey(const ValueKey('project-job')), findsOneWidget);
-
-    await tester.runAsync(() => journal.deleteItem('job'));
+    await tester.tap(find.byKey(const ValueKey('project-child-resume')));
     await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('project-job')), findsNothing);
-    expect(find.text('还没有项目'), findsOneWidget);
+    expect(tester.widget<TextField>(nameField()).controller!.text, '改简历');
   });
 }

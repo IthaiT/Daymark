@@ -46,25 +46,22 @@ void main() {
     );
   });
 
-  test('a project tree stops at three levels', () {
-    validateItems(
-      tree([
-        const Item(id: 'a', name: '项目'),
-        const Item(id: 'b', name: '事项', parentId: 'a'),
-        const Item(id: 'c', name: '细节', parentId: 'b'),
-      ]),
-    );
-    expect(
-      () => validateItems(
-        tree([
-          const Item(id: 'a', name: '项目'),
-          const Item(id: 'b', name: '事项', parentId: 'a'),
-          const Item(id: 'c', name: '细节', parentId: 'b'),
-          const Item(id: 'd', name: '更深', parentId: 'c'),
-        ]),
-      ),
-      throwsFormatException,
-    );
+  test('a project tree nests as deep as you need', () {
+    final items = tree([
+      const Item(id: 'a', name: '项目'),
+      const Item(id: 'b', name: '事项', parentId: 'a'),
+      const Item(id: 'c', name: '细节', parentId: 'b'),
+      const Item(id: 'd', name: '更深', parentId: 'c'),
+      const Item(id: 'e', name: '还要更深', parentId: 'd'),
+    ]);
+    validateItems(items);
+    expect(itemAncestors(items, 'e').map((item) => item.id), [
+      'a',
+      'b',
+      'c',
+      'd',
+    ]);
+    expect(orderedItems(items).length, 5);
   });
 
   test('finishing requires a result or an end date, dropping a reason', () {

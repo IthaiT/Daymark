@@ -3,14 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../application/journal_controller.dart';
+import '../data/store.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
-import 'link_launcher.dart';
 import 'workspace_style.dart';
 
-/// Project workspace: the tree of projects and planned items, separate from
-/// the time records that point at it.
+/// Project workspace: a tree of projects and planned items, edited in place
+/// with three fields — name, description and result.
 class ProjectScreen extends StatefulWidget {
   const ProjectScreen({super.key, required this.journal, this.focusNode});
   final JournalController journal;
@@ -20,17 +20,31 @@ class ProjectScreen extends StatefulWidget {
 }
 
 class ProjectScreenState extends State<ProjectScreen> {
+  static const _saveDelay = Duration(milliseconds: 500);
+
   String? _selected;
   bool _saving = false;
   late final _focus = widget.focusNode ?? FocusNode();
-  final _quickAdd = TextEditingController();
-  final _quickFocus = FocusNode();
+  final _rootAdd = TextEditingController();
+  final _childAdd = TextEditingController();
+  final _name = TextEditingController();
+  final _description = TextEditingController();
+  final _result = TextEditingController();
+  final _collapsed = <String>{};
+  String? _boundId;
+  Timer? _pendingSave;
+
+  Store get _store => widget.journal.store;
 
   @override
   void dispose() {
+    _pendingSave?.cancel();
     if (widget.focusNode == null) _focus.dispose();
-    _quickAdd.dispose();
-    _quickFocus.dispose();
+    _rootAdd.dispose();
+    _childAdd.dispose();
+    _name.dispose();
+    _description.dispose();
+    _result.dispose();
     super.dispose();
   }
 
@@ -57,37 +71,60 @@ class ProjectScreenState extends State<ProjectScreen> {
     }
   }
 
-  /// The dialog saves before closing, so a failed write keeps the draft and
-  /// the error on screen instead of discarding what was typed.
-  Future<void> _edit([Item? item, String? parentId]) async {
-    final saved = await showDialog<Item>(
-      context: context,
-      builder: (context) => _ItemDialog(
-        journal: widget.journal,
-        item: item,
-        parentId: item?.parentId ?? parentId,
-        onSave: (value) => widget.journal.saveItem(value),
-      ),
+  /// Binds the three editors to one node. Switching nodes first writes whatever
+  /// was typed, so nothing is lost when clicking around the tree.
+  Future<void> _select(String? id) async {
+    if (id == _selected) return;
+    await _flush();
+    if (!mounted) return;
+    setState(() => _selected = id);
+    _bind(id == null ? null : _store.items[id]);
+  }
+
+  void _bind(Item? item) {
+    _boundId = item?.id;
+    _name.text = item?.name ?? '';
+    _description.text = item?.objective ?? '';
+    _result.text = item?.outcome ?? '';
+  }
+
+  void _scheduleSave() {
+    _pendingSave?.cancel();
+    _pendingSave = Timer(_saveDelay, () => unawaited(_flush()));
+  }
+
+  Future<void> _flush() async {
+    _pendingSave?.cancel();
+    _pendingSave = null;
+    final id = _boundId;
+    if (id == null) return;
+    final item = _store.items[id];
+    if (item == null) return;
+    final name = _name.text.trim();
+    final next = item.copyWith(
+      // An empty name would fail validation; keep the last good one.
+      name: name.isEmpty ? item.name : name,
+      objective: _description.text,
+      outcome: _result.text,
     );
-    if (saved == null || !mounted) return;
-    setState(() => _selected = saved.id);
+    if (next == item) return;
+    await _run(() => widget.journal.saveItem(next));
   }
 
   /// Accepts several lines at once, so a brainstorm can be pasted in one go.
-  Future<void> _addChildren(Item parent, String text) async {
+  Future<void> _addChildren(String? parentId, String text) async {
     final names = [
       for (final line in text.split('\n'))
         if (line.trim().isNotEmpty) line.trim(),
     ];
     if (names.isEmpty) return;
+    await _flush();
     await _run(() async {
       for (final name in names) {
-        await widget.journal.createItem(name, parent.id);
+        await widget.journal.createItem(name, parentId);
       }
     });
   }
-
-  Future<void> _createChild(Item parent) => _edit(null, parent.id);
 
   Future<void> _delete(Item item) async {
     final confirmed = await showDialog<bool>(
@@ -108,90 +145,114 @@ class ProjectScreenState extends State<ProjectScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    await _flush();
     await _run(() async {
       await widget.journal.deleteItem(item.id);
-      if (mounted) setState(() => _selected = item.parentId);
+      if (!mounted) return;
+      _bind(null);
+      setState(() => _selected = item.parentId);
+      _bind(_selected == null ? null : _store.items[_selected]);
     });
   }
 
-  Future<void> _menu(Offset position, Item item) async {
-    final choice = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        position.dx,
-        position.dy,
-        position.dx,
-        position.dy,
-      ),
-      items: const [
-        PopupMenuItem(value: 'edit', child: Text('修改项目')),
-        PopupMenuItem(value: 'child', child: Text('新建子事项')),
-        PopupMenuItem(value: 'delete', child: Text('删除项目')),
-      ],
-    );
-    if (!mounted) return;
-    switch (choice) {
-      case 'edit':
-        await _edit(item);
-      case 'child':
-        await _createChild(item);
-      case 'delete':
-        await _delete(item);
-    }
+  /// Applies one tag to the selected node: own tags are removed, inherited ones
+  /// are dropped for this branch, everything else is added.
+  Future<void> _toggleTag(Item item, String tagId) async {
+    await _flush();
+    final own = item.tagIds.contains(tagId);
+    final inherited =
+        !own && _store.effectiveItemTagIds(item.id).contains(tagId);
+    final excluded = item.excludedTagIds.contains(tagId);
+    final next = own
+        ? item.copyWith(
+            tagIds: [
+              for (final id in item.tagIds)
+                if (id != tagId) id,
+            ],
+          )
+        : inherited
+        ? item.copyWith(excludedTagIds: [...item.excludedTagIds, tagId])
+        : excluded
+        ? item.copyWith(
+            excludedTagIds: [
+              for (final id in item.excludedTagIds)
+                if (id != tagId) id,
+            ],
+            tagIds: [...item.tagIds, tagId],
+          )
+        : item.copyWith(tagIds: [...item.tagIds, tagId]);
+    await _run(() => widget.journal.saveItem(next));
   }
 
   @override
-  Widget build(BuildContext context) => Focus(
-    focusNode: _focus,
-    child: AnimatedBuilder(
-      animation: widget.journal,
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.journal,
       builder: (context, _) {
-        final items = widget.journal.store.items;
+        final items = _store.items;
+        final selected = _selected == null ? null : items[_selected];
+        if (_selected != null && selected == null) {
+          _selected = null;
+          _bind(null);
+        }
+        final durations = itemDurations(
+          items,
+          _store.events.values,
+          splitOverlap: widget.journal.settings.splitOverlap,
+        );
         return WorkspaceLayout(
-          sidebar: _sidebar(items),
-          content: _detail(items),
+          sidebar: _sidebar(items, durations),
+          content: _detail(items, selected, durations),
         );
       },
-    ),
-  );
-
-  Widget _sidebar(Map<String, Item> items) {
-    final ordered = orderedItems(items);
-    final durations = itemDurations(
-      items,
-      widget.journal.store.events.values,
-      splitOverlap: widget.journal.settings.splitOverlap,
     );
+  }
+
+  Widget _sidebar(Map<String, Item> items, Map<String, Duration> durations) {
+    final rows = _visibleRows(items);
     return WorkspacePanel(
-      padding: WorkspaceStyle.panelPadding,
+      padding: const EdgeInsets.all(12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           WorkspaceSectionHeader(
             title: '项目',
             actions: [
-              IconButton(
-                key: const ValueKey('project-add'),
-                tooltip: '新建项目',
-                onPressed: _saving ? null : () => unawaited(_edit()),
-                icon: const Icon(Icons.add, size: 20),
+              Text(
+                '${items.length}',
+                style: Theme.of(context).textTheme.labelSmall,
               ),
             ],
           ),
+          _addField(
+            key: const ValueKey('project-add'),
+            controller: _rootAdd,
+            hint: '新增项目，回车创建',
+            parentId: null,
+          ),
           const SizedBox(height: 8),
           Expanded(
-            child: ordered.isEmpty
-                ? Center(
+            child: rows.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
                     child: Text(
-                      '还没有项目',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      '还没有项目。在上面输入名字，回车就建好了。',
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   )
-                : ListView(
-                    children: [
-                      for (final (item, depth) in ordered)
-                        _tile(item, depth, durations[item.id] ?? Duration.zero),
-                    ],
+                : ListView.builder(
+                    itemCount: rows.length,
+                    itemBuilder: (context, index) {
+                      final (item, depth) = rows[index];
+                      return _tile(
+                        item,
+                        depth,
+                        durations[item.id] ?? Duration.zero,
+                        hasChildren: items.values.any(
+                          (child) => child.parentId == item.id,
+                        ),
+                      );
+                    },
                   ),
           ),
         ],
@@ -199,655 +260,343 @@ class ProjectScreenState extends State<ProjectScreen> {
     );
   }
 
-  Widget _tile(Item item, int depth, Duration duration) {
-    final selected = item.id == _selected;
+  /// Rows the tree shows, honouring which branches are folded.
+  List<(Item, int)> _visibleRows(Map<String, Item> items) {
+    final children = <String?, List<Item>>{};
+    for (final item in items.values) {
+      (children[item.parentId] ??= []).add(item);
+    }
+    for (final siblings in children.values) {
+      siblings.sort(compareItemOrder);
+    }
+    final rows = <(Item, int)>[];
+    void visit(String? parentId, int depth) {
+      for (final item in children[parentId] ?? const <Item>[]) {
+        rows.add((item, depth));
+        if (!_collapsed.contains(item.id)) visit(item.id, depth + 1);
+      }
+    }
+
+    visit(null, 0);
+    return rows;
+  }
+
+  Widget _tile(
+    Item item,
+    int depth,
+    Duration duration, {
+    required bool hasChildren,
+  }) {
     final scheme = Theme.of(context).colorScheme;
-    final icon = switch (item.status) {
-      ItemStatus.active => Icons.radio_button_unchecked,
-      ItemStatus.paused => Icons.pause_circle_outline,
-      ItemStatus.done => Icons.check_circle_outline,
-      ItemStatus.dropped => Icons.remove_circle_outline,
-    };
-    return Material(
-      color: selected ? scheme.secondaryContainer : Colors.transparent,
+    final selected = item.id == _selected;
+    return InkWell(
+      key: ValueKey('project-${item.id}'),
       borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: ValueKey('project-${item.id}'),
-        onTap: () => setState(() => _selected = item.id),
-        onSecondaryTapUp: (details) =>
-            unawaited(_menu(details.globalPosition, item)),
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(8 + depth * 16, 8, 8, 8),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: item.status.isOpen ? scheme.primary : scheme.outline,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
+      onTap: () => unawaited(_select(item.id)),
+      child: Container(
+        padding: EdgeInsets.only(left: 4 + depth * 14.0, right: 6),
+        decoration: BoxDecoration(
+          color: selected ? scheme.secondaryContainer : null,
+          borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 22,
+              child: hasChildren
+                  ? IconButton(
+                      key: ValueKey('project-toggle-${item.id}'),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 22,
+                        height: 22,
+                      ),
+                      iconSize: 16,
+                      tooltip: _collapsed.contains(item.id) ? '展开' : '收起',
+                      onPressed: () => setState(() {
+                        if (!_collapsed.remove(item.id)) {
+                          _collapsed.add(item.id);
+                        }
+                      }),
+                      icon: Icon(
+                        _collapsed.contains(item.id)
+                            ? Icons.chevron_right
+                            : Icons.expand_more,
+                      ),
+                    )
+                  : null,
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 9),
                 child: Text(
                   item.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: selected ? FontWeight.w600 : null,
                   ),
                 ),
               ),
-              if (duration > Duration.zero)
-                Text(
-                  durationText(duration),
-                  style: Theme.of(context).textTheme.labelSmall,
+            ),
+            if (duration > Duration.zero)
+              Text(
+                durationText(duration),
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
                 ),
-            ],
-          ),
+              ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _detail(Map<String, Item> items) {
-    final item = _selected == null ? null : items[_selected];
+  Widget _detail(
+    Map<String, Item> items,
+    Item? item,
+    Map<String, Duration> durations,
+  ) {
     if (item == null) {
       return WorkspacePanel(
-        padding: WorkspaceStyle.panelPadding,
+        padding: const EdgeInsets.all(24),
         child: Center(
           child: Text(
-            '选择左侧的项目查看详情',
-            style: Theme.of(context).textTheme.bodyMedium,
+            '选择左侧的项目来写描述和结果，\n或者直接在上面输入名字新建一个。',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       );
     }
-    final events =
-        widget.journal.store.events.values
-            .where(
-              (event) =>
-                  event.itemId != null &&
-                  itemOwnedBy(items, event.itemId!, item.id),
-            )
-            .toList()
-          ..sort((a, b) => b.start.compareTo(a.start));
-    final durations = itemDurations(
-      items,
-      widget.journal.store.events.values,
-      splitOverlap: widget.journal.settings.splitOverlap,
-    );
-    final children = orderedItems(
-      items,
-    ).where((entry) => entry.$1.parentId == item.id).toList();
-    final scheme = Theme.of(context).colorScheme;
+    final children = [
+      for (final child in items.values)
+        if (child.parentId == item.id) child,
+    ]..sort(compareItemOrder);
+    final total = durations[item.id] ?? Duration.zero;
     return WorkspacePanel(
-      padding: WorkspaceStyle.panelPadding,
-      child: ListView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.name,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      durations[item.id] == null ||
-                              durations[item.id] == Duration.zero
-                          ? '还没有记录时间'
-                          : '累计 ${durationText(durations[item.id]!)} · ${events.length} 条记录',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+                child: TextField(
+                  key: const ValueKey('project-name'),
+                  controller: _name,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    hintText: '名字',
+                  ),
+                  onChanged: (_) => _scheduleSave(),
+                  onTapOutside: (_) => unawaited(_flush()),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
+              const SizedBox(width: 12),
+              Text(
+                total == Duration.zero ? '还没有记录' : durationText(total),
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-                decoration: BoxDecoration(
-                  color: scheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  item.status.label,
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                tooltip: '修改项目',
-                onPressed: _saving ? null : () => unawaited(_edit(item)),
-                icon: const Icon(Icons.edit_outlined, size: 20),
               ),
               IconButton(
-                tooltip: '删除项目',
+                key: const ValueKey('project-delete'),
+                tooltip: '删除',
                 onPressed: _saving ? null : () => unawaited(_delete(item)),
                 icon: const Icon(Icons.delete_outline, size: 20),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          _text('目标', item.objective, '写下完成时要达到什么'),
-          _text('结果', item.outcome, '完成后记录结果，放弃时记录原因'),
-          if (widget.journal.store.effectiveItemTagIds(item.id).isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 10),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
+          const SizedBox(height: 4),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final id in widget.journal.store.effectiveItemTagIds(
-                    item.id,
-                  ))
-                    Chip(
-                      key: ValueKey('project-detail-tag-$id'),
-                      label: Text(widget.journal.store.tagName(id)),
-                      visualDensity: VisualDensity.compact,
-                    ),
+                  _field(
+                    key: const ValueKey('project-description'),
+                    controller: _description,
+                    label: '描述',
+                    hint: '这件事是做什么的，为什么做',
+                    minLines: 3,
+                  ),
+                  const SizedBox(height: 14),
+                  _field(
+                    key: const ValueKey('project-result'),
+                    controller: _result,
+                    label: '结果',
+                    hint: '做完之后得到了什么，放弃了也写在这里',
+                    minLines: 3,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('标签', style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 6),
+                  _tagBar(item),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '子事项 ${children.length}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ),
+                      Text(
+                        '点一行进入它自己的页面',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  for (final child in children)
+                    _childRow(child, durations[child.id] ?? Duration.zero),
+                  _addField(
+                    key: const ValueKey('project-add-child'),
+                    controller: _childAdd,
+                    hint: '新增子事项，回车创建；可粘贴多行',
+                    parentId: item.id,
+                  ),
                 ],
               ),
             ),
-          if (item.links.isNotEmpty) ...[
-            Text('成果', style: Theme.of(context).textTheme.labelMedium),
-            const SizedBox(height: 2),
-            for (final link in item.links)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  key: ValueKey('project-link-$link'),
-                  onPressed: () => unawaited(openExternalLink(link)),
-                  icon: const Icon(Icons.open_in_new, size: 16),
-                  label: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 420),
-                    child: Text(
-                      link,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '子事项',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              TextButton.icon(
-                onPressed: _saving ? null : () => unawaited(_createChild(item)),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('添加'),
-              ),
-            ],
           ),
-          if (children.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                '可以把这件事拆成更小的步骤，拆出来的条目不需要立刻有记录。',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            )
-          else
-            for (final (child, _) in children)
-              ListTile(
-                key: ValueKey('project-child-${child.id}'),
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(switch (child.status) {
-                  ItemStatus.active => Icons.radio_button_unchecked,
-                  ItemStatus.paused => Icons.pause_circle_outline,
-                  ItemStatus.done => Icons.check_circle_outline,
-                  ItemStatus.dropped => Icons.remove_circle_outline,
-                }, size: 16),
-                title: Text(child.name),
-                trailing: Text(
-                  durations[child.id] == null ||
-                          durations[child.id] == Duration.zero
-                      ? '—'
-                      : durationText(durations[child.id]!),
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-                onTap: () => setState(() => _selected = child.id),
-              ),
-          TextField(
-            key: const ValueKey('project-quick-add'),
-            controller: _quickAdd,
-            focusNode: _quickFocus,
-            decoration: const InputDecoration(
-              isDense: true,
-              hintText: '输入事项名，回车连续添加；可直接粘贴多行',
-            ),
-            onChanged: (value) {
-              if (!value.contains('\n')) return;
-              _quickAdd.clear();
-              unawaited(_addChildren(item, value));
-            },
-            onSubmitted: (value) {
-              if (value.trim().isEmpty) return;
-              _quickAdd.clear();
-              unawaited(_addChildren(item, value));
-              _quickFocus.requestFocus();
-            },
-          ),
-          if (item.log.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text('过程', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 4),
-            for (final entry in item.log.reversed.take(6))
-              Text(
-                '${dateText(entry.at)} ${clockText(entry.at)} · ${entry.text}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-          ],
-          const SizedBox(height: 16),
-          Text('记录', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 8),
-          if (events.isEmpty)
-            Text(
-              '在时间记录里输入事项名，就会自动归到这里。',
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else
-            for (final event in events.take(12))
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 132,
-                      child: Text(
-                        '${dateText(event.start)} ${clockText(event.start)}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        event.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Text(
-                      event.end == null
-                          ? '进行中'
-                          : durationText(event.end!.difference(event.start)),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                  ],
-                ),
-              ),
         ],
       ),
     );
   }
 
-  Widget _text(String label, String value, [String? hint]) => Padding(
-    padding: const EdgeInsets.only(bottom: 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelMedium),
-        const SizedBox(height: 2),
-        Text(
-          value.trim().isEmpty ? (hint ?? '未填写') : value,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-            color: value.trim().isEmpty
-                ? Theme.of(context).colorScheme.outline
-                : null,
-          ),
-        ),
-      ],
+  /// Enter turns the line into a node; pasting a block creates one per line.
+  Widget _addField({
+    required Key key,
+    required TextEditingController controller,
+    required String hint,
+    required String? parentId,
+  }) => TextField(
+    key: key,
+    controller: controller,
+    minLines: 1,
+    maxLines: null,
+    keyboardType: TextInputType.multiline,
+    decoration: InputDecoration(
+      isDense: true,
+      hintText: hint,
+      prefixIcon: const Icon(Icons.add, size: 18),
     ),
+    onChanged: (value) {
+      if (!value.contains('\n')) return;
+      controller.clear();
+      unawaited(_addChildren(parentId, value));
+    },
   );
-}
 
-class _ItemDialog extends StatefulWidget {
-  const _ItemDialog({
-    required this.journal,
-    required this.onSave,
-    this.item,
-    this.parentId,
-  });
-  final JournalController journal;
-  final Future<Item> Function(Item item) onSave;
-  final Item? item;
-  final String? parentId;
-  @override
-  State<_ItemDialog> createState() => _ItemDialogState();
-}
-
-class _ItemDialogState extends State<_ItemDialog> {
-  late final _name = TextEditingController(text: widget.item?.name ?? '');
-  late final _objective = TextEditingController(
-    text: widget.item?.objective ?? '',
+  Widget _field({
+    required Key key,
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    int minLines = 2,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 4),
+      TextField(
+        key: key,
+        controller: controller,
+        minLines: minLines,
+        maxLines: null,
+        keyboardType: TextInputType.multiline,
+        decoration: InputDecoration(hintText: hint, isDense: true),
+        onChanged: (_) => _scheduleSave(),
+        onTapOutside: (_) => unawaited(_flush()),
+      ),
+    ],
   );
-  late final _outcome = TextEditingController(text: widget.item?.outcome ?? '');
-  late final _started = TextEditingController(
-    text: widget.item?.startedOn == null
-        ? ''
-        : dateText(widget.item!.startedOn!),
-  );
-  late final _ended = TextEditingController(
-    text: widget.item?.endedOn == null ? '' : dateText(widget.item!.endedOn!),
-  );
-  late final _links = TextEditingController(
-    text: (widget.item?.links ?? const []).join('\n'),
-  );
-  late ItemStatus _status = widget.item?.status ?? ItemStatus.active;
-  late String? _parentId = widget.parentId;
-  late List<String> _tagIds = [...?widget.item?.tagIds];
-  late List<String> _excludedTagIds = [...?widget.item?.excludedTagIds];
-  String? _error;
-  bool _saving = false;
 
-  @override
-  void dispose() {
-    _name.dispose();
-    _objective.dispose();
-    _outcome.dispose();
-    _started.dispose();
-    _ended.dispose();
-    _links.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_saving) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      final started = _started.text.trim().isEmpty
-          ? null
-          : parseDate(_started.text);
-      final ended = _ended.text.trim().isEmpty ? null : parseDate(_ended.text);
-      final item = Item(
-        id: widget.item?.id ?? widget.journal.newItemId(),
-        name: _name.text.trim(),
-        parentId: _parentId,
-        status: _status,
-        startedOn: started,
-        endedOn: ended,
-        objective: _objective.text.trim(),
-        outcome: _outcome.text.trim(),
-        tagIds: _tagIds,
-        excludedTagIds: _excludedTagIds,
-        links: [
-          for (final line in _links.text.split('\n'))
-            if (line.trim().isNotEmpty) line.trim(),
-        ],
-        log: widget.item?.log ?? const [],
-      );
-      // Validate against the tree the store will see, before saving.
-      validateItems({...widget.journal.store.items, item.id: item});
-      final saved = await widget.onSave(item);
-      if (mounted) Navigator.of(context).pop(saved);
-    } on FormatException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-    } on Object catch (error) {
-      if (mounted) setState(() => _error = errorText(error));
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  Widget _tagSection(BuildContext context) {
-    final store = widget.journal.store;
-    final inherited = _parentId == null
-        ? const <String>[]
-        : [
-            for (final id in itemEffectiveTagIds(store.items, _parentId!))
-              if (!_tagIds.contains(id) && !_excludedTagIds.contains(id)) id,
-          ];
-    final available = [
-      for (final tag in store.orderedTags())
-        if (!_tagIds.contains(tag.id) && !inherited.contains(tag.id)) tag,
-    ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+  Widget _childRow(Item child, Duration duration) {
+    final scheme = Theme.of(context).colorScheme;
+    final description = child.objective.trim();
+    final result = child.outcome.trim();
+    final details = [
+      if (duration > Duration.zero) durationText(duration),
+      if (description.isNotEmpty) description,
+      if (result.isNotEmpty) '→ $result',
+    ].join(' · ');
+    return InkWell(
+      key: ValueKey('project-child-${child.id}'),
+      borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
+      onTap: () => unawaited(_select(child.id)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
           children: [
-            Text('标签', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(width: 12),
             Expanded(
-              child: DropdownButton<String>(
-                key: const ValueKey('project-tag-add'),
-                isExpanded: true,
-                hint: const Text('添加标签'),
-                items: [
-                  for (final tag in available)
-                    DropdownMenuItem(
-                      value: tag.id,
-                      child: Text(
-                        store
-                            .ancestors(tag.id)
-                            .map((item) => item.name)
-                            .join(' / '),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    child.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (details.isNotEmpty)
+                    Text(
+                      details,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
                     ),
                 ],
-                onChanged: _saving
-                    ? null
-                    : (value) {
-                        if (value == null) return;
-                        setState(() {
-                          _tagIds = [..._tagIds, value];
-                          _excludedTagIds = [
-                            for (final id in _excludedTagIds)
-                              if (id != value) id,
-                          ];
-                        });
-                      },
               ),
             ),
+            Icon(Icons.chevron_right, size: 18, color: scheme.onSurfaceVariant),
           ],
         ),
-        if (_tagIds.isNotEmpty || inherited.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final id in _tagIds)
-                  InputChip(
-                    key: ValueKey('project-tag-$id'),
-                    label: Text(store.tagName(id)),
-                    onDeleted: _saving
-                        ? null
-                        : () => setState(() {
-                            _tagIds = [
-                              for (final tag in _tagIds)
-                                if (tag != id) tag,
-                            ];
-                          }),
-                  ),
-                for (final id in inherited)
-                  InputChip(
-                    key: ValueKey('project-tag-inherited-$id'),
-                    label: Text('${store.tagName(id)}（继承）'),
-                    onDeleted: _saving
-                        ? null
-                        : () => setState(() {
-                            _excludedTagIds = [..._excludedTagIds, id];
-                          }),
-                  ),
-              ],
-            ),
-          ),
-      ],
+      ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final store = widget.journal.store;
-    final excluded = widget.item == null
-        ? const <String>{}
-        : {
-            widget.item!.id,
-            for (final entry in orderedItems(store.items))
-              if (itemOwnedBy(store.items, entry.$1.id, widget.item!.id))
-                entry.$1.id,
-          };
-    final parents = orderedItems(
-      store.items,
-    ).where((entry) => !excluded.contains(entry.$1.id)).toList();
-    return Dialog(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 560),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.item == null ? '新建项目' : '修改项目',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      TextField(
-                        key: const ValueKey('project-name'),
-                        controller: _name,
-                        autofocus: true,
-                        decoration: const InputDecoration(labelText: '名称'),
-                        onSubmitted: (_) => unawaited(_save()),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String?>(
-                        key: const ValueKey('project-parent'),
-                        initialValue: _parentId,
-                        decoration: const InputDecoration(labelText: '上级'),
-                        items: [
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('顶层'),
-                          ),
-                          for (final (item, depth) in parents)
-                            DropdownMenuItem<String?>(
-                              value: item.id,
-                              child: Text('${'　' * depth}${item.name}'),
-                            ),
-                        ],
-                        onChanged: (value) => setState(() => _parentId = value),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<ItemStatus>(
-                        key: const ValueKey('project-status'),
-                        initialValue: _status,
-                        decoration: const InputDecoration(labelText: '状态'),
-                        items: [
-                          for (final status in ItemStatus.values)
-                            DropdownMenuItem(
-                              value: status,
-                              child: Text(status.label),
-                            ),
-                        ],
-                        onChanged: (value) =>
-                            setState(() => _status = value ?? _status),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _started,
-                              decoration: const InputDecoration(
-                                labelText: '开始日期',
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextField(
-                              controller: _ended,
-                              decoration: const InputDecoration(
-                                labelText: '结束日期',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _objective,
-                        decoration: const InputDecoration(labelText: '目标'),
-                        minLines: 1,
-                        maxLines: 3,
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _outcome,
-                        decoration: const InputDecoration(labelText: '结果 / 原因'),
-                        minLines: 1,
-                        maxLines: 3,
-                      ),
-                      const SizedBox(height: 14),
-                      _tagSection(context),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _links,
-                        decoration: const InputDecoration(
-                          labelText: '成果链接',
-                          helperText: '每行一个：Obsidian、网页或本地文件',
-                        ),
-                        minLines: 1,
-                        maxLines: 3,
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
+  Widget _tagBar(Item item) {
+    final own = item.tagIds;
+    final inherited = [
+      for (final id in _store.effectiveItemTagIds(item.id))
+        if (!own.contains(id)) id,
+    ];
+    final tags = _store.orderedTags();
+    if (tags.isEmpty) {
+      return Text(
+        '还没有标签，去标签导图里建一个。',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 132),
+      child: SingleChildScrollView(
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final tag in tags)
+              FilterChip(
+                key: ValueKey('project-tag-${tag.id}'),
+                selected: own.contains(tag.id) || inherited.contains(tag.id),
+                label: Text(
+                  inherited.contains(tag.id) ? '${tag.name}（继承）' : tag.name,
                 ),
+                onSelected: _saving
+                    ? null
+                    : (_) => unawaited(_toggleTag(item, tag.id)),
               ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _saving
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    child: const Text('取消'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    key: const ValueKey('project-save'),
-                    onPressed: _saving ? null : () => unawaited(_save()),
-                    child: Text(_saving ? '保存中…' : '保存'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );

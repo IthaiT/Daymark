@@ -2,9 +2,6 @@ import 'event_stats.dart';
 import 'model.dart';
 import 'unicode.dart';
 
-/// Levels a project tree may contain: project, item, sub-item.
-const maxItemLevels = 3;
-
 /// Lifecycle of a node. A node carrying one of these states is what the
 /// interface calls a project; a leaf without time is a planned item.
 enum ItemStatus { active, paused, done, dropped }
@@ -265,14 +262,9 @@ void validateItems(Map<String, Item> items) {
     }
     final visited = <String>{item.id};
     var parent = item.parentId;
-    var levels = 1;
     while (parent != null) {
       if (!visited.add(parent)) {
         throw const FormatException('事项不能挂在自己或自己的子事项下。');
-      }
-      levels++;
-      if (levels > maxItemLevels) {
-        throw const FormatException('事项层级不能超过 $maxItemLevels 层。');
       }
       parent = items[parent]!.parentId;
     }
