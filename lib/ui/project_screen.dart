@@ -7,6 +7,7 @@ import '../data/store.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
 import 'dialogs.dart';
+import 'theme.dart' show tagDot;
 import 'workspace_style.dart';
 
 /// Project workspace: a tree of projects and planned items, edited in place
@@ -589,6 +590,11 @@ class ProjectScreenState extends State<ProjectScreen> {
               FilterChip(
                 key: ValueKey('project-tag-${tag.id}'),
                 selected: own.contains(tag.id) || inherited.contains(tag.id),
+                showCheckmark: false,
+                avatar: CircleAvatar(
+                  radius: 4,
+                  backgroundColor: tagDot(context, _store, tag.id),
+                ),
                 label: Text(
                   inherited.contains(tag.id) ? '${tag.name}（继承）' : tag.name,
                 ),
