@@ -57,14 +57,29 @@ ObsidianImport parseObsidian(
       body = end + 1;
     }
     String? rootId;
+    String? rootFence;
     for (var index = body; index < lines.length; index++) {
+      final code = RegExp(
+        r'^(`{3,}|~{3,})',
+      ).firstMatch(lines[index].trimLeft());
+      if (code != null) {
+        final marker = code[1]!;
+        if (rootFence == null) {
+          rootFence = marker;
+        } else if (marker.startsWith(rootFence[0]) &&
+            marker.length >= rootFence.length) {
+          rootFence = null;
+        }
+        continue;
+      }
+      if (rootFence != null) continue;
       final match = _fileId.firstMatch(lines[index]);
       if (match == null) continue;
       if (rootId != null) throw FormatException('$path 包含多个文件 ID。');
       rootId = match[1];
     }
-    rootId ??= newId();
-    if (!lines.any((line) => _fileId.hasMatch(line))) {
+    if (rootId == null) {
+      rootId = newId();
       lines.insert(body, '<!-- daymark-file:$rootId -->');
     }
     final name = path
@@ -123,8 +138,9 @@ ObsidianImport parseObsidian(
         stack.removeLast();
       }
       final ids = _taskId.allMatches(line).toList();
-      if (ids.length > 1)
+      if (ids.length > 1) {
         throw FormatException('$path 第 ${index + 1} 行包含多个 ID。');
+      }
       final id = ids.isEmpty ? newId() : ids.single[1]!;
       if (ids.isEmpty) lines[index] = '$line <!-- daymark:$id -->';
       final fields = _fields(_cleanTask(match[3]!));
@@ -191,8 +207,9 @@ String? _parent(Object? value, String path) {
   }
   if (value == null || value == '') return null;
   if (value is! String) throw FormatException('$path 的 parent 必须为一个双链。');
-  if (const ['最顶层事项', '最顶层', '最顶层的事项', 'root'].contains(value.trim()))
+  if (const ['最顶层事项', '最顶层', '最顶层的事项', 'root'].contains(value.trim())) {
     return null;
+  }
   final match = RegExp(r'^\[\[([^\]]+)\]\]$').firstMatch(value.trim());
   if (match == null) throw FormatException('$path 的 parent 请使用 [[文件名]]。');
   return match[1]!

@@ -231,6 +231,6 @@ void main() {
     expect(saved.log.length, 2);
     expect(saved.log.first.kind, 'created');
     expect(saved.log.last.kind, 'status');
-    expect(saved.log.last.text, '进行中 → 已放弃：方向不合适');
+    expect(saved.log.last.text, '待办 → 已取消：方向不合适');
   });
 }

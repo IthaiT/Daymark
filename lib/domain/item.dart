@@ -10,10 +10,10 @@ enum ItemStatus { active, paused, done, dropped }
 
 extension ItemStatusText on ItemStatus {
   String get label => switch (this) {
-    ItemStatus.active => '进行中',
+    ItemStatus.active => '待办',
     ItemStatus.paused => '暂停',
     ItemStatus.done => '已完成',
-    ItemStatus.dropped => '已放弃',
+    ItemStatus.dropped => '已取消',
   };
 
   /// Neither finished nor abandoned, so it can still receive new events.

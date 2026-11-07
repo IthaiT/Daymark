@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import '../data/obsidian_sync.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/archive_store.dart';
@@ -238,7 +241,22 @@ class JournalController extends ChangeNotifier {
   });
 
   /// Runs behind every pending event write; blank drafts remain in memory.
-  Future<void> archiveForClose() => _run(_archiveCompletedDays);
+  Future<void> archiveForClose() => _run(() async {
+    await _archiveCompletedDays();
+    await store.captureTreeBackup();
+  });
+  Future<void> backupTree() => _run(store.captureTreeBackup);
+  Future<int> syncObsidian(String path) => _run(() async {
+    if (path.trim().isEmpty) {
+      throw const FormatException('请先选择 Obsidian 事项文件夹。');
+    }
+    final count = await const ObsidianSync().synchronize(
+      store,
+      Directory(path.trim()),
+    );
+    notifyListeners();
+    return count;
+  });
 
   /// Applies a new recording policy. Disabling derived undefined records only
   /// hides them; stored gaps and their user-edited names are never discarded.

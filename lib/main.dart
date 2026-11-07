@@ -13,6 +13,7 @@ import 'application/settings_controller.dart';
 import 'data/appearance_store.dart';
 import 'data/archive_store.dart';
 import 'domain/appearance.dart';
+import 'domain/model.dart' show dayStart;
 import 'domain/journal_view_preferences.dart';
 import 'data/instance_lock.dart';
 import 'data/ledger_store.dart';
@@ -83,7 +84,7 @@ Future<void> main(List<String> arguments) async {
     final directory = dataDirectory(arguments);
     lock = InstanceLock.acquire(directory);
     final ledgerStore = await LedgerStore.open(directory);
-    final store = await Store.open(directory);
+    final store = await Store.open(directory, backupTrees: true);
     final settingsStore = await SettingsStore.open(directory);
     final archive = await ArchiveStore.open(directory);
     final journal = JournalController(
@@ -158,6 +159,34 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
   final _app = GlobalKey<AppScreenState>();
   final _journal = GlobalKey<JournalScreenState>();
   bool _closing = false;
+  Timer? _treeBackupTimer;
+  DateTime _lastTreeBackupDay = dayStart(DateTime.now());
+  bool _backupErrorShown = false;
+
+  Future<void> _syncObsidianOnStart() async {
+    final path = widget.journal.settings.obsidianDirectory;
+    if (path.isEmpty) return;
+    try {
+      await widget.journal.syncObsidian(path);
+    } catch (error) {
+      if (mounted) _showAppearanceError('Obsidian 同步失败，已保留上次的事项：$error');
+    }
+  }
+
+  Future<void> _backupIfDateChanged() async {
+    final today = dayStart(DateTime.now());
+    if (today == _lastTreeBackupDay) return;
+    try {
+      await widget.journal.backupTree();
+      _lastTreeBackupDay = today;
+      _backupErrorShown = false;
+    } catch (error) {
+      if (mounted && !_backupErrorShown) {
+        _backupErrorShown = true;
+        _showAppearanceError('事项树备份失败：$error');
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -169,6 +198,15 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
     _settings = widget.settings ?? SettingsController();
     widget.journal.addListener(_syncRootColors);
     _syncRootColors();
+    if (widget.journal.store.backupTrees) {
+      _treeBackupTimer = Timer.periodic(
+        const Duration(minutes: 1),
+        (_) => unawaited(_backupIfDateChanged()),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_syncObsidianOnStart());
+    });
     if (_appearance.store?.readError != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -296,6 +334,7 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
   void dispose() {
     widget.journal.removeListener(_syncRootColors);
     windowManager.removeListener(this);
+    _treeBackupTimer?.cancel();
     if (_ownsAppearance) _appearance.dispose();
     if (_ownsSettings) _settings.dispose();
     widget.instanceLock?.close();

@@ -19,9 +19,11 @@ void main() {
     vault = await Directory('${directory.path}/vault').create();
     store = await Store.open(
       Directory('${directory.path}/data'),
+      backupTrees: true,
       writer: (file, bytes) async {
-        if (failItems && file.path.endsWith('items.json'))
+        if (failItems && file.path.endsWith('items.json')) {
           throw const FileSystemException('denied');
+        }
         await AtomicFile.write(file, bytes);
       },
     );
@@ -89,7 +91,11 @@ void main() {
                 ).readAsString(),
               )
               as Map;
-      expect((snapshot['events'] as List).single['item_id'], task.id);
+      expect(
+        ((snapshot['events'] as List<Object?>).single!
+            as Map<String, Object?>)['item_id'],
+        task.id,
+      );
       expect((snapshot['items'] as List).length, store.items.length);
     },
   );

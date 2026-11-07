@@ -24,7 +24,11 @@ void main() {
     'rotates the last observed day once and retains first-of-month snapshots',
     () async {
       var now = DateTime.utc(2026, 10, 31, 20);
-      final store = await Store.open(directory, clock: () => now);
+      final store = await Store.open(
+        directory,
+        backupTrees: true,
+        clock: () => now,
+      );
       await store.saveItem(const Item(id: 'a', name: '昨日树'));
       now = DateTime.utc(2026, 11, 1, 8);
       await store.captureTreeBackup();
@@ -33,13 +37,15 @@ void main() {
       await store.saveItem(const Item(id: 'a', name: '新树'));
       expect(await read('monthly/2026-11-01.json'), monthly);
       expect(
-        ((await read('yesterday.json'))['items'] as List).single['name'],
+        (((await read('yesterday.json'))['items'] as List<Object?>).single!
+            as Map<String, Object?>)['name'],
         '昨日树',
       );
       now = DateTime.utc(2026, 11, 2);
       await store.captureTreeBackup();
       expect(
-        ((await read('yesterday.json'))['items'] as List).single['name'],
+        (((await read('yesterday.json'))['items'] as List<Object?>).single!
+            as Map<String, Object?>)['name'],
         '新树',
       );
       expect((await read('yesterday.json'))['date'], '2026-11-01');
@@ -52,6 +58,7 @@ void main() {
       var failAt = -1;
       final store = await Store.open(
         directory,
+        backupTrees: true,
         writer: (file, bytes) async {
           if (file.path.endsWith('latest.json') && ++latestWrites == failAt) {
             throw const FileSystemException('backup denied');
@@ -61,7 +68,7 @@ void main() {
       );
       await store.saveItem(const Item(id: 'a', name: '原值'));
       final bytes = await store.itemsFile.readAsBytes();
-      failAt = latestWrites + 2;
+      failAt = latestWrites + 1;
       await expectLater(
         store.saveItem(const Item(id: 'a', name: '新值')),
         throwsA(isA<FileSystemException>()),
@@ -74,7 +81,7 @@ void main() {
   test(
     'corrupt latest snapshot is retained and never silently replaced',
     () async {
-      final store = await Store.open(directory);
+      final store = await Store.open(directory, backupTrees: true);
       final latest = File('${directory.path}/tree-backups/latest.json');
       await latest.writeAsString('broken');
       await expectLater(

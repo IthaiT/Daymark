@@ -53,6 +53,23 @@ void main() {
     );
   });
 
+  test(
+    'Obsidian folder survives settings serialization and copyWith',
+    () async {
+      final store = await SettingsStore.open(directory);
+      final value = const AppSettings().copyWith(
+        obsidianDirectory: r'E:\Synthetic\Daymark',
+      );
+      await store.replace(value);
+      final reopened = await SettingsStore.open(directory);
+      expect(reopened.state, value);
+      expect(
+        reopened.state.copyWith(dragMinutes: 5).obsidianDirectory,
+        value.obsidianDirectory,
+      );
+    },
+  );
+
   test('split overlap preference survives a reopen', () async {
     final store = await SettingsStore.open(directory);
     final controller = SettingsController(store);

@@ -38,7 +38,9 @@ class DataError implements Exception {
 }
 
 class Store {
-  Store._(this.directory, this._writer, this.clock);
+  Store._(this.directory, this._writer, this.clock, this.backupTrees);
+  final bool backupTrees;
+  DateTime? _backupDay;
   final DateTime Function() clock;
   final Directory directory;
   final FileWriter _writer;
@@ -56,9 +58,15 @@ class Store {
     Directory directory, {
     FileWriter writer = AtomicFile.write,
     DateTime Function()? clock,
+    bool backupTrees = false,
   }) async {
     await directory.create(recursive: true);
-    final store = Store._(directory.absolute, writer, clock ?? DateTime.now);
+    final store = Store._(
+      directory.absolute,
+      writer,
+      clock ?? DateTime.now,
+      backupTrees,
+    );
     final hasTags = await store.tagsFile.exists();
     final hasItems = await store.itemsFile.exists();
     final hasEvents = await store.eventsFile.exists();
@@ -128,7 +136,7 @@ class Store {
     if (needle.isEmpty) return null;
     String? found;
     for (final item in _items.values) {
-      if (caseFold(item.name.trim()) != needle) continue;
+      if (!item.isTodo || caseFold(item.name.trim()) != needle) continue;
       if (found != null) return null;
       found = item.id;
     }
@@ -394,7 +402,10 @@ class Store {
     ),
     tags: tags,
   );
-  Future<void> _writeItems(Map<String, Item> items) {
+  Future<void> _writeItems(
+    Map<String, Item> items, {
+    Map<String, Event>? events,
+  }) {
     final sorted = items.values.toList()
       ..sort((a, b) {
         final name = compareUnicode(caseFold(a.name), caseFold(b.name));
@@ -406,6 +417,7 @@ class Store {
         '${const JsonEncoder.withIndent('  ').convert({'version': 1, 'items': sorted.map((item) => item.toJson()).toList()})}\n',
       ),
       items: items,
+      events: events,
     );
   }
 
@@ -431,10 +443,15 @@ class Store {
     );
   }
 
-  Future<void> captureTreeBackup() => TreeBackupStore(
-    directory,
-    writer: _writer,
-  ).capture(items: _items, tags: _tags, events: _events, now: clock());
+  /// Enabled by the application; embedders may supply their own backup policy.
+  Future<void> captureTreeBackup() async {
+    if (!backupTrees) return;
+    await TreeBackupStore(
+      directory,
+      writer: _writer,
+    ).capture(items: _items, tags: _tags, events: _events, now: clock());
+    _backupDay = dayStart(clock());
+  }
 
   /// Backups are part of a save: failure restores the prior canonical bytes.
   Future<void> _writeData(
@@ -444,7 +461,11 @@ class Store {
     Map<String, Tag>? tags,
     Map<String, Event>? events,
   }) async {
-    await captureTreeBackup();
+    if (!backupTrees) {
+      await _writer(file, bytes);
+      return;
+    }
+    if (_backupDay != dayStart(clock())) await captureTreeBackup();
     final previous = await file.exists() ? await file.readAsBytes() : null;
     await _writer(file, bytes);
     try {
@@ -454,6 +475,7 @@ class Store {
         events: events ?? _events,
         now: clock(),
       );
+      _backupDay = dayStart(clock());
     } on Object {
       if (previous != null) {
         await _writer(file, previous);
@@ -491,8 +513,9 @@ class Store {
           .where((t) => caseFold(t.name) == caseFold(name))
           .toList();
       if (leaf.length == 1) return leaf.single.id;
-      if (leaf.length > 1)
+      if (leaf.length > 1) {
         throw FormatException('标签「$name」有重名，请在 Markdown 中使用完整标签路径。');
+      }
       String? parent;
       for (final part in name.split('/')) {
         if (part.trim().isEmpty) throw const FormatException('标签路径不能为空。');
@@ -637,6 +660,9 @@ class Store {
   }
 
   Future<Item> saveItem(Item item) async {
+    if (_items[item.id]?.source != null && _items[item.id] != item) {
+      throw const FormatException('此事项由 Obsidian 管理，请修改 Markdown 后同步。');
+    }
     final desired = {..._items, item.id: item};
     validateItems(desired);
     _checkItemTags(desired);
@@ -663,6 +689,9 @@ class Store {
   Future<void> deleteItem(String id) async {
     final item = _items[id];
     if (item == null) throw const FormatException('事项不存在。');
+    if (item.source != null) {
+      throw const FormatException('此事项由 Obsidian 管理，源中移除后仍保留历史。');
+    }
     if (_items.values.any((child) => child.parentId == id)) {
       throw const FormatException('此事项还有子事项，请先移动或删除子事项。');
     }
@@ -683,7 +712,7 @@ class Store {
     final previousEvents = _events;
     await _writeEvents(nextEvents);
     try {
-      await _writeItems(nextItems);
+      await _writeItems(nextItems, events: nextEvents);
     } on Object {
       await _writeEvents(previousEvents);
       rethrow;

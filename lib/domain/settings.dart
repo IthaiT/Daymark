@@ -10,6 +10,7 @@ class AppSettings {
     this.autoUndefined = true,
     this.dragMinutes = 1,
     this.splitOverlap = false,
+    this.obsidianDirectory = '',
   }) : assert(dragMinutes > 0);
 
   /// Whether the empty spans between events become derived “空档” records.
@@ -25,14 +26,19 @@ class AppSettings {
   /// totals stay unchanged.
   final bool splitOverlap;
 
+  /// The folder whose immediate Markdown files form the imported item tree.
+  final String obsidianDirectory;
+
   AppSettings copyWith({
     bool? autoUndefined,
     int? dragMinutes,
     bool? splitOverlap,
+    String? obsidianDirectory,
   }) => AppSettings(
     autoUndefined: autoUndefined ?? this.autoUndefined,
     dragMinutes: dragMinutes ?? this.dragMinutes,
     splitOverlap: splitOverlap ?? this.splitOverlap,
+    obsidianDirectory: obsidianDirectory ?? this.obsidianDirectory,
   );
 
   Map<String, Object> toJson() => {
@@ -40,6 +46,7 @@ class AppSettings {
     'auto_undefined': autoUndefined,
     'drag_minutes': dragMinutes,
     'split_overlap': splitOverlap,
+    if (obsidianDirectory.isNotEmpty) 'obsidian_directory': obsidianDirectory,
   };
 
   factory AppSettings.fromJson(Object? value) {
@@ -56,6 +63,9 @@ class AppSettings {
           ? minutes
           : 1,
       splitOverlap: split is bool ? split : false,
+      obsidianDirectory: value['obsidian_directory'] is String
+          ? (value['obsidian_directory']! as String).trim()
+          : '',
     );
   }
 
@@ -64,8 +74,10 @@ class AppSettings {
       other is AppSettings &&
       other.autoUndefined == autoUndefined &&
       other.dragMinutes == dragMinutes &&
-      other.splitOverlap == splitOverlap;
+      other.splitOverlap == splitOverlap &&
+      other.obsidianDirectory == obsidianDirectory;
 
   @override
-  int get hashCode => Object.hash(autoUndefined, dragMinutes, splitOverlap);
+  int get hashCode =>
+      Object.hash(autoUndefined, dragMinutes, splitOverlap, obsidianDirectory);
 }
