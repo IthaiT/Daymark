@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/item.dart';
+import 'package:daymark/domain/model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -78,6 +79,39 @@ void main() {
       expect((await Store.open(directory)).items['a']!.name, '原值');
     },
   );
+  test(
+    'a reassigned record and the new tree share one consistent snapshot',
+    () async {
+      final store = await Store.open(directory, backupTrees: true);
+      await store.saveItem(const Item(id: 'parent', name: '父事项'));
+      await store.saveItem(
+        const Item(id: 'child', name: '子事项', parentId: 'parent'),
+      );
+      await store.saveEvent(
+        Event(
+          'e',
+          '记录',
+          ['work'],
+          DateTime.utc(2026, 11, 8, 9),
+          DateTime.utc(2026, 11, 8, 10),
+          '备注',
+          'child',
+        ),
+      );
+      await store.deleteItem('child');
+      final snapshot = await read('latest.json');
+      final items = (snapshot['items']! as List<Object?>)
+          .cast<Map<String, Object?>>();
+      expect(items.map((item) => item['id']), ['parent']);
+      final event =
+          (snapshot['events']! as List<Object?>).single!
+              as Map<String, Object?>;
+      expect(event['item_id'], 'parent');
+      expect(event['notes'], '备注');
+      expect(store.events['e']!.itemId, 'parent');
+    },
+  );
+
   test(
     'corrupt latest snapshot is retained and never silently replaced',
     () async {
