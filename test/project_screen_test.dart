@@ -188,7 +188,11 @@ void main() {
     );
     await tester.tap(find.byKey(ValueKey('project-child-${child.id}')));
     await tester.pumpAndSettle();
-    expect(find.text('主业（继承）'), findsOneWidget);
+    // Inherited tags are marked by tone, not by a suffix.
+    expect(
+      find.byKey(const ValueKey('project-chip-inherited-work')),
+      findsOneWidget,
+    );
 
     // Dropping the inherited tag is an explicit choice on the child.
     await tester.tap(
@@ -199,7 +203,10 @@ void main() {
     );
     await settleWrite(tester);
     expect(journal.store.items[child.id]!.excludedTagIds, contains('work'));
-    expect(find.text('主业（继承）'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('project-chip-inherited-work')),
+      findsNothing,
+    );
   });
 
   testWidgets('folding a branch hides its descendants', (tester) async {

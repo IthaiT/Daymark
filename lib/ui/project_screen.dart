@@ -10,7 +10,8 @@ import '../domain/model.dart';
 import '../domain/unicode.dart';
 import 'dialogs.dart';
 import 'pickers.dart' show PickerPopup;
-import 'theme.dart' show tagDot;
+import 'theme.dart'
+    show tagColorOverrides, tagDisplayOverrides, tagEventColorsFor, tagDot;
 import 'workspace_style.dart';
 
 /// Project workspace: a tree of projects and planned items, edited in place
@@ -568,6 +569,30 @@ class ProjectScreenState extends State<ProjectScreen> {
     );
   }
 
+  /// One look for every plain field on this panel: same fill, radius and
+  /// padding, so the form reads as a single surface instead of mixed boxes.
+  InputDecoration _box({String? hint, Widget? prefixIcon}) {
+    final scheme = Theme.of(context).colorScheme;
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
+      borderSide: BorderSide.none,
+    );
+    return InputDecoration(
+      isDense: true,
+      filled: true,
+      fillColor: scheme.surfaceContainerHighest,
+      hintText: hint,
+      prefixIcon: prefixIcon,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      border: border,
+      enabledBorder: border,
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
+        borderSide: BorderSide(color: scheme.primary, width: 1),
+      ),
+    );
+  }
+
   /// Enter turns the line into a node; pasting a block creates one per line.
   Widget _addField({
     required Key key,
@@ -582,11 +607,7 @@ class ProjectScreenState extends State<ProjectScreen> {
     minLines: 1,
     maxLines: null,
     keyboardType: TextInputType.multiline,
-    decoration: InputDecoration(
-      isDense: true,
-      hintText: hint,
-      prefixIcon: const Icon(Icons.add, size: 18),
-    ),
+    decoration: _box(hint: hint, prefixIcon: const Icon(Icons.add, size: 18)),
     onChanged: (value) {
       if (!value.contains('\n')) return;
       controller.clear();
@@ -611,7 +632,7 @@ class ProjectScreenState extends State<ProjectScreen> {
         minLines: minLines,
         maxLines: null,
         keyboardType: TextInputType.multiline,
-        decoration: InputDecoration(hintText: hint, isDense: true),
+        decoration: _box(hint: hint),
         onChanged: (_) => _scheduleSave(),
         onTapOutside: (_) => unawaited(_flush()),
       ),
@@ -643,13 +664,14 @@ class ProjectScreenState extends State<ProjectScreen> {
                     child.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                   if (details.isNotEmpty)
                     Text(
                       details,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
@@ -672,10 +694,9 @@ class ProjectScreenState extends State<ProjectScreen> {
     anchor: TextField(
       key: const ValueKey('project-tag-search'),
       controller: _tagQuery,
-      decoration: const InputDecoration(
-        isDense: true,
-        prefixIcon: Icon(Icons.label_outline, size: 18),
-        hintText: '标签，可搜索',
+      decoration: _box(
+        hint: '标签，可搜索',
+        prefixIcon: const Icon(Icons.label_outline, size: 18),
       ),
       onTap: () => setState(() => _tagOpen = true),
       onChanged: (_) => setState(() => _tagOpen = true),
@@ -764,27 +785,43 @@ class ProjectScreenState extends State<ProjectScreen> {
       spacing: 6,
       runSpacing: 6,
       children: [
-        for (final id in own)
-          InputChip(
-            key: ValueKey('project-chip-$id'),
-            label: Text(_store.tagName(id)),
-            avatar: CircleAvatar(
-              radius: 4,
-              backgroundColor: tagDot(context, _store, id),
-            ),
-            onDeleted: _saving ? null : () => unawaited(_removeTag(item, id)),
-          ),
-        for (final id in inherited)
-          InputChip(
-            key: ValueKey('project-chip-inherited-$id'),
-            label: Text('${_store.tagName(id)}（继承）'),
-            avatar: CircleAvatar(
-              radius: 4,
-              backgroundColor: tagDot(context, _store, id),
-            ),
-            onDeleted: _saving ? null : () => unawaited(_excludeTag(item, id)),
-          ),
+        for (final id in own) _chip(item, id, inherited: false),
+        for (final id in inherited) _chip(item, id, inherited: true),
       ],
+    );
+  }
+
+  /// A tag painted in its own colour instead of carrying a suffix. Inherited
+  /// tags use the lighter tone, so the two stay distinguishable without words.
+  Widget _chip(Item item, String id, {required bool inherited}) {
+    final (background, foreground) = tagEventColorsFor(
+      _store,
+      id,
+      tagColorOverrides(context),
+      selected: !inherited,
+      tagDisplays: tagDisplayOverrides(context),
+    );
+    return InputChip(
+      key: ValueKey(
+        inherited ? 'project-chip-inherited-$id' : 'project-chip-$id',
+      ),
+      label: Text(_store.tagName(id)),
+      labelStyle: TextStyle(
+        color: foreground,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+      ),
+      backgroundColor: background,
+      side: BorderSide.none,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      deleteIconColor: foreground,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      onDeleted: _saving
+          ? null
+          : () => unawaited(
+              inherited ? _excludeTag(item, id) : _removeTag(item, id),
+            ),
     );
   }
 }
