@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
 import '../data/store.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
+import '../domain/unicode.dart';
 import 'dialogs.dart';
+import 'pickers.dart' show PickerPopup;
 import 'theme.dart' show tagDot;
 import 'workspace_style.dart';
 
@@ -31,8 +34,13 @@ class ProjectScreenState extends State<ProjectScreen> {
   final _name = TextEditingController();
   final _description = TextEditingController();
   final _result = TextEditingController();
+  final _tagQuery = TextEditingController();
+  final _nameFocus = FocusNode(debugLabel: 'project-name');
+  final _childFocus = FocusNode(debugLabel: 'project-child-add');
+  final _treeFocus = FocusNode(debugLabel: 'project-tree');
   final _collapsed = <String>{};
   String? _boundId;
+  bool _tagOpen = false;
   Timer? _pendingSave;
 
   Store get _store => widget.journal.store;
@@ -46,6 +54,10 @@ class ProjectScreenState extends State<ProjectScreen> {
     _name.dispose();
     _description.dispose();
     _result.dispose();
+    _tagQuery.dispose();
+    _nameFocus.dispose();
+    _childFocus.dispose();
+    _treeFocus.dispose();
     super.dispose();
   }
 
@@ -127,6 +139,70 @@ class ProjectScreenState extends State<ProjectScreen> {
     });
   }
 
+  /// Right-click actions for a tree row, so renaming, adding a child and
+  /// deleting all work without leaving the panel.
+  Future<void> _rowMenu(Offset position, Item item) async {
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'rename', child: Text('重命名')),
+        PopupMenuItem(value: 'child', child: Text('新建子事项')),
+        PopupMenuItem(value: 'delete', child: Text('删除')),
+      ],
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case 'rename':
+        _treeFocus.requestFocus();
+        await _select(item.id);
+        if (!mounted) return;
+        _nameFocus.requestFocus();
+        _name.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _name.text.length,
+        );
+      case 'child':
+        await _select(item.id);
+        if (!mounted) return;
+        _childFocus.requestFocus();
+      case 'delete':
+        await _delete(item);
+    }
+  }
+
+  /// Keyboard handling for the tree: Del removes the selected node, arrows
+  /// walk the visible rows.
+  KeyEventResult _treeKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    final rows = _visibleRows(_store.items);
+    if (rows.isEmpty) return KeyEventResult.ignored;
+    if (key == LogicalKeyboardKey.delete ||
+        key == LogicalKeyboardKey.backspace) {
+      final item = _selected == null ? null : _store.items[_selected];
+      if (item == null) return KeyEventResult.ignored;
+      unawaited(_delete(item));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowUp) {
+      final current = rows.indexWhere((row) => row.$1.id == _selected);
+      final delta = key == LogicalKeyboardKey.arrowDown ? 1 : -1;
+      final next = current < 0
+          ? 0
+          : (current + delta).clamp(0, rows.length - 1);
+      unawaited(_select(rows[next].$1.id));
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   Future<void> _delete(Item item) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -156,33 +232,52 @@ class ProjectScreenState extends State<ProjectScreen> {
     });
   }
 
-  /// Applies one tag to the selected node: own tags are removed, inherited ones
-  /// are dropped for this branch, everything else is added.
-  Future<void> _toggleTag(Item item, String tagId) async {
+  /// Adds one tag to the selected node, undoing any exclusion of it.
+  Future<void> _addTag(Item item, String tagId) async {
+    _tagQuery.clear();
     await _flush();
-    final own = item.tagIds.contains(tagId);
-    final inherited =
-        !own && _store.effectiveItemTagIds(item.id).contains(tagId);
-    final excluded = item.excludedTagIds.contains(tagId);
-    final next = own
-        ? item.copyWith(
-            tagIds: [
-              for (final id in item.tagIds)
-                if (id != tagId) id,
-            ],
-          )
-        : inherited
-        ? item.copyWith(excludedTagIds: [...item.excludedTagIds, tagId])
-        : excluded
-        ? item.copyWith(
-            excludedTagIds: [
-              for (final id in item.excludedTagIds)
-                if (id != tagId) id,
-            ],
-            tagIds: [...item.tagIds, tagId],
-          )
-        : item.copyWith(tagIds: [...item.tagIds, tagId]);
-    await _run(() => widget.journal.saveItem(next));
+    await _run(
+      () => widget.journal.saveItem(
+        item.copyWith(
+          tagIds: [...item.tagIds, tagId],
+          excludedTagIds: [
+            for (final id in item.excludedTagIds)
+              if (id != tagId) id,
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Drops a tag this node set itself.
+  Future<void> _removeTag(Item item, String tagId) async {
+    await _flush();
+    await _run(
+      () => widget.journal.saveItem(
+        item.copyWith(
+          tagIds: [
+            for (final id in item.tagIds)
+              if (id != tagId) id,
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Drops a tag inherited from an ancestor for this branch only.
+  Future<void> _excludeTag(Item item, String tagId) async {
+    await _flush();
+    await _run(
+      () => widget.journal.saveItem(
+        item.copyWith(
+          excludedTagIds: [...item.excludedTagIds, tagId],
+          tagIds: [
+            for (final id in item.tagIds)
+              if (id != tagId) id,
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -216,15 +311,7 @@ class ProjectScreenState extends State<ProjectScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          WorkspaceSectionHeader(
-            title: '项目',
-            actions: [
-              Text(
-                '${items.length}',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-            ],
-          ),
+          const WorkspaceSectionHeader(title: '项目'),
           _addField(
             key: const ValueKey('project-add'),
             controller: _rootAdd,
@@ -233,28 +320,32 @@ class ProjectScreenState extends State<ProjectScreen> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: rows.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      '还没有项目。在上面输入名字，回车就建好了。',
-                      style: Theme.of(context).textTheme.bodySmall,
+            child: Focus(
+              focusNode: _treeFocus,
+              onKeyEvent: _treeKey,
+              child: rows.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        '还没有项目。在上面输入名字，回车就建好了。',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: rows.length,
+                      itemBuilder: (context, index) {
+                        final (item, depth) = rows[index];
+                        return _tile(
+                          item,
+                          depth,
+                          durations[item.id] ?? Duration.zero,
+                          hasChildren: items.values.any(
+                            (child) => child.parentId == item.id,
+                          ),
+                        );
+                      },
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: rows.length,
-                    itemBuilder: (context, index) {
-                      final (item, depth) = rows[index];
-                      return _tile(
-                        item,
-                        depth,
-                        durations[item.id] ?? Duration.zero,
-                        hasChildren: items.values.any(
-                          (child) => child.parentId == item.id,
-                        ),
-                      );
-                    },
-                  ),
+            ),
           ),
         ],
       ),
@@ -293,7 +384,12 @@ class ProjectScreenState extends State<ProjectScreen> {
     return InkWell(
       key: ValueKey('project-${item.id}'),
       borderRadius: BorderRadius.circular(WorkspaceStyle.controlRadius),
-      onTap: () => unawaited(_select(item.id)),
+      onTap: () {
+        _treeFocus.requestFocus();
+        unawaited(_select(item.id));
+      },
+      onSecondaryTapDown: (details) =>
+          unawaited(_rowMenu(details.globalPosition, item)),
       child: Container(
         padding: EdgeInsets.only(left: 4 + depth * 14.0, right: 6),
         decoration: BoxDecoration(
@@ -388,6 +484,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                 child: TextField(
                   key: const ValueKey('project-name'),
                   controller: _name,
+                  focusNode: _nameFocus,
                   style: Theme.of(context).textTheme.headlineSmall,
                   decoration: const InputDecoration(
                     isDense: true,
@@ -399,12 +496,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                total == Duration.zero ? '还没有记录' : durationText(total),
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
+              SizedBox(width: 260, child: _tagSearch(item)),
               IconButton(
                 key: const ValueKey('project-delete'),
                 tooltip: '删除',
@@ -413,6 +505,8 @@ class ProjectScreenState extends State<ProjectScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 6),
+          _selectedTags(item),
           const SizedBox(height: 4),
           Expanded(
             child: SingleChildScrollView(
@@ -434,10 +528,6 @@ class ProjectScreenState extends State<ProjectScreen> {
                     hint: '做完之后得到了什么，放弃了也写在这里',
                     minLines: 3,
                   ),
-                  const SizedBox(height: 16),
-                  Text('标签', style: Theme.of(context).textTheme.titleSmall),
-                  const SizedBox(height: 6),
-                  _tagBar(item),
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -447,12 +537,16 @@ class ProjectScreenState extends State<ProjectScreen> {
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
                       ),
-                      Text(
-                        '点一行进入它自己的页面',
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      if (total > Duration.zero)
+                        Text(
+                          '累计 ${durationText(total)}',
+                          style: Theme.of(context).textTheme.labelMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -461,6 +555,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                   _addField(
                     key: const ValueKey('project-add-child'),
                     controller: _childAdd,
+                    focusNode: _childFocus,
                     hint: '新增子事项，回车创建；可粘贴多行',
                     parentId: item.id,
                   ),
@@ -479,9 +574,11 @@ class ProjectScreenState extends State<ProjectScreen> {
     required TextEditingController controller,
     required String hint,
     required String? parentId,
+    FocusNode? focusNode,
   }) => TextField(
     key: key,
     controller: controller,
+    focusNode: focusNode,
     minLines: 1,
     maxLines: null,
     keyboardType: TextInputType.multiline,
@@ -566,45 +663,128 @@ class ProjectScreenState extends State<ProjectScreen> {
     );
   }
 
-  Widget _tagBar(Item item) {
+  /// Searchable tag bar: typing filters the tree, picking adds one. The full
+  /// list never opens at once, so a large tag tree stays readable.
+  Widget _tagSearch(Item item) => PickerPopup(
+    open: _tagOpen,
+    groupId: item.id,
+    onClose: () => setState(() => _tagOpen = false),
+    anchor: TextField(
+      key: const ValueKey('project-tag-search'),
+      controller: _tagQuery,
+      decoration: const InputDecoration(
+        isDense: true,
+        prefixIcon: Icon(Icons.label_outline, size: 18),
+        hintText: '标签，可搜索',
+      ),
+      onTap: () => setState(() => _tagOpen = true),
+      onChanged: (_) => setState(() => _tagOpen = true),
+      onSubmitted: (_) {
+        final matches = _tagMatches(item);
+        if (matches.isNotEmpty) unawaited(_addTag(item, matches.first.id));
+      },
+    ),
+    builder: (context, close) => _tagOptions(item, close),
+  );
+
+  List<Tag> _tagMatches(Item item) {
+    final needle = caseFold(_tagQuery.text.trim());
+    return [
+      for (final tag in _store.orderedTags())
+        if (!item.tagIds.contains(tag.id) &&
+            (needle.isEmpty ||
+                caseFold(
+                  _store
+                      .ancestors(tag.id)
+                      .map((entry) => entry.name)
+                      .join(' / '),
+                ).contains(needle)))
+          tag,
+    ];
+  }
+
+  Widget _tagOptions(Item item, VoidCallback close) {
+    final matches = _tagMatches(item);
+    if (matches.isEmpty) {
+      return const Padding(padding: EdgeInsets.all(12), child: Text('没有匹配的标签'));
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 280),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final tag in matches)
+              ListTile(
+                key: ValueKey('project-tag-${tag.id}'),
+                dense: true,
+                leading: CircleAvatar(
+                  radius: 4,
+                  backgroundColor: tagDot(context, _store, tag.id),
+                ),
+                title: Text(
+                  tag.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  _store
+                      .ancestors(tag.id)
+                      .map((entry) => entry.name)
+                      .join(' / '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  close();
+                  unawaited(_addTag(item, tag.id));
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The tags this node adds and the ones it inherits, as removable chips.
+  Widget _selectedTags(Item item) {
     final own = item.tagIds;
     final inherited = [
       for (final id in _store.effectiveItemTagIds(item.id))
         if (!own.contains(id)) id,
     ];
-    final tags = _store.orderedTags();
-    if (tags.isEmpty) {
+    if (own.isEmpty && inherited.isEmpty) {
       return Text(
-        '还没有标签，去标签导图里建一个。',
+        '还没有标签，在右上角搜索添加。',
         style: Theme.of(context).textTheme.bodySmall,
       );
     }
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 132),
-      child: SingleChildScrollView(
-        child: Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final tag in tags)
-              FilterChip(
-                key: ValueKey('project-tag-${tag.id}'),
-                selected: own.contains(tag.id) || inherited.contains(tag.id),
-                showCheckmark: false,
-                avatar: CircleAvatar(
-                  radius: 4,
-                  backgroundColor: tagDot(context, _store, tag.id),
-                ),
-                label: Text(
-                  inherited.contains(tag.id) ? '${tag.name}（继承）' : tag.name,
-                ),
-                onSelected: _saving
-                    ? null
-                    : (_) => unawaited(_toggleTag(item, tag.id)),
-              ),
-          ],
-        ),
-      ),
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final id in own)
+          InputChip(
+            key: ValueKey('project-chip-$id'),
+            label: Text(_store.tagName(id)),
+            avatar: CircleAvatar(
+              radius: 4,
+              backgroundColor: tagDot(context, _store, id),
+            ),
+            onDeleted: _saving ? null : () => unawaited(_removeTag(item, id)),
+          ),
+        for (final id in inherited)
+          InputChip(
+            key: ValueKey('project-chip-inherited-$id'),
+            label: Text('${_store.tagName(id)}（继承）'),
+            avatar: CircleAvatar(
+              radius: 4,
+              backgroundColor: tagDot(context, _store, id),
+            ),
+            onDeleted: _saving ? null : () => unawaited(_excludeTag(item, id)),
+          ),
+      ],
     );
   }
 }

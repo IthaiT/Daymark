@@ -6,7 +6,9 @@ import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/item.dart';
 import 'package:daymark/domain/model.dart';
 import 'package:daymark/ui/project_screen.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -52,11 +54,25 @@ void main() {
       find.byKey(const ValueKey('project-description'));
   Finder resultField() => find.byKey(const ValueKey('project-result'));
 
+  /// Adds a tag through the search bar, which is the only way tags are picked.
   /// Lets the debounced write and the controller's queue finish.
   Future<void> settleWrite(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 700));
     await tester.runAsync(() async {});
     await tester.pumpAndSettle();
+  }
+
+  /// Adds a tag through the search bar, which is the only way tags are picked.
+  Future<void> addTag(WidgetTester tester, String name) async {
+    await tester.tap(find.byKey(const ValueKey('project-tag-search')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('project-tag-search')),
+      name,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('project-tag-work')));
+    await settleWrite(tester);
   }
 
   /// Typing a name and pressing Enter creates the node, no dialog involved.
@@ -163,8 +179,7 @@ void main() {
     await tester.tap(find.byKey(ValueKey('project-${root.id}')));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('project-tag-work')));
-    await settleWrite(tester);
+    await addTag(tester, '主业');
     expect(journal.store.items[root.id]!.tagIds, contains('work'));
 
     await addChildNamed(tester, '改简历');
@@ -176,7 +191,12 @@ void main() {
     expect(find.text('主业（继承）'), findsOneWidget);
 
     // Dropping the inherited tag is an explicit choice on the child.
-    await tester.tap(find.byKey(const ValueKey('project-tag-work')));
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const ValueKey('project-chip-inherited-work')),
+        matching: find.byType(Icon),
+      ),
+    );
     await settleWrite(tester);
     expect(journal.store.items[child.id]!.excludedTagIds, contains('work'));
     expect(find.text('主业（继承）'), findsNothing);
@@ -233,5 +253,67 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('project-child-resume')));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(nameField()).controller!.text, '改简历');
+  });
+
+  testWidgets('the tag bar only lists candidates when opened', (tester) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final item = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${item.id}')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('project-tag-work')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('project-tag-search')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('project-tag-work')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const ValueKey('project-tag-search')),
+      '生活',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('project-tag-work')), findsNothing);
+    expect(find.byKey(const ValueKey('project-tag-life')), findsOneWidget);
+  });
+
+  testWidgets('Delete removes the selected node after confirmation', (
+    tester,
+  ) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final item = journal.store.items.values.single;
+    await tester.tap(find.byKey(ValueKey('project-${item.id}')));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+    expect(find.text('删除「跳槽」？'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '删除'));
+    await settleWrite(tester);
+    expect(journal.store.items, isEmpty);
+  });
+
+  testWidgets('right click offers rename and add child', (tester) async {
+    await pump(tester);
+    await addRoot(tester, '跳槽');
+    final item = journal.store.items.values.single;
+
+    await tester.tap(
+      find.byKey(ValueKey('project-${item.id}')),
+      buttons: kSecondaryMouseButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('重命名'), findsOneWidget);
+    expect(find.text('新建子事项'), findsOneWidget);
+    expect(find.text('删除'), findsOneWidget);
+
+    await tester.tap(find.text('重命名'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(nameField()).focusNode!.hasPrimaryFocus,
+      isTrue,
+    );
   });
 }
