@@ -283,7 +283,7 @@ void validateItems(Map<String, Item> items) {
     if (sibling != null && sibling.source == null && item.source == null) {
       throw const FormatException('同一个父事项下不能有重名事项。');
     }
-    siblings[key] = item;
+    if (sibling == null || item.source == null) siblings[key] = item;
     final visited = <String>{item.id};
     var parent = item.parentId;
     while (parent != null) {
@@ -326,12 +326,17 @@ Item? itemRoot(Map<String, Item> items, String id) {
 int compareItemOrder(Item a, Item b) {
   final left = a.source;
   final right = b.source;
-  if (left != null &&
-      right != null &&
-      left.directory == right.directory &&
-      left.path == right.path &&
-      left.kind == 'task' &&
-      right.kind == 'task') {
+  if (left != null || right != null) {
+    if (left == null) return -1;
+    if (right == null) return 1;
+    for (final pair in [
+      (left.directory, right.directory),
+      (left.path, right.path),
+      (left.kind, right.kind),
+    ]) {
+      final result = compareUnicode(caseFold(pair.$1), caseFold(pair.$2));
+      if (result != 0) return result;
+    }
     final order = left.order.compareTo(right.order);
     if (order != 0) return order;
   }

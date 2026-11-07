@@ -5,6 +5,8 @@ import 'package:csv/csv.dart';
 import 'package:uuid/uuid.dart';
 
 import '../domain/item.dart';
+import '../domain/obsidian.dart';
+import 'tree_backup_store.dart';
 import '../domain/model.dart';
 import '../domain/unicode.dart';
 import 'atomic_file.dart';
@@ -36,7 +38,8 @@ class DataError implements Exception {
 }
 
 class Store {
-  Store._(this.directory, this._writer);
+  Store._(this.directory, this._writer, this.clock);
+  final DateTime Function() clock;
   final Directory directory;
   final FileWriter _writer;
   Map<String, Tag> _tags = {};
@@ -52,9 +55,10 @@ class Store {
   static Future<Store> open(
     Directory directory, {
     FileWriter writer = AtomicFile.write,
+    DateTime Function()? clock,
   }) async {
     await directory.create(recursive: true);
-    final store = Store._(directory.absolute, writer);
+    final store = Store._(directory.absolute, writer, clock ?? DateTime.now);
     final hasTags = await store.tagsFile.exists();
     final hasItems = await store.itemsFile.exists();
     final hasEvents = await store.eventsFile.exists();
@@ -68,6 +72,7 @@ class Store {
     if (!hasTags) await store._writeTags(store._tags);
     if (!hasItems) await store._writeItems(store._items);
     if (!hasEvents) await store._writeEvents(store._events);
+    await store.captureTreeBackup();
     return store;
   }
 
@@ -382,11 +387,12 @@ class Store {
     }
   }
 
-  Future<void> _writeTags(Map<String, Tag> tags) => _writer(
+  Future<void> _writeTags(Map<String, Tag> tags) => _writeData(
     tagsFile,
     utf8.encode(
       '${const JsonEncoder.withIndent('  ').convert({'version': 1, 'tags': tags.values.map((tag) => tag.toJson()).toList()})}\n',
     ),
+    tags: tags,
   );
   Future<void> _writeItems(Map<String, Item> items) {
     final sorted = items.values.toList()
@@ -394,11 +400,12 @@ class Store {
         final name = compareUnicode(caseFold(a.name), caseFold(b.name));
         return name != 0 ? name : compareUnicode(a.id, b.id);
       });
-    return _writer(
+    return _writeData(
       itemsFile,
       utf8.encode(
         '${const JsonEncoder.withIndent('  ').convert({'version': 1, 'items': sorted.map((item) => item.toJson()).toList()})}\n',
       ),
+      items: items,
     );
   }
 
@@ -417,10 +424,136 @@ class Store {
           event.itemId ?? '',
         ],
     ];
-    return _writer(
+    return _writeData(
       eventsFile,
       utf8.encode('\uFEFF${const ListToCsvConverter().convert(rows)}\r\n'),
+      events: events,
     );
+  }
+
+  Future<void> captureTreeBackup() => TreeBackupStore(
+    directory,
+    writer: _writer,
+  ).capture(items: _items, tags: _tags, events: _events, now: clock());
+
+  /// Backups are part of a save: failure restores the prior canonical bytes.
+  Future<void> _writeData(
+    File file,
+    List<int> bytes, {
+    Map<String, Item>? items,
+    Map<String, Tag>? tags,
+    Map<String, Event>? events,
+  }) async {
+    await captureTreeBackup();
+    final previous = await file.exists() ? await file.readAsBytes() : null;
+    await _writer(file, bytes);
+    try {
+      await TreeBackupStore(directory, writer: _writer).capture(
+        items: items ?? _items,
+        tags: tags ?? _tags,
+        events: events ?? _events,
+        now: clock(),
+      );
+    } on Object {
+      if (previous != null) {
+        await _writer(file, previous);
+      } else if (await file.exists()) {
+        await file.delete();
+      }
+      rethrow;
+    }
+  }
+
+  /// Merge by identity. Source removals are retained and hidden from recording.
+  Future<void> importObsidian(
+    ObsidianImport imported, {
+    required String directory,
+    Future<void> Function()? beforeSave,
+  }) async {
+    final tags = {..._tags};
+    String resolveTag(String name) {
+      String pathOf(Tag tag) {
+        final parts = <String>[tag.name];
+        var parent = tag.parentId;
+        while (parent != null) {
+          final node = tags[parent]!;
+          parts.insert(0, node.name);
+          parent = node.parentId;
+        }
+        return parts.join('/');
+      }
+
+      final exact = tags.values
+          .where((t) => caseFold(pathOf(t)) == caseFold(name))
+          .toList();
+      if (exact.length == 1) return exact.single.id;
+      final leaf = tags.values
+          .where((t) => caseFold(t.name) == caseFold(name))
+          .toList();
+      if (leaf.length == 1) return leaf.single.id;
+      if (leaf.length > 1)
+        throw FormatException('标签「$name」有重名，请在 Markdown 中使用完整标签路径。');
+      String? parent;
+      for (final part in name.split('/')) {
+        if (part.trim().isEmpty) throw const FormatException('标签路径不能为空。');
+        final existing = tags.values.where(
+          (t) => t.parentId == parent && caseFold(t.name) == caseFold(part),
+        );
+        if (existing.isNotEmpty) {
+          parent = existing.single.id;
+        } else {
+          final tag = Tag(const Uuid().v4().replaceAll('-', ''), part, parent);
+          tags[tag.id] = tag;
+          parent = tag.id;
+        }
+      }
+      return parent!;
+    }
+
+    final items = {
+      for (final item in _items.values)
+        item.id:
+            item.source?.directory == directory &&
+                !imported.items.containsKey(item.id)
+            ? item.copyWith(source: item.source!.asMissing())
+            : item,
+    };
+    for (final item in imported.items.values) {
+      final previous = _items[item.id];
+      if (previous != null && previous.source == null) {
+        throw FormatException('导入 ID 与本地事项冲突：${item.id}。');
+      }
+      final tagIds = [
+        for (final name in imported.tagNames[item.id] ?? const <String>[])
+          resolveTag(name),
+      ];
+      items[item.id] = (previous ?? item).copyWith(
+        name: item.name,
+        parentId: item.parentId,
+        clearParent: item.parentId == null,
+        objective: item.objective,
+        outcome: item.outcome,
+        status: item.status,
+        tagIds: normalizeTagIds(tagIds),
+        excludedTagIds: const [],
+        source: item.source,
+      );
+    }
+    validateTags(tags);
+    validateItems(items);
+    await beforeSave?.call();
+    final previousTags = _tags;
+    final changedTags = tags.length != _tags.length;
+    if (changedTags) await _writeTags(tags);
+    _tags = tags;
+    try {
+      await _writeItems(items);
+    } on Object {
+      _tags = previousTags;
+      if (changedTags) await _writeTags(previousTags);
+      rethrow;
+    }
+    _items = items;
   }
 
   Future<Tag> saveTag(String name, String? parentId, {String? id}) async {
