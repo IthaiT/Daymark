@@ -290,6 +290,7 @@ class Store {
         'excluded_tag_ids',
         'links',
         'log',
+        'source',
       };
       final items = <String, Item>{};
       for (final row in payload['items']! as List<Object?>) {

@@ -1,0 +1,264 @@
+import 'package:uuid/uuid.dart';
+import 'package:yaml/yaml.dart';
+
+import 'item.dart';
+import 'unicode.dart';
+
+/// A fully validated import, before any source file is changed.
+class ObsidianImport {
+  const ObsidianImport(this.items, this.tagNames, this.documents);
+  final Map<String, Item> items;
+  final Map<String, List<String>> tagNames;
+  final Map<String, String> documents;
+}
+
+final _fileId = RegExp(r'^<!-- daymark-file:([a-zA-Z0-9_-]+) -->\s*$');
+final _taskId = RegExp(r'<!-- daymark:([a-zA-Z0-9_-]+) -->');
+final _checkbox = RegExp(r'^(\s*)(?:[-+*]|\d+[.)])\s+\[(.)\]\s*(.*)$');
+
+/// Parses only immediate Markdown children of the selected Daymark folder.
+/// Native hidden comments carry identity, independently of title and location.
+ObsidianImport parseObsidian(
+  Map<String, String> documents, {
+  required String directory,
+  String Function()? newId,
+}) {
+  newId ??= () => 'obsidian-${const Uuid().v4()}';
+  final items = <String, Item>{};
+  final tags = <String, List<String>>{};
+  final updated = <String, String>{};
+  final roots = <String, String>{};
+  final parents = <String, String>{};
+  void add(Item item) {
+    if (items.containsKey(item.id)) {
+      throw FormatException(
+        'Markdown 中存在重复事项 ID：${item.id}。请为复制的事项移除 ID 注释后重试。',
+      );
+    }
+    items[item.id] = item;
+  }
+
+  for (final entry in documents.entries) {
+    final path = entry.key;
+    final text = entry.value;
+    final eol = text.contains('\r\n') ? '\r\n' : '\n';
+    final bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
+    final lines = text.substring(bom.length).split(eol);
+    var body = 0;
+    Map<Object?, Object?> properties = const {};
+    if (lines.first.trim() == '---') {
+      final end = lines.indexWhere((line) => line.trim() == '---', 1);
+      if (end < 0) throw FormatException('$path 的 YAML 属性未结束。');
+      final value = loadYaml(lines.sublist(1, end).join('\n'));
+      if (value != null && value is! YamlMap) {
+        throw FormatException('$path 的 YAML 属性必须是映射。');
+      }
+      if (value is YamlMap) properties = value;
+      body = end + 1;
+    }
+    String? rootId;
+    for (var index = body; index < lines.length; index++) {
+      final match = _fileId.firstMatch(lines[index]);
+      if (match == null) continue;
+      if (rootId != null) throw FormatException('$path 包含多个文件 ID。');
+      rootId = match[1];
+    }
+    rootId ??= newId();
+    if (!lines.any((line) => _fileId.hasMatch(line))) {
+      lines.insert(body, '<!-- daymark-file:$rootId -->');
+    }
+    final name = path
+        .replaceAll('\\', '/')
+        .split('/')
+        .last
+        .replaceFirst(RegExp(r'\.md$', caseSensitive: false), '');
+    final key = caseFold(name);
+    if (roots.containsKey(key)) throw FormatException('文件名重复：$name。');
+    roots[key] = rootId;
+    final parent = _parent(properties['parent'], path);
+    if (parent != null) parents[rootId] = parent;
+    tags[rootId] = _tags(properties['tags'], path);
+    final stack = <(int, String)>[];
+    String? fence;
+    var comment = false;
+    var order = 0;
+    for (var index = body; index < lines.length; index++) {
+      final line = lines[index];
+      final trimmed = line.trimLeft();
+      final code = RegExp(r'^(`{3,}|~{3,})').firstMatch(trimmed);
+      if (code != null) {
+        final marker = code[1]!;
+        if (fence == null) {
+          fence = marker;
+        } else if (marker.startsWith(fence[0]) &&
+            marker.length >= fence.length) {
+          fence = null;
+        }
+        continue;
+      }
+      if (fence != null) continue;
+      if (comment) {
+        if (trimmed.contains('-->') || trimmed.contains('%%')) comment = false;
+        continue;
+      }
+      if ((trimmed.startsWith('<!--') && !trimmed.contains('-->')) ||
+          (trimmed.startsWith('%%') && !trimmed.substring(2).contains('%%'))) {
+        comment = true;
+        continue;
+      }
+      final match = _checkbox.firstMatch(line);
+      if (match == null) continue;
+      final status = switch (match[2]) {
+        ' ' => ItemStatus.active,
+        '/' => ItemStatus.paused,
+        '-' => ItemStatus.dropped,
+        'x' || 'X' => ItemStatus.done,
+        _ => throw FormatException('$path 第 ${index + 1} 行的复选框状态不支持。'),
+      };
+      var indent = 0;
+      for (final unit in match[1]!.codeUnits) {
+        indent += unit == 9 ? 4 - indent % 4 : 1;
+      }
+      while (stack.isNotEmpty && stack.last.$1 >= indent) {
+        stack.removeLast();
+      }
+      final ids = _taskId.allMatches(line).toList();
+      if (ids.length > 1)
+        throw FormatException('$path 第 ${index + 1} 行包含多个 ID。');
+      final id = ids.isEmpty ? newId() : ids.single[1]!;
+      if (ids.isEmpty) lines[index] = '$line <!-- daymark:$id -->';
+      final fields = _fields(_cleanTask(match[3]!));
+      if (fields.first.trim().isEmpty || fields.length > 3) {
+        throw FormatException(
+          '$path 第 ${index + 1} 行请使用「名称 | 描述 | 结果」，正文中的竖线请写为 \\|。',
+        );
+      }
+      add(
+        Item(
+          id: id,
+          name: fields[0].trim(),
+          objective: fields.length > 1 ? fields[1].trim() : '',
+          outcome: fields.length > 2 ? fields[2].trim() : '',
+          status: status,
+          parentId: stack.isEmpty ? rootId : stack.last.$2,
+          source: ItemSource(
+            directory: directory,
+            path: path,
+            kind: 'task',
+            order: order++,
+            raw: lines[index],
+          ),
+        ),
+      );
+      stack.add((indent, id));
+    }
+    final annotated = '$bom${lines.join(eol)}';
+    updated[path] = annotated;
+    add(
+      Item(
+        id: rootId,
+        name: name,
+        source: ItemSource(
+          directory: directory,
+          path: path,
+          kind: 'file',
+          order: 0,
+          raw: annotated,
+        ),
+      ),
+    );
+  }
+  for (final entry in parents.entries) {
+    final parentId = roots[caseFold(entry.value)];
+    if (parentId == null) throw FormatException('父事项文件不存在：${entry.value}。');
+    items[entry.key] = items[entry.key]!.copyWith(parentId: parentId);
+  }
+  validateItems(items);
+  return ObsidianImport(
+    Map.unmodifiable(items),
+    Map.unmodifiable(tags),
+    Map.unmodifiable(updated),
+  );
+}
+
+String? _parent(Object? value, String path) {
+  // YAML interprets unquoted [[Name]] as nested flow lists.
+  if (value is List &&
+      value.length == 1 &&
+      value.single is List &&
+      (value.single as List).length == 1) {
+    value = '[[${(value.single as List).single}]]';
+  }
+  if (value == null || value == '') return null;
+  if (value is! String) throw FormatException('$path 的 parent 必须为一个双链。');
+  if (const ['最顶层事项', '最顶层', '最顶层的事项', 'root'].contains(value.trim()))
+    return null;
+  final match = RegExp(r'^\[\[([^\]]+)\]\]$').firstMatch(value.trim());
+  if (match == null) throw FormatException('$path 的 parent 请使用 [[文件名]]。');
+  return match[1]!
+      .split('|')
+      .first
+      .split('#')
+      .first
+      .replaceAll('\\', '/')
+      .split('/')
+      .last
+      .replaceFirst(RegExp(r'\.md$', caseSensitive: false), '');
+}
+
+List<String> _tags(Object? value, String path) {
+  if (value == null) return const [];
+  final values = value is String ? value.split(RegExp(r'[,，]')) : value;
+  if (values is! List || values.any((tag) => tag is! String)) {
+    throw FormatException('$path 的 tags 必须为标签名称列表。');
+  }
+  return [
+    for (final tag in values.cast<String>())
+      if (tag.trim().isNotEmpty) tag.trim().replaceFirst(RegExp(r'^#'), ''),
+  ];
+}
+
+String _cleanTask(String value) => value
+    .replaceAll(RegExp(r'<!--.*?-->|%%.*?%%'), '')
+    .replaceAll(
+      RegExp(
+        r'[\[(](?:due|scheduled|start|created|completion|cancelled|priority|repeat|id|dependsOn|onCompletion)::[^\])]*[\])]',
+        caseSensitive: false,
+      ),
+      '',
+    )
+    .replaceAll(RegExp(r'[📅🛫⏳➕✅❌]\s*\d{4}-\d{2}-\d{2}', unicode: true), '')
+    .replaceAll(RegExp(r'[🔺⏫🔼🔽⏬]\uFE0F?', unicode: true), '')
+    .replaceAll(RegExp(r'🏁\s*(?:keep|delete)', unicode: true), '')
+    .replaceAll(RegExp(r'[🆔⛔]\s*[\w-]+(?:\s*,\s*[\w-]+)*', unicode: true), '')
+    .replaceAll(RegExp(r'🔁\s*.*$', unicode: true), '')
+    .replaceAll(RegExp(r'(^|\s)#[\w\u0080-\uFFFF/-]+'), ' ')
+    .replaceAll(RegExp(r'\s+\^[\w-]+\s*$'), '')
+    .trim();
+
+/// Keep escaped pipes, wiki-link aliases and inline code inside a field.
+List<String> _fields(String text) {
+  final fields = <String>[];
+  final field = StringBuffer();
+  var wiki = 0;
+  var code = false;
+  for (var i = 0; i < text.length; i++) {
+    final c = text[i];
+    if (c == '\\' && i + 1 < text.length && text[i + 1] == '|') {
+      field.write('|');
+      i++;
+      continue;
+    }
+    if (c == '`') code = !code;
+    if (!code && text.startsWith('[[', i)) wiki++;
+    if (!code && text.startsWith(']]', i)) wiki--;
+    if (c == '|' && wiki == 0 && !code) {
+      fields.add(field.toString());
+      field.clear();
+    } else {
+      field.write(c);
+    }
+  }
+  fields.add(field.toString());
+  return fields;
+}

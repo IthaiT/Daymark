@@ -1,5 +1,7 @@
 import 'event_stats.dart';
 import 'model.dart';
+import 'item_source.dart';
+export 'item_source.dart';
 import 'unicode.dart';
 
 /// Lifecycle of a node. A node carrying one of these states is what the
@@ -37,6 +39,7 @@ class Item {
     this.excludedTagIds = const [],
     this.links = const [],
     this.log = const [],
+    this.source,
   });
 
   final String id;
@@ -66,10 +69,17 @@ class Item {
   /// abandoned, with the moment it happened.
   final List<ItemLog> log;
 
+  /// Lossless Markdown source, also retained when the source disappears.
+  final ItemSource? source;
+  bool get isTodo => status == ItemStatus.active && !(source?.missing ?? false);
+
   /// Reads one node from `items.json` or an archive backup.
   factory Item.fromJson(Map<String, Object?> row) {
     List<String> strings(Object? value) =>
         (value as List<Object?>? ?? const []).cast<String>().toList();
+    if (row['source'] != null && row['source'] is! Map<String, Object?>) {
+      throw const FormatException('事项来源格式不正确。');
+    }
     final log = <ItemLog>[];
     for (final entry in (row['log'] as List<Object?>? ?? const [])) {
       final item = entry! as Map<String, Object?>;
@@ -104,6 +114,9 @@ class Item {
       excludedTagIds: strings(row['excluded_tag_ids']),
       links: strings(row['links']),
       log: log,
+      source: row['source'] == null
+          ? null
+          : ItemSource.fromJson(row['source']! as Map<String, Object?>),
     );
   }
 
@@ -122,6 +135,7 @@ class Item {
     List<String>? excludedTagIds,
     List<String>? links,
     List<ItemLog>? log,
+    ItemSource? source,
   }) => Item(
     id: id,
     name: name ?? this.name,
@@ -135,6 +149,7 @@ class Item {
     excludedTagIds: excludedTagIds ?? this.excludedTagIds,
     links: links ?? this.links,
     log: log ?? this.log,
+    source: source ?? this.source,
   );
 
   Map<String, Object?> toJson() => {
@@ -150,6 +165,7 @@ class Item {
     'excluded_tag_ids': excludedTagIds,
     'links': links,
     'log': [for (final entry in log) entry.toJson()],
+    if (source != null) 'source': source!.toJson(),
   };
 
   @override
@@ -163,6 +179,7 @@ class Item {
       endedOn == other.endedOn &&
       objective == other.objective &&
       outcome == other.outcome &&
+      source == other.source &&
       sameValues(tagIds, other.tagIds) &&
       sameValues(excludedTagIds, other.excludedTagIds) &&
       sameValues(links, other.links) &&
@@ -178,6 +195,7 @@ class Item {
     endedOn,
     objective,
     outcome,
+    source,
     Object.hashAll(tagIds),
     Object.hashAll(excludedTagIds),
     Object.hashAll(links),
@@ -245,21 +263,27 @@ void validateItems(Map<String, Item> items) {
         item.endedOn!.isBefore(item.startedOn!)) {
       throw FormatException('事项「${item.name}」的结束日期早于开始日期。');
     }
-    if (item.status == ItemStatus.done &&
+    if (item.source == null &&
+        item.status == ItemStatus.done &&
         item.outcome.trim().isEmpty &&
         item.endedOn == null) {
       throw FormatException('事项「${item.name}」完成前需要填写结果或结束日期。');
     }
-    if (item.status == ItemStatus.dropped && item.outcome.trim().isEmpty) {
+    if (item.source == null &&
+        item.status == ItemStatus.dropped &&
+        item.outcome.trim().isEmpty) {
       throw FormatException('事项「${item.name}」放弃时请填写原因。');
     }
   }
 
-  final siblings = <(String?, String)>{};
+  final siblings = <(String?, String), Item>{};
   for (final item in items.values) {
-    if (!siblings.add((item.parentId, caseFold(item.name.trim())))) {
+    final key = (item.parentId, caseFold(item.name.trim()));
+    final sibling = siblings[key];
+    if (sibling != null && sibling.source == null && item.source == null) {
       throw const FormatException('同一个父事项下不能有重名事项。');
     }
+    siblings[key] = item;
     final visited = <String>{item.id};
     var parent = item.parentId;
     while (parent != null) {
@@ -271,7 +295,7 @@ void validateItems(Map<String, Item> items) {
   }
 
   for (final item in items.values) {
-    if (item.status != ItemStatus.done) continue;
+    if (item.source != null || item.status != ItemStatus.done) continue;
     for (final child in items.values) {
       if (child.parentId == item.id && child.status.isOpen) {
         throw FormatException('事项「${item.name}」还有进行中的子事项，不能标记完成。');
@@ -300,6 +324,17 @@ Item? itemRoot(Map<String, Item> items, String id) {
 }
 
 int compareItemOrder(Item a, Item b) {
+  final left = a.source;
+  final right = b.source;
+  if (left != null &&
+      right != null &&
+      left.directory == right.directory &&
+      left.path == right.path &&
+      left.kind == 'task' &&
+      right.kind == 'task') {
+    final order = left.order.compareTo(right.order);
+    if (order != 0) return order;
+  }
   final result = compareUnicode(
     caseFold(a.name.trim()),
     caseFold(b.name.trim()),
