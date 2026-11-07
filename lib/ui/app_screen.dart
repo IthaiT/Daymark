@@ -124,6 +124,7 @@ class AppScreenState extends State<AppScreen> {
     await showSettingsDialog(
       context,
       settings: widget.journal.settings,
+      onSyncObsidian: widget.journal.syncObsidian,
       allowHistoryEditing: widget.journal.allowHistoryEditing,
       onHistoryEditingChanged: widget.journal.setAllowHistoryEditing,
       onSave: (value) async {
@@ -201,7 +202,7 @@ class AppScreenState extends State<AppScreen> {
                       const SizedBox(height: 16),
                       _mode(context, 0, '时间记录', Icons.schedule),
                       const SizedBox(height: 8),
-                      _mode(context, 1, '项目', Icons.workspaces_outline),
+                      _mode(context, 1, '事项', Icons.workspaces_outline),
                       const SizedBox(height: 8),
                       _mode(
                         context,

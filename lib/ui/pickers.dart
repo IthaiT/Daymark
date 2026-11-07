@@ -300,7 +300,11 @@ class TagChoicesState extends State<TagChoices> {
 /// Owners matching [query]: tags first, then project items, both searched by
 /// their full path so repeated leaf names stay distinguishable. A null entry
 /// means "no owner", so typing the empty label clears the owner.
-List<OwnerRef?> matchingOwners(Store store, String query) {
+List<OwnerRef?> matchingOwners(
+  Store store,
+  String query, {
+  bool includeItems = true,
+}) {
   final needle = caseFold(query.trim());
   return [
     if (caseFold('未归类').contains(needle)) null,
@@ -310,7 +314,9 @@ List<OwnerRef?> matchingOwners(Store store, String query) {
       ).contains(needle))
         (id: tag.id, isItem: false),
     for (final (item, _) in orderedItems(store.items))
-      if (caseFold(store.itemPath(item.id)).contains(needle))
+      if (includeItems &&
+          item.isTodo &&
+          caseFold(store.itemPath(item.id)).contains(needle))
         (id: item.id, isItem: true),
   ];
 }
@@ -331,12 +337,12 @@ String _titleSubtitle(Store store, OwnerRef owner) {
     return store.ancestors(owner.id).map((tag) => tag.name).join(' / ');
   }
   final parents = itemAncestors(store.items, owner.id);
-  return parents.isEmpty ? '项目' : parents.map((item) => item.name).join(' / ');
+  return parents.isEmpty ? '事项' : parents.map((item) => item.name).join(' / ');
 }
 
 /// Candidates for the name column.
 ///
-/// Only closed vocabularies take part — project items and tags — so a freely
+/// Only todo items take part, so a freely
 /// typed phrase never turns yesterday's wording into a suggestion. Exact
 /// matches rank first, then prefixes, then anything containing the query.
 List<TitleChoice> titleChoices(Store store, String query, {int limit = 8}) {
@@ -366,10 +372,7 @@ List<TitleChoice> titleChoices(Store store, String query, {int limit = 8}) {
   }
 
   for (final (item, _) in orderedItems(store.items)) {
-    add(item.name, (id: item.id, isItem: true));
-  }
-  for (final tag in store.orderedTags()) {
-    add(tag.name, (id: tag.id, isItem: false));
+    if (item.isTodo) add(item.name, (id: item.id, isItem: true));
   }
   return [...exact, ...prefix, ...contains].take(limit).toList();
 }
@@ -405,6 +408,15 @@ class TitleChoices extends StatelessWidget {
                 ),
                 dense: true,
                 selected: index == selected,
+                selectedTileColor: Theme.of(
+                  context,
+                ).colorScheme.secondaryContainer,
+                selectedColor: Theme.of(
+                  context,
+                ).colorScheme.onSecondaryContainer,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 leading: Icon(
                   choices[index].owner.isItem
                       ? Icons.workspaces_outline
@@ -441,6 +453,7 @@ class OwnerChoices extends StatefulWidget {
     this.tagIds = const [],
     this.query = '',
     this.highlighted = -1,
+    this.includeItems = true,
   });
   final Store store;
   final ValueChanged<OwnerRef?> onChoose;
@@ -450,6 +463,7 @@ class OwnerChoices extends StatefulWidget {
 
   /// Index in [OwnerChoicesState.visibleOwners] moved with the arrow keys.
   final int highlighted;
+  final bool includeItems;
   @override
   State<OwnerChoices> createState() => OwnerChoicesState();
 }
@@ -476,13 +490,20 @@ class OwnerChoicesState extends State<OwnerChoices> {
   /// Rows the arrow keys walk through, in display order.
   List<OwnerRef?> get visibleOwners {
     final query = widget.query.trim();
-    if (query.isNotEmpty) return matchingOwners(widget.store, query);
+    if (query.isNotEmpty) {
+      return matchingOwners(
+        widget.store,
+        query,
+        includeItems: widget.includeItems,
+      );
+    }
     return [
       null,
       for (final tag in widget.store.orderedTags())
         if (!_hidden(tag.id)) (id: tag.id, isItem: false),
       for (final (item, _) in orderedItems(widget.store.items))
-        if (!_hiddenItem(item.id)) (id: item.id, isItem: true),
+        if (widget.includeItems && item.isTodo && !_hiddenItem(item.id))
+          (id: item.id, isItem: true),
     ];
   }
 
@@ -515,7 +536,9 @@ class OwnerChoicesState extends State<OwnerChoices> {
             TagTreeTile(
               key: const ValueKey('tag-choice-unclassified'),
               store: widget.store,
-              selected: widget.itemId == null && widget.tagIds.isEmpty,
+              selected:
+                  (!widget.includeItems || widget.itemId == null) &&
+                  widget.tagIds.isEmpty,
               label: '未归类',
               onTap: () => widget.onChoose(null),
             ),
@@ -529,7 +552,7 @@ class OwnerChoicesState extends State<OwnerChoices> {
           const Divider(height: 16),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-            child: Text('项目', style: Theme.of(context).textTheme.labelMedium),
+            child: Text('事项', style: Theme.of(context).textTheme.labelMedium),
           ),
         ],
         for (final owner in items)
@@ -540,7 +563,7 @@ class OwnerChoicesState extends State<OwnerChoices> {
         if (!noneMatches && owners.isEmpty)
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Text('没有匹配的标签或项目', style: TextStyle(color: scheme.outline)),
+            child: Text('没有匹配的标签或事项', style: TextStyle(color: scheme.outline)),
           ),
       ],
     );

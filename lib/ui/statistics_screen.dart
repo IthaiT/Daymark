@@ -458,7 +458,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               AppSegmentedButton<_StatsDimension>(
                 segments: const [
                   ButtonSegment(value: _StatsDimension.tag, label: Text('标签')),
-                  ButtonSegment(value: _StatsDimension.item, label: Text('项目')),
+                  ButtonSegment(value: _StatsDimension.item, label: Text('事项')),
                 ],
                 selected: {_dimension},
                 onSelectionChanged: (values) => setState(() {
@@ -950,7 +950,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '${_dimension == _StatsDimension.item ? '全部项目' : '全部标签'}${isChild ? ' › ${_pathOf(model, node)}' : ' › ${node.name}'}',
+          '${_dimension == _StatsDimension.item ? '全部事项' : '全部标签'}${isChild ? ' › ${_pathOf(model, node)}' : ' › ${node.name}'}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(
@@ -1714,7 +1714,7 @@ class _MoveTargetDialogState extends State<_MoveTargetDialog> {
           TextField(
             key: const ValueKey('move-target-search'),
             autofocus: true,
-            decoration: const InputDecoration(hintText: '搜索标签或项目'),
+            decoration: const InputDecoration(hintText: '搜索标签或事项'),
             onChanged: (value) => setState(() => _query = value),
           ),
           const SizedBox(height: 8),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_selector/file_selector.dart';
 
 import '../domain/settings.dart';
 import 'dialogs.dart' show errorText;
@@ -7,6 +8,7 @@ Future<void> showSettingsDialog(
   BuildContext context, {
   required AppSettings settings,
   required Future<void> Function(AppSettings) onSave,
+  Future<int> Function(String)? onSyncObsidian,
   bool allowHistoryEditing = false,
   ValueChanged<bool>? onHistoryEditingChanged,
 }) => showDialog<void>(
@@ -14,6 +16,7 @@ Future<void> showSettingsDialog(
   builder: (_) => _SettingsDialog(
     settings: settings,
     onSave: onSave,
+    onSyncObsidian: onSyncObsidian,
     allowHistoryEditing: allowHistoryEditing,
     onHistoryEditingChanged: onHistoryEditingChanged,
   ),
@@ -23,11 +26,13 @@ class _SettingsDialog extends StatefulWidget {
   const _SettingsDialog({
     required this.settings,
     required this.onSave,
+    this.onSyncObsidian,
     required this.allowHistoryEditing,
     this.onHistoryEditingChanged,
   });
   final AppSettings settings;
   final Future<void> Function(AppSettings) onSave;
+  final Future<int> Function(String)? onSyncObsidian;
   final bool allowHistoryEditing;
   final ValueChanged<bool>? onHistoryEditingChanged;
   @override
@@ -39,7 +44,48 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late int _dragMinutes = widget.settings.dragMinutes;
   late bool _splitOverlap = widget.settings.splitOverlap;
   late bool _allowHistoryEditing = widget.allowHistoryEditing;
+  late final _obsidian = TextEditingController(
+    text: widget.settings.obsidianDirectory,
+  );
+  String? _syncMessage;
   bool _saving = false;
+
+  @override
+  void dispose() {
+    _obsidian.dispose();
+    super.dispose();
+  }
+
+  Future<void> _browse() async {
+    try {
+      final path = await getDirectoryPath(
+        initialDirectory: _obsidian.text.trim().isEmpty
+            ? null
+            : _obsidian.text.trim(),
+        confirmButtonText: '选择事项文件夹',
+      );
+      if (mounted && path != null) setState(() => _obsidian.text = path);
+    } catch (error) {
+      if (mounted) setState(() => _error = errorText(error));
+    }
+  }
+
+  Future<void> _sync() async {
+    setState(() {
+      _saving = true;
+      _error = null;
+      _syncMessage = null;
+    });
+    try {
+      final count = await widget.onSyncObsidian!(_obsidian.text.trim());
+      if (mounted) setState(() => _syncMessage = '已同步 $count 个事项');
+    } catch (error) {
+      if (mounted) setState(() => _error = errorText(error));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   String? _error;
 
   Future<void> _save() async {
@@ -54,6 +100,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           autoUndefined: _autoUndefined,
           dragMinutes: _dragMinutes,
           splitOverlap: _splitOverlap,
+          obsidianDirectory: _obsidian.text.trim(),
         ),
       );
       widget.onHistoryEditingChanged?.call(_allowHistoryEditing);
@@ -139,6 +186,43 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                     ? null
                     : (value) => setState(() => _splitOverlap = value),
               ),
+              const Divider(height: 24),
+              Text(
+                'Obsidian 事项',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                key: const ValueKey('setting-obsidian-directory'),
+                controller: _obsidian,
+                enabled: !_saving,
+                decoration: InputDecoration(
+                  labelText: '事项文件夹',
+                  hintText: r'E:\Data\Documents\Vault\Daymark',
+                  suffixIcon: IconButton(
+                    key: const ValueKey('browse-obsidian-directory'),
+                    tooltip: '选择文件夹',
+                    onPressed: _saving ? null : _browse,
+                    icon: const Icon(Icons.folder_open_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '读取此文件夹中的 Markdown。启动时自动同步，也可立即同步；子事项继承标签，缺失标签自动创建。',
+                style: hint,
+              ),
+              if (widget.onSyncObsidian != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    key: const ValueKey('sync-obsidian'),
+                    onPressed: _saving ? null : _sync,
+                    icon: const Icon(Icons.sync),
+                    label: const Text('立即同步'),
+                  ),
+                ),
+              if (_syncMessage != null) Text(_syncMessage!, style: hint),
               if (_error != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),

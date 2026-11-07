@@ -46,7 +46,7 @@ class EditSession {
     EventColumn.tag =>
       ownerInputValid
           ? (itemId: itemId, tagIds: tagIds)
-          : throw const FormatException('没有匹配的标签或项目，请修改搜索内容或选择已有项。'),
+          : throw const FormatException('没有匹配的标签，请修改搜索内容或选择已有标签。'),
     EventColumn.start => parseEditorTime(text.text, event.start),
     EventColumn.end => parseEditorTime(
       text.text,
@@ -140,7 +140,7 @@ class _InlineEditorState extends State<InlineEditor> {
 
   bool _isCurrent(OwnerRef? owner) {
     final session = widget.session;
-    if (owner == null) return session.itemId == null && session.tagIds.isEmpty;
+    if (owner == null) return session.tagIds.isEmpty;
     if (owner.isItem) return session.itemId == owner.id;
     return session.tagIds.contains(owner.id);
   }
@@ -172,7 +172,8 @@ class _InlineEditorState extends State<InlineEditor> {
   /// Options for the current query, computed from the live text rather than
   /// the last built list: typing and pressing a key in the same frame must not
   /// act on the previous query.
-  List<OwnerRef?> _ownerOptions() => matchingOwners(widget.store, _ownerQuery);
+  List<OwnerRef?> _ownerOptions() =>
+      matchingOwners(widget.store, _ownerQuery, includeItems: false);
 
   /// Applies one owner choice to the pending classification.
   ///
@@ -182,7 +183,6 @@ class _InlineEditorState extends State<InlineEditor> {
     final session = widget.session;
     setState(() {
       if (owner == null) {
-        session.itemId = null;
         session.tagIds = const [];
       } else if (owner.isItem) {
         session.itemId = owner.id;
@@ -191,15 +191,9 @@ class _InlineEditorState extends State<InlineEditor> {
           ...widget.store.effectiveItemTagIds(owner.id),
         ]);
       } else {
-        // One tag is chosen at a time. Picking replaces the previous manual
-        // tag while the tags inherited from the project stay attached, and
-        // picking the same tag again falls back to just those defaults.
-        final inherited = session.itemId == null
-            ? const <String>[]
-            : widget.store.effectiveItemTagIds(session.itemId!);
         session.tagIds = session.tagIds.contains(owner.id)
-            ? normalizeTagIds(inherited)
-            : normalizeTagIds([...inherited, owner.id]);
+            ? normalizeTagIds(session.tagIds.where((id) => id != owner.id))
+            : normalizeTagIds([owner.id, ...session.tagIds]);
       }
       session.ownerInputValid = true;
       session.error = null;
@@ -212,7 +206,9 @@ class _InlineEditorState extends State<InlineEditor> {
     // The wrapper Focus below already receives key events from the field, so
     // attaching the handler to the node as well would run it twice per press.
     if (widget.session.column == EventColumn.tag) {
-      widget.session.text.text = widget.store.ownerName(widget.session.event);
+      widget.session.text.text = widget.session.tagIds
+          .map(widget.store.tagName)
+          .join(' · ');
     }
     // Ending an IME composition may not change the text at all, so the value
     // listener is what makes suggestions appear again after the candidate is
@@ -346,9 +342,7 @@ class _InlineEditorState extends State<InlineEditor> {
       onKeyEvent: _handleKey,
       child: PickerPopup(
         open: session.pickerOpen,
-        color: session.column == EventColumn.tag
-            ? Theme.of(context).colorScheme.surfaceContainer
-            : null,
+        color: Theme.of(context).colorScheme.surfaceContainer,
         groupId: session,
         onClose: _closePicker,
         anchor: TextField(
@@ -359,7 +353,7 @@ class _InlineEditorState extends State<InlineEditor> {
           autofocus: true,
           decoration: InputDecoration(
             hintText: switch (session.column) {
-              EventColumn.tag => '输入标签或项目搜索',
+              EventColumn.tag => '输入标签搜索',
               EventColumn.start || EventColumn.end => '例如 2021 或 20:21',
               EventColumn.title => null,
             },
@@ -382,7 +376,11 @@ class _InlineEditorState extends State<InlineEditor> {
             session.error = null;
             if (session.column == EventColumn.tag) {
               _ownerQuery = text;
-              final options = matchingOwners(widget.store, text);
+              final options = matchingOwners(
+                widget.store,
+                text,
+                includeItems: false,
+              );
               session.ownerInputValid = options.isNotEmpty;
               session.ownerIndex = -1;
               session.pickerOpen = true;
@@ -417,6 +415,7 @@ class _InlineEditorState extends State<InlineEditor> {
           EventColumn.tag => OwnerChoices(
             key: _ownerChoices,
             store: widget.store,
+            includeItems: false,
             itemId: session.itemId,
             tagIds: session.tagIds,
             query: _ownerQuery,

@@ -113,7 +113,7 @@ class ProjectScreenState extends State<ProjectScreen> {
     final id = _boundId;
     if (id == null) return;
     final item = _store.items[id];
-    if (item == null) return;
+    if (item == null || item.source != null) return;
     final name = _name.text.trim();
     final next = item.copyWith(
       // An empty name would fail validation; keep the last good one.
@@ -143,6 +143,7 @@ class ProjectScreenState extends State<ProjectScreen> {
   /// Right-click actions for a tree row, so renaming, adding a child and
   /// deleting all work without leaving the panel.
   Future<void> _rowMenu(Offset position, Item item) async {
+    if (item.source != null) return;
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
@@ -205,6 +206,7 @@ class ProjectScreenState extends State<ProjectScreen> {
   }
 
   Future<void> _delete(Item item) async {
+    if (item.source != null) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -288,6 +290,7 @@ class ProjectScreenState extends State<ProjectScreen> {
       builder: (context, _) {
         final items = _store.items;
         final selected = _selected == null ? null : items[_selected];
+        if (selected?.source != null) _bind(selected);
         if (_selected != null && selected == null) {
           _selected = null;
           _bind(null);
@@ -312,11 +315,11 @@ class ProjectScreenState extends State<ProjectScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const WorkspaceSectionHeader(title: '项目'),
+          const WorkspaceSectionHeader(title: '事项'),
           _addField(
             key: const ValueKey('project-add'),
             controller: _rootAdd,
-            hint: '新增项目，回车创建',
+            hint: '新增事项，回车创建',
             parentId: null,
           ),
           const SizedBox(height: 8),
@@ -328,7 +331,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                   ? Padding(
                       padding: const EdgeInsets.all(12),
                       child: Text(
-                        '还没有项目。在上面输入名字，回车就建好了。',
+                        '还没有事项。在上面输入名字，回车就建好了。',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     )
@@ -437,6 +440,14 @@ class ProjectScreenState extends State<ProjectScreen> {
                 ),
               ),
             ),
+            if (item.source != null || item.status != ItemStatus.active)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Text(
+                  item.source?.missing == true ? '已移除' : item.status.label,
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              ),
             if (duration > Duration.zero)
               Text(
                 durationText(duration),
@@ -460,7 +471,7 @@ class ProjectScreenState extends State<ProjectScreen> {
         padding: const EdgeInsets.all(24),
         child: Center(
           child: Text(
-            '选择左侧的项目来写描述和结果，\n或者直接在上面输入名字新建一个。',
+            '选择左侧的事项来写描述和结果，\n或者直接在上面输入名字新建一个。',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -485,6 +496,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                 child: TextField(
                   key: const ValueKey('project-name'),
                   controller: _name,
+                  readOnly: item.source != null,
                   focusNode: _nameFocus,
                   style: Theme.of(context).textTheme.headlineSmall,
                   decoration: const InputDecoration(
@@ -497,11 +509,14 @@ class ProjectScreenState extends State<ProjectScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              SizedBox(width: 260, child: _tagSearch(item)),
+              if (item.source == null)
+                SizedBox(width: 260, child: _tagSearch(item)),
               IconButton(
                 key: const ValueKey('project-delete'),
                 tooltip: '删除',
-                onPressed: _saving ? null : () => unawaited(_delete(item)),
+                onPressed: _saving || item.source != null
+                    ? null
+                    : () => unawaited(_delete(item)),
                 icon: const Icon(Icons.delete_outline, size: 20),
               ),
             ],
@@ -509,6 +524,14 @@ class ProjectScreenState extends State<ProjectScreen> {
           const SizedBox(height: 6),
           _selectedTags(item),
           const SizedBox(height: 4),
+          Text(
+            item.source == null
+                ? item.status.label
+                : 'Obsidian · ${item.source!.path} · ${item.status.label}${item.source!.missing ? ' · 源中已移除，历史保留' : ''}，请在 Obsidian 中修改',
+            key: const ValueKey('item-source-status'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
@@ -518,7 +541,8 @@ class ProjectScreenState extends State<ProjectScreen> {
                     key: const ValueKey('project-description'),
                     controller: _description,
                     label: '描述',
-                    hint: '这件事是做什么的，为什么做',
+                    readOnly: item.source != null,
+                    hint: item.source == null ? '这件事是做什么的，为什么做' : '暂无描述',
                     minLines: 3,
                   ),
                   const SizedBox(height: 14),
@@ -526,7 +550,8 @@ class ProjectScreenState extends State<ProjectScreen> {
                     key: const ValueKey('project-result'),
                     controller: _result,
                     label: '结果',
-                    hint: '做完之后得到了什么，放弃了也写在这里',
+                    readOnly: item.source != null,
+                    hint: item.source == null ? '做完之后得到了什么，放弃了也写在这里' : '暂无结果',
                     minLines: 3,
                   ),
                   const SizedBox(height: 18),
@@ -621,6 +646,7 @@ class ProjectScreenState extends State<ProjectScreen> {
     required String label,
     required String hint,
     int minLines = 2,
+    bool readOnly = false,
   }) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -630,6 +656,7 @@ class ProjectScreenState extends State<ProjectScreen> {
         key: key,
         controller: controller,
         minLines: minLines,
+        readOnly: readOnly,
         maxLines: null,
         keyboardType: TextInputType.multiline,
         decoration: _box(hint: hint),
@@ -777,7 +804,7 @@ class ProjectScreenState extends State<ProjectScreen> {
     ];
     if (own.isEmpty && inherited.isEmpty) {
       return Text(
-        '还没有标签，在右上角搜索添加。',
+        item.source == null ? '还没有标签，在右上角搜索添加。' : '没有标签，可在 Obsidian 文件属性中添加。',
         style: Theme.of(context).textTheme.bodySmall,
       );
     }
@@ -817,7 +844,7 @@ class ProjectScreenState extends State<ProjectScreen> {
       deleteIconColor: foreground,
       visualDensity: VisualDensity.compact,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      onDeleted: _saving
+      onDeleted: _saving || item.source != null
           ? null
           : () => unawaited(
               inherited ? _excludeTag(item, id) : _removeTag(item, id),

@@ -29,11 +29,38 @@ void main() {
     expect(titles, contains('改简历'));
   });
 
-  test('a tag and an item with the same name are both offered', () async {
+  test('a tag never appears in the name-column suggestions', () async {
     await store.saveTag('跳槽', null);
     final choices = titleChoices(store, '跳槽');
-    expect(choices.map((choice) => choice.owner.isItem).toSet(), {true, false});
+    expect(choices.map((choice) => choice.owner.isItem).toSet(), {true});
   });
+
+  test(
+    'only todo items are offered and the middle of a name matches',
+    () async {
+      await store.saveItem(
+        const Item(id: 'paused', name: '暂停简历', status: ItemStatus.paused),
+      );
+      await store.saveItem(
+        const Item(
+          id: 'done',
+          name: '完成简历',
+          status: ItemStatus.done,
+          outcome: '完成',
+        ),
+      );
+      await store.saveItem(
+        const Item(
+          id: 'cancel',
+          name: '取消简历',
+          status: ItemStatus.dropped,
+          outcome: '取消',
+        ),
+      );
+      expect(titleChoices(store, '简').map((c) => c.owner.id), ['resume']);
+      expect(store.itemIdForTitle('暂停简历'), isNull);
+    },
+  );
 
   test('an empty query offers nothing', () {
     expect(titleChoices(store, '  '), isEmpty);

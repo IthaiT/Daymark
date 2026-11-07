@@ -890,8 +890,9 @@ void main() {
         expect(journal.event('a')!.tagId, 'embedded');
         final field = tester.widget<TextField>(input('a', 'tag'));
         expect(field.focusNode!.hasPrimaryFocus, isTrue);
-        expect(field.controller!.text, '嵌入式');
-        expect(field.controller!.selection, TextSelection.collapsed(offset: 3));
+        expect(field.controller!.text, '嵌入式 · 生活');
+        expect(journal.event('a')!.tagIds, ['embedded', 'life']);
+        expect(field.controller!.selection, TextSelection.collapsed(offset: 8));
         expect(find.byType(OwnerChoices), findsNothing);
       }
     },
@@ -997,7 +998,7 @@ void main() {
       expect(journal.event('a')!.tagId, 'work');
       expect(
         tester.widget<TextField>(input('a', 'tag')).controller!.text,
-        '主业',
+        '主业 · 生活',
       );
       await key(tester, LogicalKeyboardKey.tab);
       expect(input('a', 'title'), findsOneWidget);

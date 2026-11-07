@@ -90,7 +90,7 @@ void main() {
     tester,
   ) async {
     await pump(tester);
-    expect(find.textContaining('还没有项目'), findsOneWidget);
+    expect(find.textContaining('还没有事项'), findsOneWidget);
 
     await addRoot(tester, '跳槽');
     expect(journal.store.items.length, 1);
