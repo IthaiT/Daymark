@@ -15,6 +15,14 @@ $taskEvents = "id,title,tag_id,start,end,notes`r`ncoverage,合成整日覆盖,wo
 $taskLedger = '{"version":2,"default_cash_account_id":"cash","balance_enabled":true,"accounts":[{"id":"cash","name":"现金","kind":"cash","opening_cents":1000000,"balance_cents":997200},{"id":"provident","name":"公积金","kind":"provident","opening_cents":0,"balance_cents":0},{"id":"investment","name":"投资","kind":"investment","opening_cents":0,"balance_cents":0}],"categories":[{"id":"lunch","name":"午餐","kind":"expense","parent_id":null}],"records":[{"id":"synthetic-money","kind":"expense","amount_cents":2800,"date":"' + $taskDay + '","category_id":"lunch","notes":"隔离测试","account_id":"cash","to_account_id":null,"affects_balance":true}],"pinned":["lunch"]}'
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'ledger.json'), $taskLedger, [Text.UTF8Encoding]::new($false))
 
+# This source is synthetic and stays inside the smoke test's private data folder.
+$taskObsidian = Join-Path $taskDirectory 'obsidian'
+New-Item -ItemType Directory -Path $taskObsidian | Out-Null
+$taskMarkdown = "---`ntags: [主业, 副业]`n---`n- [ ] 待办事项 | 描述`n- [/] 暂停事项`n- [-] 取消事项`n- [x] 完成事项 | | 结果`n"
+[IO.File]::WriteAllText((Join-Path $taskObsidian '合成事项.md'), $taskMarkdown, [Text.UTF8Encoding]::new($false))
+$taskSettings = @{version=1; obsidian_directory=$taskObsidian} | ConvertTo-Json
+[IO.File]::WriteAllText((Join-Path $taskDirectory 'settings.json'), $taskSettings, [Text.UTF8Encoding]::new($false))
+
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -110,7 +118,8 @@ public static class DaymarkPrivateDesktop {
             0xe556, 0xf48f, 0xf316, 0xf107, 0xef56, 0xefc4, 0xef4c,
             0xe25c, 0xf1be, 0xee33, 0xf266, 0xf37d, 0xf3ca, 0xf2ef,
             0xf336, 0xe364, 0xe44c, 0xf231, 0xe124,
-            0xe168 // Material 3 heatmap chip removal (Icons.clear).
+            0xe168, // Material 3 heatmap chip removal (Icons.clear).
+            0xf090, 0xe62f // Obsidian folder picker and synchronization.
         });
         CheckGlyphs(Path.Combine(assets, "assets", "fonts", "NotoSansSC.ttf"), new[] {
             0x0030, 0x0041, 0x0061, 0x00a5, 0x4e2d, 0x6587, 0x65f6, 0x95f4, 0x9910, 0x996e,
@@ -237,4 +246,13 @@ $taskArchive = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'archive.
 if ($taskArchive.version -ne 1 -or $taskArchive.days.Count -ne 1 -or $taskArchive.days[0] -ne $taskPreviousDay -or -not ($taskArchive.events.id -contains 'coverage')) {
     throw 'Startup/normal close did not retain the completed-day archive backup.'
 }
-Write-Output "Native smoke passed: journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, completed-day archive backup and graceful close, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+$taskTree = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskImported = @($taskTree.items | Where-Object { $_.source.kind -eq 'task' })
+if ($taskTree.version -ne 1 -or $taskImported.Count -ne 4 -or @($taskImported.status | Select-Object -Unique).Count -ne 4 -or -not ($taskTree.events.id -contains 'synthetic')) {
+    throw 'Startup synchronization or the complete tree backup lost imported states or saved records.'
+}
+$taskAnnotated = [IO.File]::ReadAllText((Join-Path $taskObsidian '合成事项.md'))
+if ([regex]::Matches($taskAnnotated, '<!-- daymark:').Count -ne 4 -or -not $taskAnnotated.Contains('<!-- daymark-file:')) {
+    throw 'Startup synchronization did not write stable hidden identities.'
+}
+Write-Output "Native smoke passed: Obsidian startup synchronization, four item states and complete tree backup, journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, completed-day archive backup and graceful close, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
