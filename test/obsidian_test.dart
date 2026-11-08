@@ -113,4 +113,24 @@ void main() {
     validateItems(result.items);
     expect(result.items.length, 4);
   });
+  test(
+    'inline tags in every field belong to their task, not link or code text',
+    () {
+      final result = parse({
+        'A.md':
+            '---\ntags: [主业]\n---\n- [ ] #研发 名称 | 描述 #客户/甲 | #待确认 结果 #研发\n  - [ ] 子事项 #自己的标签\n- [ ] `#code` [[目标#标题]] \\#literal #123 | #有效_tag 描述\n',
+      });
+      final task = result.items.values.singleWhere((n) => n.name == '名称');
+      expect(result.tagNames[task.id], ['研发', '客户/甲', '待确认']);
+      expect(task.objective, '描述');
+      expect(task.outcome, '结果');
+      final child = result.items.values.singleWhere((n) => n.name == '子事项');
+      expect(result.tagNames[child.id], ['自己的标签']);
+      final literal = result.items.values.singleWhere(
+        (n) => n.name.startsWith('`'),
+      );
+      expect(literal.name, '`#code` [[目标#标题]] \\#literal #123');
+      expect(result.tagNames[literal.id], ['有效_tag']);
+    },
+  );
 }

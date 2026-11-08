@@ -143,7 +143,9 @@ ObsidianImport parseObsidian(
       }
       final id = ids.isEmpty ? newId() : ids.single[1]!;
       if (ids.isEmpty) lines[index] = '$line <!-- daymark:$id -->';
-      final fields = _fields(_cleanTask(match[3]!));
+      final (content, ownTags) = _inlineTags(match[3]!);
+      tags[id] = ownTags;
+      final fields = _fields(_cleanTask(content));
       if (fields.first.trim().isEmpty || fields.length > 3) {
         throw FormatException(
           '$path 第 ${index + 1} 行请使用「名称 | 描述 | 结果」，正文中的竖线请写为 \\|。',
@@ -235,6 +237,56 @@ List<String> _tags(Object? value, String path) {
   ];
 }
 
+/// Obsidian tags may appear in any field; links and code are literal text.
+(String, List<String>) _inlineTags(String value) {
+  value = value.replaceAll(RegExp(r'<!--.*?-->|%%.*?%%'), '');
+  final tag = RegExp(r'^#[\p{L}\p{M}\p{N}_/-]+', unicode: true);
+  final letter = RegExp(r'[\p{L}\p{M}_-]', unicode: true);
+  final names = <String>[];
+  final text = StringBuffer();
+  var wiki = false;
+  var ticks = 0;
+  for (var index = 0; index < value.length;) {
+    if (value[index] == '\\' && index + 1 < value.length) {
+      text.write(value.substring(index, index + 2));
+      index += 2;
+      continue;
+    }
+    if (value[index] == '`') {
+      var end = index;
+      while (end < value.length && value[end] == '`') {
+        end++;
+      }
+      final count = end - index;
+      if (ticks == 0) {
+        ticks = count;
+      } else if (ticks == count) {
+        ticks = 0;
+      }
+      text.write(value.substring(index, end));
+      index = end;
+      continue;
+    }
+    if (ticks == 0 && value.startsWith('[[', index)) wiki = true;
+    if (ticks == 0 && value.startsWith(']]', index)) wiki = false;
+    if (!wiki &&
+        ticks == 0 &&
+        value[index] == '#' &&
+        (index == 0 || RegExp(r'[\s|]').hasMatch(value[index - 1]))) {
+      final match = tag.firstMatch(value.substring(index));
+      if (match != null && letter.hasMatch(match[0]!)) {
+        final name = match[0]!.substring(1);
+        if (!names.contains(name)) names.add(name);
+        text.write(' ');
+        index += match[0]!.length;
+        continue;
+      }
+    }
+    text.write(value[index++]);
+  }
+  return (text.toString(), names);
+}
+
 String _cleanTask(String value) => value
     .replaceAll(RegExp(r'<!--.*?-->|%%.*?%%'), '')
     .replaceAll(
@@ -249,7 +301,6 @@ String _cleanTask(String value) => value
     .replaceAll(RegExp(r'🏁\s*(?:keep|delete)', unicode: true), '')
     .replaceAll(RegExp(r'[🆔⛔]\s*[\w-]+(?:\s*,\s*[\w-]+)*', unicode: true), '')
     .replaceAll(RegExp(r'🔁\s*.*$', unicode: true), '')
-    .replaceAll(RegExp(r'(^|\s)#[\w\u0080-\uFFFF/-]+'), ' ')
     .replaceAll(RegExp(r'\s+\^[\w-]+\s*$'), '')
     .trim();
 

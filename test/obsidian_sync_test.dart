@@ -158,4 +158,23 @@ void main() {
       );
     },
   );
+  test(
+    'task tags combine with file and parent task tags without rewriting history',
+    () async {
+      final file = File('${vault.path}/A.md');
+      await file.writeAsString(
+        '---\ntags: [主业]\n---\n- [ ] 父事项 #研发\n  - [ ] 子事项 | 描述 #客户 | 结果 #自有\n',
+      );
+      await const ObsidianSync().synchronize(store, vault);
+      final task = store.items.values.singleWhere((n) => n.name == '子事项');
+      expect(store.effectiveItemTagIds(task.id).map(store.tagName).toSet(), {
+        '主业',
+        '研发',
+        '客户',
+        '自有',
+      });
+      expect(task.tagIds.map(store.tagName).toSet(), {'客户', '自有'});
+      expect(task.objective, '描述');
+    },
+  );
 }
