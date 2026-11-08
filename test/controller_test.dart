@@ -119,6 +119,34 @@ void main() {
     },
   );
 
+  test(
+    'unchanged gaps retain annotations when overlapping boundary owners change',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 10),
+        'b': item('b', 9, 10),
+        'c': item('c', 12, 13),
+      });
+      await controller.initialize();
+      final gap = controller.rows.singleWhere((e) => e.isUndefined);
+      await controller.updateEvent(gap.copyWith(title: '散步', notes: '看夕阳'));
+      await controller.updateEvent(
+        item(
+          'b',
+          9,
+          10,
+        ).copyWith(end: day.add(const Duration(hours: 9, minutes: 45))),
+      );
+      final next = controller.rows.singleWhere((e) => e.isUndefined);
+      expect(next.id, isNot(gap.id));
+      expect(next.start, gap.start);
+      expect(next.end, gap.end);
+      expect(next.title, '散步');
+      expect(next.notes, '看夕阳');
+      expect((await Store.open(directory)).events[next.id], next);
+    },
+  );
+
   test('last classification cannot be removed from a saved event', () async {
     await store.replaceEvents({'a': item('a', 9, 10)});
     await expectLater(

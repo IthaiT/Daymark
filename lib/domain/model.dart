@@ -372,7 +372,13 @@ List<Event> currentGaps(Iterable<Event> savedEvents) {
 }
 
 Event _annotatedGap(Event gap, Map<String, Event> previous) {
-  var annotation = previous[gap.id];
+  // Overlapping neighbours can exchange which event owns the boundary while
+  // leaving the gap itself unchanged. A real split has different bounds.
+  var annotation =
+      previous[gap.id] ??
+      previous.values
+          .where((event) => event.start == gap.start && event.end == gap.end)
+          .firstOrNull;
   if (annotation == null && dayStart(gap.start).isBefore(dayStart(gap.end!))) {
     final legacy = previous[undefinedHeadId(gap.end!)];
     if (legacy?.end == gap.end && legacy!.start == dayStart(gap.end!)) {
