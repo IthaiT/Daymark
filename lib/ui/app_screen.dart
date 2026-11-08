@@ -48,6 +48,7 @@ class AppScreen extends StatefulWidget {
 
 class AppScreenState extends State<AppScreen> {
   final _journal = GlobalKey<JournalScreenState>();
+  final _projects = GlobalKey<ProjectScreenState>();
   final _tagMapScreen = GlobalKey<TagMapScreenState>();
   final _ledgerFocus = FocusNode();
   final _projectFocus = FocusNode();
@@ -190,6 +191,34 @@ class AppScreenState extends State<AppScreen> {
             ),
           ),
         ),
+        ListenableBuilder(
+          listenable: widget.journal,
+          builder: (context, _) {
+            final references = widget.journal.store.deletedObsidianReferences;
+            if (references.isEmpty) return const SizedBox.shrink();
+            final count = references.values.fold(0, (sum, n) => sum + n);
+            return MaterialBanner(
+              key: const ValueKey('obsidian-deleted-notice'),
+              content: Text(
+                'Obsidian 中已删除 ${references.length} 个事项，仍有 $count 条时间记录引用，已保留关联。',
+              ),
+              actions: [
+                TextButton(
+                  key: const ValueKey('view-deleted-obsidian-item'),
+                  onPressed: () async {
+                    await _switch(1);
+                    if (mounted && _page == 1) {
+                      await _projects.currentState?.showItem(
+                        references.keys.first,
+                      );
+                    }
+                  },
+                  child: const Text('查看事项'),
+                ),
+              ],
+            );
+          },
+        ),
         Expanded(
           child: Row(
             children: [
@@ -247,6 +276,7 @@ class AppScreenState extends State<AppScreen> {
                       descendantsAreFocusable: _page == 1,
                       descendantsAreTraversable: _page == 1,
                       child: ProjectScreen(
+                        key: _projects,
                         journal: widget.journal,
                         focusNode: _projectFocus,
                       ),

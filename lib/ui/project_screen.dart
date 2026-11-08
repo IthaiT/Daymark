@@ -104,6 +104,18 @@ class ProjectScreenState extends State<ProjectScreen> {
     _bind(id == null ? null : _store.items[id]);
   }
 
+  /// Opens a retained source item from the deletion notice.
+  Future<void> showItem(String id) async {
+    if (!_store.items.containsKey(id)) return;
+    await _select(id);
+    if (!mounted) return;
+    setState(() {
+      for (final parent in itemAncestors(_store.items, id)) {
+        _collapsed.remove(parent.id);
+      }
+    });
+  }
+
   void _bind(Item? item) {
     _boundId = item?.id;
     _name.text = item?.name ?? '';
@@ -472,7 +484,7 @@ class ProjectScreenState extends State<ProjectScreen> {
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child: Text(
-                  item.source?.missing == true ? '已移除' : item.status.label,
+                  item.source?.missing == true ? '源已删除' : item.status.label,
                   style: Theme.of(context).textTheme.labelSmall,
                 ),
               ),
@@ -548,7 +560,7 @@ class ProjectScreenState extends State<ProjectScreen> {
               const SizedBox(width: 12),
               if (item.source == null)
                 SizedBox(width: 260, child: _tagSearch(item)),
-              if (item.source != null)
+              if (item.source != null && !item.source!.missing)
                 IconButton(
                   key: const ValueKey('project-open-obsidian'),
                   tooltip: '在 Obsidian 中打开',
@@ -564,6 +576,15 @@ class ProjectScreenState extends State<ProjectScreen> {
                 ),
             ],
           ),
+          if (item.source?.missing == true)
+            Padding(
+              key: const ValueKey('project-deleted-source'),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                '此事项已从 Obsidian 删除，仍有 ${_store.deletedObsidianReferences[item.id] ?? 0} 条时间记录引用。修改记录的所属事项后，再次同步即可删除。',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
           const SizedBox(height: 6),
           _selectedTags(item),
           const SizedBox(height: 4),
