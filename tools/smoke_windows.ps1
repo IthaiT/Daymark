@@ -18,7 +18,7 @@ $taskLedger = '{"version":2,"default_cash_account_id":"cash","balance_enabled":t
 # This source is synthetic and stays inside the smoke test's private data folder.
 $taskObsidian = Join-Path $taskDirectory 'obsidian'
 New-Item -ItemType Directory -Path $taskObsidian | Out-Null
-$taskMarkdown = "---`ntags: [主业, 副业]`n---`n- [ ] 待办事项 | 描述`n- [/] 暂停事项`n- [-] 取消事项`n- [x] 完成事项 | | 结果`n`n^daymark-file-smoke-note`n"
+$taskMarkdown = "---`ntags: [主业, 副业]`n---`n- [ ] 待办事项 | 描述`n- [/] 暂停事项`n- [-] 取消事项`n- [x] 完成事项 | | 结果`n"
 [IO.File]::WriteAllText((Join-Path $taskObsidian '合成事项.md'), $taskMarkdown, [Text.UTF8Encoding]::new($false))
 $taskSettings = @{version=1; obsidian_directory=$taskObsidian} | ConvertTo-Json
 [IO.File]::WriteAllText((Join-Path $taskDirectory 'settings.json'), $taskSettings, [Text.UTF8Encoding]::new($false))
@@ -252,22 +252,44 @@ if ($taskTree.version -ne 1 -or $taskImported.Count -ne 4 -or @($taskImported.st
     throw 'Startup synchronization or the complete tree backup lost imported states or saved records.'
 }
 $taskAnnotated = [IO.File]::ReadAllText((Join-Path $taskObsidian '合成事项.md'))
-if ([regex]::Matches($taskAnnotated, '\^daymark-obsidian-').Count -ne 4 -or -not $taskAnnotated.Contains('daymark-id: "smoke-note"') -or $taskAnnotated.Contains('^daymark-file-')) {
-    throw 'Startup synchronization did not migrate the note ID to properties and retain task block IDs.'
+$taskIdPattern = '\^daymark-obsidian-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+$taskFileId = ($taskTree.items | Where-Object { $_.source.kind -eq 'file' }).id
+$taskProperty = [regex]::Match($taskAnnotated, '(?m)^daymark-id: "(' + $taskIdPattern + ')"\s*$')
+if ([regex]::Matches($taskAnnotated, $taskIdPattern).Count -ne 5 -or $taskProperty.Groups[1].Value -ne $taskFileId) {
+    throw 'Note properties, task blocks and stored item IDs do not share the same complete identity.'
 }
-# Delete only the synthetic note; a saved record must retain its referenced task.
+# Merge a note into a task by copying its property value unchanged.
 $taskRetainedId = ($taskImported | Where-Object { $_.status -eq 'active' }).id
 $taskCsvPath = Join-Path $taskDirectory 'events.csv'
 $taskHeader = [IO.File]::ReadAllLines($taskCsvPath)[0]
 if (-not $taskHeader.EndsWith(',item_id')) { throw 'The current CSV owner column is missing.' }
 $taskCsvText = [IO.File]::ReadAllText($taskCsvPath).TrimEnd([char[]]"`r`n")
-[IO.File]::WriteAllText($taskCsvPath, "$taskCsvText`r`nsource-ref,合成引用,work,${taskDay}T10:00:00,${taskDay}T11:00:00,保留关联,$taskRetainedId`r`n", [Text.UTF8Encoding]::new($true))
+[IO.File]::WriteAllText($taskCsvPath, "$taskCsvText`r`nsource-ref,合成引用,work,${taskDay}T10:00:00,${taskDay}T11:00:00,保留关联,$taskRetainedId`r`nnote-ref,笔记引用,work,${taskDay}T11:00:00,${taskDay}T12:00:00,保留笔记身份,$taskFileId`r`n", [Text.UTF8Encoding]::new($true))
+$taskContainerId = '^daymark-obsidian-' + [Guid]::NewGuid().ToString('D')
+$taskTaskLines = [IO.File]::ReadAllLines((Join-Path $taskObsidian '合成事项.md')) | Where-Object { $_ -match '^- \[.\]' } | ForEach-Object { '    ' + $_ }
+$taskMergedFile = Join-Path $taskObsidian '合并事项.md'
+$taskMergedText = "---`ndaymark-id: `"$taskContainerId`"`n---`n- [ ] 合成事项 $taskFileId`n" + ($taskTaskLines -join "`n") + "`n"
+[IO.File]::WriteAllText($taskMergedFile, $taskMergedText, [Text.UTF8Encoding]::new($false))
 Remove-Item -LiteralPath (Join-Path $taskObsidian '合成事项.md')
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+$taskAfterMerge = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskMergedNote = $taskAfterMerge.items | Where-Object { $_.id -eq $taskFileId }
+$taskMergedChild = $taskAfterMerge.items | Where-Object { $_.id -eq $taskRetainedId }
+if (@($taskAfterMerge.items).Count -ne 6 -or $taskMergedNote.source.kind -ne 'task' -or $taskMergedNote.parent_id -ne $taskContainerId -or $taskMergedChild.parent_id -ne $taskFileId -or $taskMergedChild.source.missing) {
+    throw 'Merging the note into a task changed its identity or lost its children.'
+}
+if (($taskAfterMerge.events | Where-Object { $_.id -eq 'note-ref' }).item_id -ne $taskFileId -or ($taskAfterMerge.events | Where-Object { $_.id -eq 'source-ref' }).item_id -ne $taskRetainedId) {
+    throw 'Note-to-task conversion changed the saved record associations.'
+}
+# Deleting the source retains only the two directly referenced nodes.
+Remove-Item -LiteralPath $taskMergedFile
 [DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
 $taskAfterDeletion = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
 $taskRemaining = @($taskAfterDeletion.items)
-$taskRetainedRecord = $taskAfterDeletion.events | Where-Object { $_.id -eq 'source-ref' }
-if ($taskRemaining.Count -ne 1 -or $taskRemaining[0].id -ne $taskRetainedId -or -not $taskRemaining[0].source.missing -or $taskRemaining[0].status -ne 'active' -or $taskRetainedRecord.item_id -ne $taskRetainedId) {
-    throw 'Source deletion did not remove unreferenced nodes while preserving the saved record association.'
+if ($taskRemaining.Count -ne 2 -or @($taskRemaining | Where-Object { $_.source.missing -and $_.status -eq 'active' }).Count -ne 2 -or -not ($taskRemaining.id -contains $taskRetainedId) -or -not ($taskRemaining.id -contains $taskFileId)) {
+    throw 'Source deletion did not retain only the referenced nodes with their original states.'
 }
-Write-Output "Native smoke passed: Obsidian note property migration, four item states, source deletion with referenced-task preservation and complete tree backup, journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, completed-day archive backup and graceful close, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+if (($taskAfterDeletion.events | Where-Object { $_.id -eq 'note-ref' }).item_id -ne $taskFileId -or ($taskAfterDeletion.events | Where-Object { $_.id -eq 'source-ref' }).item_id -ne $taskRetainedId) {
+    throw 'Source deletion changed the saved record associations.'
+}
+Write-Output "Native smoke passed: unified note/task identities, note-to-task merge with unchanged record associations, four item states, source deletion and complete tree backup, Release fonts, isolated desktop, window bounds, BOM/cross-midnight gaps, archive backup, ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
