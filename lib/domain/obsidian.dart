@@ -21,7 +21,7 @@ final _taskId = RegExp(r'<!-- daymark:([a-zA-Z0-9_-]+) -->');
 final _checkbox = RegExp(r'^(\s*)(?:[-+*]|\d+[.)])\s+\[(.)\]\s*(.*)$');
 
 /// Parses only immediate Markdown children of the selected Daymark folder.
-/// Native block references carry identity, independently of title and location.
+/// Note properties and task block references keep identity across moves.
 ObsidianImport parseObsidian(
   Map<String, String> documents, {
   required String directory,
@@ -38,7 +38,7 @@ ObsidianImport parseObsidian(
   void add(Item item) {
     if (items.containsKey(item.id)) {
       throw FormatException(
-        'Markdown 中存在重复事项 ID：${item.id}。请为复制的事项移除 ID 注释后重试。',
+        'Markdown 中存在重复事项 ID：${item.id}。请检查 daymark-id 属性和事项块 ID。',
       );
     }
     items[item.id] = item;
@@ -51,19 +51,20 @@ ObsidianImport parseObsidian(
     final bom = text.startsWith('\uFEFF') ? '\uFEFF' : '';
     final lines = text.substring(bom.length).split(eol);
     var body = 0;
-    Map<Object?, Object?> properties = const {};
+    YamlMap? properties;
     if (lines.first.trim() == '---') {
       final end = lines.indexWhere((line) => line.trim() == '---', 1);
       if (end < 0) throw FormatException('$path 的 YAML 属性未结束。');
-      final value = loadYaml(lines.sublist(1, end).join('\n'));
+      final value = loadYaml(lines.sublist(1, end).join(eol));
       if (value != null && value is! YamlMap) {
         throw FormatException('$path 的 YAML 属性必须是映射。');
       }
       if (value is YamlMap) properties = value;
       body = end + 1;
     }
-    String? rootId;
-    int? legacyRootLine;
+    final propertyId = _noteId(properties?['daymark-id'], path);
+    var rootId = propertyId;
+    final oldRootLines = <int>[];
     String? rootFence;
     var rootComment = false;
     for (var index = body; index < lines.length; index++) {
@@ -97,16 +98,20 @@ ObsidianImport parseObsidian(
       final legacy = _fileId.firstMatch(lines[index]);
       final native = _fileBlockId.firstMatch(lines[index]);
       if (legacy == null && native == null) continue;
-      if (rootId != null) throw FormatException('$path 包含多个文件 ID。');
-      rootId = legacy?[1] ?? _decodeId(native![1]!);
-      if (legacy != null) legacyRootLine = index;
+      if (oldRootLines.isNotEmpty) {
+        throw FormatException('$path 包含多个旧文件 ID。');
+      }
+      final oldId = legacy?[1] ?? _decodeId(native![1]!);
+      if (propertyId != null && propertyId != oldId) {
+        throw FormatException('$path 的 daymark-id 属性与旧文件 ID 冲突，请确认后再同步。');
+      }
+      rootId = oldId;
+      oldRootLines.add(index);
     }
     if (rootFence != null || rootComment) {
       throw FormatException('$path 的代码块或注释未结束，请补全后同步。');
     }
-    final needsRootBlock = rootId == null || legacyRootLine != null;
     rootId ??= newId();
-    if (legacyRootLine != null) lines.removeAt(legacyRootLine);
     final name = path
         .replaceAll('\\', '/')
         .split('/')
@@ -115,9 +120,9 @@ ObsidianImport parseObsidian(
     final key = caseFold(name);
     if (roots.containsKey(key)) throw FormatException('文件名重复：$name。');
     roots[key] = rootId;
-    final parent = _parent(properties['parent'], path);
+    final parent = _parent(properties?['parent'], path);
     if (parent != null) parents[rootId] = parent;
-    tags[rootId] = _tags(properties['tags'], path);
+    tags[rootId] = _tags(properties?['tags'], path);
     final stack = <(int, String)>[];
     String? fence;
     var comment = false;
@@ -212,9 +217,17 @@ ObsidianImport parseObsidian(
       );
       stack.add((indent, id));
     }
-    if (needsRootBlock) {
-      if (lines.last.isNotEmpty) lines.add('');
-      lines.addAll(['^daymark-file-${_encodeId(rootId)}', '']);
+    for (final index in oldRootLines.reversed) {
+      lines.removeAt(index);
+    }
+    if (propertyId == null) {
+      if (body == 0) {
+        lines.insertAll(0, ['---', 'daymark-id: ${jsonEncode(rootId)}', '---']);
+      } else {
+        final yaml = lines.sublist(1, body - 1).join(eol);
+        final updatedYaml = _withNoteId(yaml, properties, rootId, eol);
+        lines.replaceRange(1, body - 1, updatedYaml.split(eol));
+      }
     }
     final annotated = '$bom${lines.join(eol)}';
     updated[path] = annotated;
@@ -243,6 +256,47 @@ ObsidianImport parseObsidian(
     Map.unmodifiable(tags),
     Map.unmodifiable(updated),
   );
+}
+
+String? _noteId(Object? value, String path) {
+  if (value == null || (value is String && value.trim().isEmpty)) return null;
+  if (value is! String || !RegExp(r'^[a-zA-Z0-9_.:-]+$').hasMatch(value)) {
+    throw FormatException('$path 的 daymark-id 必须是由字母、数字或 _ . : - 组成的文本 ID。');
+  }
+  return value;
+}
+
+/// Change only the identity property, preserving unrelated YAML and comments.
+String _withNoteId(String yaml, YamlMap? properties, String id, String eol) {
+  final encoded = jsonEncode(id);
+  final node = properties?.nodes['daymark-id'];
+  String updated;
+  if (node != null) {
+    // An implicit YAML null has a zero-length span at the mapping colon.
+    var start = node.span.start.offset;
+    var end = node.span.end.offset;
+    if (start == end && start < yaml.length && yaml[start] == ':') {
+      start++;
+      end++;
+    }
+    updated = yaml.replaceRange(start, end, ' $encoded');
+  } else if (properties?.style == CollectionStyle.FLOW) {
+    final start = properties!.span.start.offset;
+    final insert = yaml.indexOf('{', start) + 1;
+    final suffix = properties.isEmpty ? '' : ', ';
+    updated = yaml.replaceRange(insert, insert, 'daymark-id: $encoded$suffix');
+  } else {
+    final column = properties == null || properties.isEmpty
+        ? 0
+        : (properties.nodes.keys.first as YamlNode).span.start.column;
+    final indent = ' ' * column;
+    updated = '$yaml$eol${indent}daymark-id: $encoded';
+  }
+  final checked = loadYaml(updated);
+  if (checked is! YamlMap || checked['daymark-id'] != id) {
+    throw const FormatException('无法安全写入 daymark-id 属性，请检查 YAML 格式。');
+  }
+  return updated;
 }
 
 /// Existing user block IDs are preserved; the stored tree remembers their alias.

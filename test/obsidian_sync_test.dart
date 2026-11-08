@@ -5,6 +5,7 @@ import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/obsidian_sync.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -200,4 +201,120 @@ void main() {
     expect(reopened.items[old.id]!.source!.path, 'B.md');
     expect(reopened.items[old.id]!.source!.missing, false);
   });
+
+  test(
+    'note ID migration preserves project and task records after restart and rename',
+    () async {
+      final path = await vault.resolveSymbolicLinks();
+      final file = File('$path/A.md');
+      const original =
+          '---\ntags: [主业]\n---\n- [ ] 任务 ^daymark-task-a\n\n^daymark-file-file-a\n';
+      await file.writeAsString(original);
+      await store.saveItem(
+        Item(
+          id: 'file-a',
+          name: 'A',
+          tagIds: ['work'],
+          source: ItemSource(
+            directory: path,
+            path: 'A.md',
+            kind: 'file',
+            order: 0,
+            raw: original,
+          ),
+        ),
+      );
+      await store.saveItem(
+        Item(
+          id: 'task-a',
+          name: '任务',
+          parentId: 'file-a',
+          source: ItemSource(
+            directory: path,
+            path: 'A.md',
+            kind: 'task',
+            order: 0,
+            raw: '- [ ] 任务 ^daymark-task-a',
+          ),
+        ),
+      );
+      final projectRecord = Event(
+        'project-record',
+        '原笔记记录',
+        'work',
+        DateTime.utc(2026, 11, 8, 8),
+        DateTime.utc(2026, 11, 8, 9),
+        '保留备注',
+        'file-a',
+      );
+      final taskRecord = Event(
+        'task-record',
+        '原任务记录',
+        'side',
+        DateTime.utc(2026, 11, 8, 9),
+        DateTime.utc(2026, 11, 8, 10),
+        '',
+        'task-a',
+      );
+      await store.saveEvent(projectRecord);
+      await store.saveEvent(taskRecord);
+      const sync = ObsidianSync();
+      await sync.synchronize(store, vault);
+      final migrated = await file.readAsString();
+      expect(migrated, contains('daymark-id: "file-a"'));
+      expect(migrated, isNot(contains('^daymark-file-')));
+      expect(migrated, contains('- [ ] 任务 ^daymark-task-a'));
+      final originals = await Directory(
+        '${store.directory.path}/obsidian-originals',
+      ).list().toList();
+      final backup =
+          jsonDecode(await (originals.single as File).readAsString()) as Map;
+      expect((backup['documents'] as Map)['A.md'], original);
+      await file.rename('$path/重命名.md');
+      final reopened = await Store.open(store.directory, backupTrees: true);
+      await sync.synchronize(reopened, vault);
+      expect(reopened.items['file-a']!.name, '重命名');
+      expect(reopened.items['file-a']!.source!.path, '重命名.md');
+      expect(reopened.items['file-a']!.source!.missing, false);
+      expect(reopened.items['task-a']!.parentId, 'file-a');
+      expect(reopened.events['project-record'], projectRecord);
+      expect(reopened.events['task-record'], taskRecord);
+      expect(await File('$path/重命名.md').readAsString(), migrated);
+      final snapshot =
+          jsonDecode(
+                await File(
+                  '${store.directory.path}/tree-backups/latest.json',
+                ).readAsString(),
+              )
+              as Map;
+      final snapshotEvents = snapshot['events'] as List;
+      expect(snapshotEvents.map((e) => (e as Map)['item_id']).toSet(), {
+        'file-a',
+        'task-a',
+      });
+    },
+  );
+
+  test(
+    'conflicting note properties fail before any file or stored data changes',
+    () async {
+      final a = File('${vault.path}/A.md');
+      final b = File('${vault.path}/B.md');
+      await a.writeAsString('- [ ] 已有任务');
+      const sync = ObsidianSync();
+      await sync.synchronize(store, vault);
+      final oldItems = store.items;
+      final oldTags = store.tags;
+      final originalA = await a.readAsString();
+      const conflict =
+          '---\ndaymark-id: property-id\n---\n- [ ] 不应写入\n^daymark-file-other-id\n';
+      await b.writeAsString(conflict);
+      await expectLater(sync.synchronize(store, vault), throwsFormatException);
+      expect(await a.readAsString(), originalA);
+      expect(await b.readAsString(), conflict);
+      expect(store.items, oldItems);
+      expect(store.tags, oldTags);
+      expect((await Store.open(store.directory)).items, oldItems);
+    },
+  );
 }

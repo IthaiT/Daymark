@@ -1,6 +1,7 @@
 import 'package:daymark/domain/obsidian.dart';
 import 'package:daymark/domain/item.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:yaml/yaml.dart';
 
 void main() {
   var counter = 0;
@@ -39,7 +40,7 @@ void main() {
     final root = first.items.values.singleWhere((n) => n.name == 'A');
     final line = first.documents['A.md']!
         .split('\n')
-        .singleWhere((l) => l.startsWith('-'));
+        .singleWhere((l) => l.startsWith('- ['));
     final second = parse({
       '重命名.md': first.documents['A.md']!.replaceAll('$line\n', ''),
       'B.md': '${first.documents['B.md']}\n${line.replaceFirst('名称', '新名称')}\n',
@@ -133,18 +134,22 @@ void main() {
       expect(result.tagNames[literal.id], ['有效_tag']);
     },
   );
-  test('legacy IDs migrate to native blocks without changing identities', () {
-    final result = parse({
-      'A.md':
-          '<!-- daymark-file:old-file -->\n- [ ] 名称 <!-- daymark:old-task -->\n',
-    });
-    expect(result.items['old-file']!.name, 'A');
-    expect(result.items['old-task']!.name, '名称');
-    expect(result.documents['A.md'], contains('^daymark-old-task'));
-    expect(result.documents['A.md'], contains('^daymark-file-old-file'));
-    expect(result.documents['A.md'], isNot(contains('<!-- daymark')));
-    expect(parse(result.documents).documents, result.documents);
-  });
+  test(
+    'legacy IDs migrate to note properties and task blocks without changing identities',
+    () {
+      final result = parse({
+        'A.md':
+            '<!-- daymark-file:old-file -->\n- [ ] 名称 <!-- daymark:old-task -->\n',
+      });
+      expect(result.items['old-file']!.name, 'A');
+      expect(result.items['old-task']!.name, '名称');
+      expect(result.documents['A.md'], contains('^daymark-old-task'));
+      expect(result.documents['A.md'], contains('daymark-id: "old-file"'));
+      expect(result.documents['A.md'], isNot(contains('^daymark-file-')));
+      expect(result.documents['A.md'], isNot(contains('<!-- daymark')));
+      expect(parse(result.documents).documents, result.documents);
+    },
+  );
   test('existing native block links are retained during migration', () {
     final result = parse({
       'A.md': '- [ ] 名称 ^existing-link <!-- daymark:old-task -->\n',
@@ -178,4 +183,135 @@ void main() {
       );
     },
   );
+
+  test('new notes store their identity only in frontmatter', () {
+    for (final source in ['', '正文', '---\n---\n正文']) {
+      final result = parse({'A.md': source});
+      final root = result.items.values.single;
+      final annotated = result.documents['A.md']!;
+      expect(annotated, startsWith('---\n'));
+      final properties = loadYaml(annotated.split('---')[1]) as YamlMap;
+      expect(properties['daymark-id'], root.id);
+      expect(annotated, endsWith(source.endsWith('正文') ? '正文' : ''));
+      expect(annotated, isNot(contains('^daymark-file-')));
+      expect(parse(result.documents).documents, result.documents);
+    }
+  });
+
+  test(
+    'existing note properties are stable across renames without rewriting YAML',
+    () {
+      const source =
+          "---\n# preserved\n'daymark-id': 'dm-project.1:root_a' # identity\ntags: [主业]\nsummary: |\n  daymark-id: literal text\n---\n正文\n";
+      final result = parse({'改名后.md': source});
+      expect(result.items['dm-project.1:root_a']!.name, '改名后');
+      expect(result.documents['改名后.md'], source);
+    },
+  );
+
+  test(
+    'native file blocks migrate losslessly while task block links stay put',
+    () {
+      const source =
+          '\uFEFF---\r\n# keep this comment\r\ntags: [主业]\r\nsummary: |\r\n  daymark-id: literal\r\n---\r\n正文\r\n- [ ] 任务 ^daymark-task-old\r\n\r\n^daymark-file-encoded-66696c655f6f6c64\r\n';
+      final result = parse({'A.md': source});
+      final annotated = result.documents['A.md']!;
+      expect(result.items['file_old']!.name, 'A');
+      expect(result.items['task-old']!.parentId, 'file_old');
+      expect(annotated, contains('daymark-id: "file_old"\r\n---'));
+      expect(annotated, contains('# keep this comment\r\ntags: [主业]'));
+      expect(annotated, contains('  daymark-id: literal\r\n'));
+      expect(annotated, contains('- [ ] 任务 ^daymark-task-old\r\n'));
+      expect(annotated, isNot(contains('^daymark-file-')));
+      expect(annotated, startsWith('\uFEFF---\r\n'));
+      expect(annotated.replaceAll('\r\n', ''), isNot(contains('\n')));
+      expect(parse(result.documents).documents, result.documents);
+    },
+  );
+
+  test(
+    'a matching old marker is removed and conflicting identities are rejected',
+    () {
+      const prefix = '---\ndaymark-id: file-a\n---\n';
+      final result = parse({'A.md': '$prefix正文\n^daymark-file-file-a\n'});
+      expect(result.items.keys, ['file-a']);
+      expect(result.documents['A.md'], '$prefix正文\n');
+      for (final marker in [
+        '^daymark-file-other',
+        '<!-- daymark-file:other -->',
+      ]) {
+        expect(
+          () => parse({'A.md': '$prefix$marker\n'}),
+          throwsFormatException,
+        );
+      }
+      expect(
+        () =>
+            parse({'A.md': '^daymark-file-same\n<!-- daymark-file:same -->\n'}),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test('blank identity properties and flow mappings retain unrelated YAML', () {
+    final headers = [
+      'daymark-id: # retained comment\ntags: [主业]',
+      'daymark-id: null\ntags: [主业]',
+      "'daymark-id': '' # retained comment\ntags: [主业]",
+      'daymark-id: "  "\ntags: [主业]',
+      '{tags: [主业]} # retained comment',
+      '{daymark-id: null, tags: [主业]} # retained comment',
+      '{}',
+      '  tags: [主业]\n  summary: keep',
+    ];
+    for (final yaml in headers) {
+      final result = parse({'A.md': '---\n$yaml\n---\n正文'});
+      final annotated = result.documents['A.md']!;
+      final values = loadYaml(annotated.split('---')[1]) as YamlMap;
+      expect(values['daymark-id'], result.items.keys.single);
+      if (yaml.contains('主业')) expect(values['tags'], ['主业']);
+      if (yaml.contains('retained comment')) {
+        expect(annotated, contains('# retained comment'));
+      }
+      expect(annotated, endsWith('---\n正文'));
+      expect(parse(result.documents).documents, result.documents);
+    }
+  });
+
+  test(
+    'invalid and duplicate note properties cannot silently change identity',
+    () {
+      for (final value in [
+        '123',
+        'true',
+        '[one, two]',
+        '{id: one}',
+        '"has spaces"',
+      ]) {
+        expect(
+          () => parse({'A.md': '---\ndaymark-id: $value\n---\n'}),
+          throwsFormatException,
+        );
+      }
+      expect(
+        () => parse({
+          'A.md': '---\ndaymark-id: same\n---\n',
+          'B.md': '---\ndaymark-id: same\n---\n',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => parse({'A.md': '---\ndaymark-id: one\ndaymark-id: two\n---\n'}),
+        throwsA(isA<Exception>()),
+      );
+    },
+  );
+
+  test('example file IDs inside fences and comments remain literal', () {
+    const source =
+        '---\ndaymark-id: real-note\n---\n```md\n^daymark-file-example\n```\n<!--\n<!-- daymark-file:comment-example -->\n';
+    final result = parse({'A.md': source});
+    expect(result.items.keys, ['real-note']);
+    expect(result.documents['A.md'], source);
+  });
 }
