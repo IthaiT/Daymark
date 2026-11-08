@@ -14,6 +14,13 @@ class ObsidianSync {
 
   Future<int> synchronize(Store store, Directory directory) async {
     final root = Directory(await directory.resolveSymbolicLinks());
+    for (final item in store.items.values) {
+      if (item.source?.directory == root.path && !isObsidianId(item.id)) {
+        throw FormatException(
+          '已保存的 Obsidian 事项「${item.name}」的 ID 不符合统一的 ^daymark-obsidian-UUID 格式。本版本不自动迁移，原数据已保留。',
+        );
+      }
+    }
     final sources = <String, String>{};
     await for (final entity in root.list(followLinks: false)) {
       if (entity is File && entity.path.toLowerCase().endsWith('.md')) {

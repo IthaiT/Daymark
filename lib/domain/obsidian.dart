@@ -211,8 +211,11 @@ String? _noteId(Object? value, String path) {
   return _requireId(value, '$path 的 daymark-id');
 }
 
+/// Both Markdown locations and persisted imported nodes use this exact value.
+bool isObsidianId(String value) => _itemId.hasMatch(value);
+
 String _requireId(String value, String location) {
-  if (!_itemId.hasMatch(value)) {
+  if (!isObsidianId(value)) {
     throw FormatException(
       '$location 的事项 ID 必须使用完整的 ^daymark-obsidian-UUID 格式。',
     );
@@ -256,7 +259,7 @@ String _withNoteId(String yaml, YamlMap? properties, String id, String eol) {
 /// Returns the complete canonical block ID, including its caret.
 String? obsidianBlockId(String line) {
   final block = _blockId.firstMatch(line)?[1];
-  return block != null && _itemId.hasMatch(block) ? block : null;
+  return block != null && isObsidianId(block) ? block : null;
 }
 
 String? _parent(Object? value, String path) {

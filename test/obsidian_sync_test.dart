@@ -5,6 +5,7 @@ import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/obsidian_sync.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/obsidian_ids.dart';
@@ -310,6 +311,67 @@ void main() {
         expect(store.tags, oldTags);
         expect((await Store.open(store.directory)).items, oldItems);
       }
+    },
+  );
+  test(
+    'noncanonical saved identities are rejected instead of splitting record ownership',
+    () async {
+      final path = await vault.resolveSymbolicLinks();
+      final rootId = obsidianId(20);
+      final taskId = obsidianId(21);
+      final storedId = taskId.substring('^daymark-'.length);
+      final line = '- [ ] 正文格式正确但存储身份错误 $taskId';
+      final content = '---\ndaymark-id: "$rootId"\n---\n$line\n';
+      final file = File('$path/A.md');
+      await file.writeAsString(content);
+      await store.saveItem(
+        Item(
+          id: rootId,
+          name: 'A',
+          source: ItemSource(
+            directory: path,
+            path: 'A.md',
+            kind: 'file',
+            order: 0,
+            raw: content,
+          ),
+        ),
+      );
+      await store.saveItem(
+        Item(
+          id: storedId,
+          name: '原事项',
+          parentId: rootId,
+          source: ItemSource(
+            directory: path,
+            path: 'A.md',
+            kind: 'task',
+            order: 0,
+            raw: line,
+          ),
+        ),
+      );
+      final event = Event(
+        'e',
+        '原记录',
+        'work',
+        DateTime.utc(2026, 11, 8, 9),
+        DateTime.utc(2026, 11, 8, 10),
+        '原备注',
+        storedId,
+      );
+      await store.saveEvent(event);
+      final oldItems = store.items;
+      final oldBytes = await store.eventsFile.readAsBytes();
+      await expectLater(
+        const ObsidianSync().synchronize(store, vault),
+        throwsFormatException,
+      );
+      expect(store.items, oldItems);
+      expect(store.events['e'], event);
+      expect(await file.readAsString(), content);
+      expect(await store.eventsFile.readAsBytes(), oldBytes);
+      expect((await Store.open(store.directory)).items, oldItems);
     },
   );
 }
