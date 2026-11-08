@@ -581,7 +581,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                       controller: _description,
                       label: '描述',
                       readOnly: item.source != null,
-                      hint: item.source == null ? '这件事是做什么的，为什么做' : '暂无描述',
+                      hint: '',
                       minLines: 3,
                     ),
                   const SizedBox(height: 14),
@@ -593,7 +593,7 @@ class ProjectScreenState extends State<ProjectScreen> {
                       controller: _result,
                       label: '结果',
                       readOnly: item.source != null,
-                      hint: item.source == null ? '做完之后得到了什么，放弃了也写在这里' : '暂无结果',
+                      hint: '',
                       minLines: 3,
                     ),
                   const SizedBox(height: 18),
@@ -851,12 +851,14 @@ class ProjectScreenState extends State<ProjectScreen> {
           color: Theme.of(context).colorScheme.surfaceContainerLow,
           borderRadius: BorderRadius.circular(10),
         ),
-        child: ObsidianText(
-          text: text.isEmpty ? '暂无$label' : text,
-          directory: item.source!.directory,
-          sourcePath: item.source!.path,
-          openNote: widget.openNote,
-        ),
+        child: text.isEmpty
+            ? null
+            : ObsidianText(
+                text: text,
+                directory: item.source!.directory,
+                sourcePath: item.source!.path,
+                openNote: widget.openNote,
+              ),
       ),
     ],
   );
@@ -905,7 +907,6 @@ class ProjectScreenState extends State<ProjectScreen> {
       key: ValueKey(
         inherited ? 'project-chip-inherited-$id' : 'project-chip-$id',
       ),
-      avatar: Icon(Icons.label_outline, size: 12, color: foreground),
       label: Text(_store.tagName(id)),
       labelStyle: TextStyle(
         color: foreground,

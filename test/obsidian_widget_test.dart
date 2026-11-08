@@ -90,6 +90,8 @@ void main() {
       expect(find.byKey(const ValueKey('item-source-status')), findsNothing);
       expect(find.byKey(const ValueKey('project-delete')), findsNothing);
       expect(find.byKey(const ValueKey('project-sync')), findsOneWidget);
+      expect(find.text('暂无结果'), findsNothing);
+      expect(find.text('解析 Obsidian 的事项'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('project-open-obsidian')));
       await tester.pumpAndSettle();
       expect(opened, ['工作计划.md#^daymark-${task.id}']);

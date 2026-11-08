@@ -73,6 +73,10 @@ void main() {
     await show(700);
     await capture('record-tags');
     expect(find.byType(TagToken), findsNWidgets(4));
+    expect(
+      find.descendant(of: find.byType(TagToken), matching: find.byType(Icon)),
+      findsNothing,
+    );
     final work = tester.widget<TagToken>(
       find.byKey(const ValueKey('record-tag-chips-work')),
     );

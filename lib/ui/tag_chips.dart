@@ -13,13 +13,13 @@ class TagToken extends StatelessWidget {
     required this.label,
     required this.background,
     required this.foreground,
-    this.icon = Icons.label_outline,
+    this.icon,
     this.maxWidth = 160,
   });
   final String label;
   final Color background;
   final Color foreground;
-  final IconData icon;
+  final IconData? icon;
   final double maxWidth;
   static const textStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
 
@@ -36,8 +36,10 @@ class TagToken extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: foreground),
-          const SizedBox(width: 4),
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: foreground),
+            const SizedBox(width: 4),
+          ],
           Flexible(
             child: Text(
               label,
@@ -69,7 +71,6 @@ class RecordTagChips extends StatelessWidget {
           label: store.ownerLabels(event).first,
           background: bg,
           foreground: fg,
-          icon: Icons.workspaces_outline,
         ),
       );
     }
@@ -110,7 +111,10 @@ class RecordTagChips extends StatelessWidget {
 
         final widths = [
           for (final token in tokens)
-            math.min(160.0, measure(token.label) + 33),
+            math.min(
+              160.0,
+              measure(token.label) + (token.icon == null ? 17 : 33),
+            ),
         ];
         var used = 0.0;
         var visible = 0;
