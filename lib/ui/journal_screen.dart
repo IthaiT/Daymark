@@ -570,8 +570,14 @@ class JournalScreenState extends State<JournalScreen> {
             enabled: widget.journal.canEditDay(start),
             child: const Text('在此新增事件'),
           ),
-        if (event?.isUndefined == true)
+        if (event?.isUndefined == true) ...[
           const PopupMenuItem(value: 'tag', child: Text('设置标签')),
+          PopupMenuItem(
+            value: 'details',
+            enabled: widget.journal.canEditEvent(event!),
+            child: const Text('编辑详情'),
+          ),
+        ],
         if (event != null && !event.isUndefined) ...[
           if (widget.journal.store.items[event.itemId]?.source != null)
             const PopupMenuItem(

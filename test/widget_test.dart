@@ -2359,6 +2359,46 @@ void main() {
     },
   );
 
+  testWidgets('gap details edit notes while both times stay read-only', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({
+      'a': journal
+          .event('a')!
+          .copyWith(end: day.add(const Duration(hours: 14))),
+      'b': journal
+          .event('b')!
+          .copyWith(
+            start: day.add(const Duration(hours: 16)),
+            end: day.add(const Duration(hours: 17)),
+          ),
+    });
+    await open(tester);
+    final gap = journal.rows.singleWhere((e) => e.isUndefined);
+    await tester.tap(cell(gap.id, 'title'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('编辑详情'));
+    await tester.pumpAndSettle();
+    expect(find.text('编辑空档记录'), findsOneWidget);
+    for (final label in ['开始', '结束']) {
+      expect(
+        tester
+            .widget<TextField>(find.widgetWithText(TextField, label))
+            .readOnly,
+        isTrue,
+      );
+    }
+    await tester.enterText(find.widgetWithText(TextField, '事件名称'), '散步');
+    await tester.enterText(find.widgetWithText(TextField, '备注'), '看了夕阳');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(journal.store.events[gap.id]!.notes, '看了夕阳');
+    expect(journal.store.events[gap.id]!.title, '散步');
+    expect(journal.store.events[gap.id]!.start, gap.start);
+    expect(journal.store.events[gap.id]!.end, gap.end);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a record in two tag groups edits once and selects once', (
     tester,
   ) async {

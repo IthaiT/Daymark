@@ -480,7 +480,17 @@ class JournalController extends ChangeNotifier {
 
   Future<void> updateEvent(Event changed) => _run(() async {
     final current = event(changed.id);
-    if (current == null || current.isUndefined) return;
+    if (current == null) return;
+    if (current.isUndefined) {
+      // An annotation cannot change a derived interval or its classification.
+      final annotated = current.copyWith(
+        title: changed.title.trim().isEmpty ? '空档' : changed.title.trim(),
+        notes: changed.notes,
+      );
+      store.validateEvent(annotated);
+      await _apply({...store.events, current.id: annotated}, _drafts);
+      return;
+    }
     final owner = changed.owner;
     if (changed.title.trim().isEmpty && owner != null) {
       changed = changed.copyWith(title: store.ownerTitle(owner));
@@ -732,6 +742,13 @@ class JournalController extends ChangeNotifier {
       saveItem(Item(id: newItemId(), name: name.trim(), parentId: parentId));
 
   Future<void> deleteItem(String id) => _run(() async {
+    final item = store.items[id];
+    if (item?.parentId == null &&
+        store.events.values.any(
+          (event) => event.itemId == id && event.tagIds.isEmpty,
+        )) {
+      throw const FormatException('此事项仍有未带标签的记录，请先为这些记录选择标签或其他事项。');
+    }
     await store.deleteItem(id);
     notifyListeners();
   });

@@ -306,7 +306,7 @@ class _EventEditorState extends State<_EventEditor> {
           tagIds: _tag == widget.event.tagId
               ? widget.event.tagIds
               : _tag == null
-              ? const <String>[]
+              ? widget.event.tagIds.skip(1).toList()
               : normalizeTagIds([_tag!, ...widget.event.tagIds.skip(1)]),
           start: start,
           end: end,
@@ -323,7 +323,7 @@ class _EventEditorState extends State<_EventEditor> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('编辑事件'),
+    title: Text(widget.event.isUndefined ? '编辑空档记录' : '编辑事件'),
     content: SizedBox(
       width: 520,
       child: SingleChildScrollView(
@@ -336,16 +336,17 @@ class _EventEditorState extends State<_EventEditor> {
               decoration: const InputDecoration(labelText: '事件名称'),
             ),
             const SizedBox(height: 16),
-            TagField(
-              store: widget.journal.store,
-              value: _tag,
-              onChanged: (value) => setState(() {
-                _tag = value;
-                if (value != null && _title.text.trim().isEmpty) {
-                  _title.text = widget.journal.store.tagName(value);
-                }
-              }),
-            ),
+            if (!widget.event.isUndefined)
+              TagField(
+                store: widget.journal.store,
+                value: _tag,
+                onChanged: (value) => setState(() {
+                  _tag = value;
+                  if (value != null && _title.text.trim().isEmpty) {
+                    _title.text = widget.journal.store.tagName(value);
+                  }
+                }),
+              ),
             const SizedBox(height: 16),
             for (final start in [true, false])
               Padding(
@@ -361,6 +362,7 @@ class _EventEditorState extends State<_EventEditor> {
                   }),
                   anchor: TextField(
                     controller: start ? _start : _end,
+                    readOnly: widget.event.isUndefined,
                     decoration: InputDecoration(labelText: start ? '开始' : '结束'),
                     onSubmitted: (_) => setState(() {
                       if (start) {
@@ -369,13 +371,15 @@ class _EventEditorState extends State<_EventEditor> {
                         _endOpen = false;
                       }
                     }),
-                    onTap: () => setState(() {
-                      if (start) {
-                        _startOpen = true;
-                      } else {
-                        _endOpen = true;
-                      }
-                    }),
+                    onTap: widget.event.isUndefined
+                        ? null
+                        : () => setState(() {
+                            if (start) {
+                              _startOpen = true;
+                            } else {
+                              _endOpen = true;
+                            }
+                          }),
                   ),
                   builder: (context, close) => DateTimeChoices(
                     value: pickerInitialTime(

@@ -1,3 +1,6 @@
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'support/screenshot_fonts.dart';
 import 'dart:io';
 
 import 'package:daymark/application/journal_controller.dart';
@@ -71,7 +74,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: daymarkTheme(),
-        home: Scaffold(body: StatisticsScreen(journal: journal)),
+        home: RepaintBoundary(
+          key: const ValueKey('statistics-capture'),
+          child: Scaffold(body: StatisticsScreen(journal: journal)),
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -80,6 +86,7 @@ void main() {
   testWidgets(
     'two tags each cover 100 percent while the total stays one hour',
     (tester) async {
+      await loadScreenshotFonts(tester);
       final store = journal.store;
       await store.replaceEvents({
         'multi': Event(
@@ -93,6 +100,22 @@ void main() {
       await mountStatistics(tester);
       expect(find.text('去重总时长 1h'), findsOneWidget);
       expect(find.text('1h · 100%'), findsNWidgets(2));
+      final boundary = tester.renderObject<RenderRepaintBoundary>(
+        find.byKey(const ValueKey('statistics-capture')),
+      );
+      final snapshot = (await tester.runAsync(
+        () => boundary.toImage(pixelRatio: 1),
+      ))!;
+      final bytes = (await tester.runAsync(
+        () => snapshot.toByteData(format: ui.ImageByteFormat.png),
+      ))!;
+      await tester.runAsync(
+        () => File(
+          '.test-artifacts/flutter-statistics-multitag.png',
+        ).writeAsBytes(bytes.buffer.asUint8List()),
+      );
+      snapshot.dispose();
+
       await tester.tap(find.byKey(const ValueKey('stats-coverage-work-total')));
       await tester.pumpAndSettle();
       expect(find.text('去重总时长 1h'), findsOneWidget);

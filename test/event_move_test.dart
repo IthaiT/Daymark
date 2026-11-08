@@ -60,7 +60,11 @@ void main() {
     expect(writes - beforeWrites, 1);
     expect(store.events[first.id]!.tagId, 'work');
     expect(store.events[second.id]!.tagId, 'work');
-    expect(store.events[missing.id]?.isUndefined, isTrue);
+    expect(store.events.containsKey(missing.id), isFalse);
+    expect(
+      store.events.values.singleWhere((e) => e.isUndefined).start,
+      second.end,
+    );
     expect(controller.history.canUndo, isTrue);
 
     await controller.undo();
@@ -71,20 +75,26 @@ void main() {
     expect(store.events[first.id]!.tagId, 'work');
   });
 
-  test('clears a tag to unclassified and rejects unknown targets', () async {
-    final first = event('first', 'linux', 9);
-    await store.replaceEvents({first.id: first});
-    await controller.initialize();
+  test(
+    'rejects removing the last classification and unknown targets',
+    () async {
+      final first = event('first', 'linux', 9);
+      await store.replaceEvents({first.id: first});
+      await controller.initialize();
 
-    await expectLater(
-      controller.setEventTag([first.id], 'missing'),
-      throwsFormatException,
-    );
-    expect(store.events[first.id]!.tagId, 'linux');
+      await expectLater(
+        controller.setEventTag([first.id], 'missing'),
+        throwsFormatException,
+      );
+      expect(store.events[first.id]!.tagId, 'linux');
 
-    await controller.setEventTag([first.id], null);
-    expect(store.events[first.id]!.tagId, isNull);
-  });
+      await expectLater(
+        controller.setEventTag([first.id], null),
+        throwsFormatException,
+      );
+      expect(store.events[first.id]!.tagId, 'linux');
+    },
+  );
 
   test('does not write when the selection has nothing to change', () async {
     final first = event('first', 'linux', 9);

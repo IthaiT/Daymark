@@ -138,9 +138,24 @@ void main() {
     expect(store.events['e']!.itemId, 'resume');
   });
 
+  test(
+    'deleting the only classification requires reclassifying its records',
+    () async {
+      await store.saveItem(const Item(id: 'p', name: '计划'));
+      await store.saveEvent(record('e', '学习', itemId: 'p'));
+      await expectLater(journal.deleteItem('p'), throwsFormatException);
+      expect(store.items.containsKey('p'), isTrue);
+      expect(store.events['e']!.itemId, 'p');
+      await journal.setEventTags(['e'], ['work']);
+      await journal.deleteItem('p');
+      expect(store.events['e']!.tagIds, ['work']);
+      expect(store.events['e']!.itemId, isNull);
+    },
+  );
+
   test('undo after deleting a project no longer fails', () async {
     await store.saveItem(const Item(id: 'job', name: '跳槽'));
-    await store.saveEvent(record('e', '第一版简历', itemId: 'job'));
+    await store.saveEvent(record('e', '第一版简历', itemId: 'job', tags: ['work']));
     await journal.editCell('e', EventColumn.title, '第二版简历');
     await journal.deleteItem('job');
 

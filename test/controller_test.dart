@@ -86,6 +86,39 @@ void main() {
     },
   );
 
+  test(
+    'gap details save only annotations and preserve them after boundary edits',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 10),
+        'b': item('b', 12, 13),
+      });
+      await controller.initialize();
+      final gap = controller.rows.singleWhere((e) => e.isUndefined);
+      await controller.updateEvent(
+        gap.copyWith(
+          title: '煮牛肉面',
+          notes: '加了番茄',
+          start: day,
+          end: day.add(const Duration(hours: 23)),
+          tagIds: ['work'],
+        ),
+      );
+      final annotated = store.events[gap.id]!;
+      expect(annotated.start, gap.start);
+      expect(annotated.end, gap.end);
+      expect(annotated.tagIds, isEmpty);
+      expect(annotated.notes, '加了番茄');
+      await controller.updateEvent(item('a', 9, 11));
+      expect(store.events[gap.id]!.start.hour, 11);
+      expect(store.events[gap.id]!.title, '煮牛肉面');
+      expect(store.events[gap.id]!.notes, '加了番茄');
+      await controller.undo();
+      await controller.undo();
+      expect(store.events[gap.id], gap);
+    },
+  );
+
   test('last classification cannot be removed from a saved event', () async {
     await store.replaceEvents({'a': item('a', 9, 10)});
     await expectLater(
