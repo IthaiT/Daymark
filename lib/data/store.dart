@@ -486,7 +486,19 @@ class Store {
     }
   }
 
-  /// Merge by identity. Source removals are retained and hidden from recording.
+  /// Deleted source nodes survive only while saved records reference them.
+  Map<String, int> get deletedObsidianReferences {
+    final counts = <String, int>{};
+    for (final event in _events.values) {
+      final id = event.itemId;
+      if (id != null && _items[id]?.source?.missing == true) {
+        counts.update(id, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
+    return Map.unmodifiable(counts);
+  }
+
+  /// Merge by identity and delete absent nodes that have no saved records.
   Future<void> importObsidian(
     ObsidianImport imported, {
     required String directory,
@@ -533,14 +545,36 @@ class Store {
       return parent!;
     }
 
-    final items = {
+    final absent = {
       for (final item in _items.values)
-        item.id:
-            item.source?.directory == directory &&
-                !imported.items.containsKey(item.id)
-            ? item.copyWith(source: item.source!.asMissing())
-            : item,
+        if (item.source?.directory == directory &&
+            !imported.items.containsKey(item.id))
+          item.id,
     };
+    final referenced = {
+      for (final event in _events.values)
+        if (event.itemId != null) event.itemId!,
+    };
+    final deleted = absent.difference(referenced);
+    final items = <String, Item>{};
+    for (final item in _items.values) {
+      if (deleted.contains(item.id)) continue;
+      var parent = item.parentId;
+      while (deleted.contains(parent)) {
+        parent = _items[parent]!.parentId;
+      }
+      final missing = absent.contains(item.id);
+      final reparented = parent != item.parentId;
+      items[item.id] = item.copyWith(
+        parentId: parent,
+        clearParent: parent == null,
+        // Preserve inherited classification when a deleted ancestor vanishes.
+        tagIds: missing || reparented
+            ? itemEffectiveTagIds(_items, item.id)
+            : item.tagIds,
+        source: missing ? item.source!.asMissing() : item.source,
+      );
+    }
     for (final item in imported.items.values) {
       final previous = _items[item.id];
       if (previous != null && previous.source == null) {
@@ -690,7 +724,7 @@ class Store {
     final item = _items[id];
     if (item == null) throw const FormatException('事项不存在。');
     if (item.source != null) {
-      throw const FormatException('此事项由 Obsidian 管理，源中移除后仍保留历史。');
+      throw const FormatException('此事项由 Obsidian 管理，请在源中删除后同步；有时间记录引用时保留关联。');
     }
     if (_items.values.any((child) => child.parentId == id)) {
       throw const FormatException('此事项还有子事项，请先移动或删除子事项。');
