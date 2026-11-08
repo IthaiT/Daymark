@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:daymark/application/journal_controller.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
+import 'package:daymark/domain/item.dart';
 import 'package:daymark/domain/settings.dart';
 import 'package:daymark/ui/statistics_screen.dart';
 import 'package:daymark/ui/theme.dart';
@@ -53,6 +54,122 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  Future<void> mountStatistics(WidgetTester tester) async {
+    final store = journal.store;
+    journal.dispose();
+    journal = JournalController(
+      store,
+      day: monday,
+      clock: () => monday.add(const Duration(days: 6)),
+      settings: const AppSettings(splitOverlap: true),
+    );
+    await journal.initialize();
+    tester.view.physicalSize = const Size(1360, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: daymarkTheme(),
+        home: Scaffold(body: StatisticsScreen(journal: journal)),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'two tags each cover 100 percent while the total stays one hour',
+    (tester) async {
+      final store = journal.store;
+      await store.replaceEvents({
+        'multi': Event(
+          'multi',
+          '煮面听课',
+          ['life', 'work'],
+          monday.add(const Duration(hours: 9)),
+          monday.add(const Duration(hours: 10)),
+        ),
+      });
+      await mountStatistics(tester);
+      expect(find.text('去重总时长 1h'), findsOneWidget);
+      expect(find.text('1h · 100%'), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('stats-coverage-work-total')));
+      await tester.pumpAndSettle();
+      expect(find.text('去重总时长 1h'), findsOneWidget);
+      expect(find.text('1h · 100%'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'parent and child memberships deduplicate the parent and the total',
+    (tester) async {
+      final store = journal.store;
+      await store.replaceEvents({});
+      await store.replaceTags({
+        'parent': Tag('parent', '父标签'),
+        'child': Tag('child', '子标签', 'parent'),
+        'sibling': Tag('sibling', '另一个根'),
+      });
+      await store.replaceEvents({
+        'multi': Event(
+          'multi',
+          '多标签',
+          ['parent', 'child', 'sibling'],
+          monday.add(const Duration(hours: 9)),
+          monday.add(const Duration(hours: 10)),
+        ),
+      });
+      await mountStatistics(tester);
+      expect(find.text('去重总时长 1h'), findsOneWidget);
+      final parent = find.byKey(const ValueKey('stats-coverage-parent-total'));
+      expect(
+        find.descendant(of: parent, matching: find.text('1h · 100%')),
+        findsOneWidget,
+      );
+      expect(find.text('1h · 100%'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'tag-only and item-only events have independent fallback groups',
+    (tester) async {
+      final store = journal.store;
+      await store.saveItem(const Item(id: 'p', name: '学习计划'));
+      await store.replaceEvents({
+        'tags': Event(
+          'tags',
+          '煮牛肉面',
+          ['life'],
+          monday.add(const Duration(hours: 9)),
+          monday.add(const Duration(hours: 10)),
+        ),
+        'item': Event(
+          'item',
+          '学习',
+          null,
+          monday.add(const Duration(hours: 9)),
+          monday.add(const Duration(hours: 10)),
+          '',
+          'p',
+        ),
+      });
+      await mountStatistics(tester);
+      expect(find.text('去重总时长 1h'), findsOneWidget);
+      expect(find.text('无标签'), findsWidgets);
+      expect(find.text('30m · 50%'), findsNWidgets(2));
+      await tester.tap(find.text('事项').first);
+      await tester.pumpAndSettle();
+      expect(find.text('事项明细'), findsOneWidget);
+      expect(find.text('未关联事项'), findsWidgets);
+      expect(find.text('无标签'), findsNothing);
+      expect(find.text('去重总时长 1h'), findsOneWidget);
+      expect(find.text('30m · 50%'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('statistics workspace builds without overflow', (tester) async {
     tester.view.physicalSize = const Size(1360, 900);
     tester.view.devicePixelRatio = 1;
@@ -74,7 +191,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('edits an event and moves it to unclassified', (tester) async {
+  testWidgets('edits an event and moves it to another tag', (tester) async {
     // Recreate the controller inside the widget test's zone so the serialized
     // mutation queue is driven by the test binding, not by setUp's zone.
     final store = journal.store;
@@ -106,13 +223,14 @@ void main() {
     await tester.tap(find.text('归类到…'));
     await tester.pumpAndSettle();
     expect(find.text('归类 1 条记录'), findsOneWidget);
-    // Picking a row applies it straight away, including the unfiled one.
-    await tester.tap(find.byKey(const ValueKey('tag-choice-unclassified')));
+    // Formal records always keep at least one classification.
+    expect(find.byKey(const ValueKey('tag-choice-unclassified')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('tag-choice-linux')));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pumpAndSettle();
 
-    expect(journal.store.events['work']!.tagId, isNull);
+    expect(journal.store.events['work']!.tagId, 'linux');
     expect(find.textContaining('已移动 1 条记录'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -158,7 +276,7 @@ void main() {
 
     await journal.applySettings(const AppSettings(splitOverlap: true));
     await tester.pumpAndSettle();
-    expect(find.text('4h'), findsNothing);
+    expect(find.text('去重总时长 4h'), findsOneWidget);
     expect(find.text('1h'), findsWidgets);
     expect(tester.takeException(), isNull);
   });

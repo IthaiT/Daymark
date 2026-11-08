@@ -14,6 +14,38 @@ void main() {
         day.add(Duration(minutes: end)),
       );
 
+  test('every tag receives the full event share regardless of tag order', () {
+    final a = event(
+      'a',
+      '煮面听课',
+      'work',
+      540,
+      600,
+    ).copyWith(tagIds: ['work', 'life'], itemId: 'p');
+    final other = event('other', '并行', 'other', 540, 600);
+    for (final tags in [
+      ['work', 'life'],
+      ['life', 'work'],
+    ]) {
+      final records = [a.copyWith(tagIds: tags), other];
+      final profile = ConcurrencyProfile.of(
+        StatsWindow.days(day, day),
+        records,
+      );
+      final groups = eventGroups(records, day, profile: profile);
+      expect(groups.map((g) => g.key.tagId), ['life', 'work', 'other']);
+      expect(
+        groups.every((g) => g.duration == const Duration(minutes: 30)),
+        isTrue,
+      );
+      expect(
+        profile.durationOf(groups.expand((g) => g.events)),
+        const Duration(hours: 1),
+      );
+      expect(groups.take(2).every((g) => g.hasSummary), isTrue);
+    }
+  });
+
   test(
     'stable tag IDs group different titles and preserve all original names',
     () {

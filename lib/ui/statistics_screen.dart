@@ -23,7 +23,7 @@ class StatisticsScreen extends StatefulWidget {
 
 enum _StatsPeriod { week, month, custom }
 
-/// Records belong either to a tag or to a project item, so the two views are
+/// Tags and project associations are independent dimensions, so the two views are
 /// built and totalled independently instead of being summed together.
 enum _StatsDimension { tag, item }
 
@@ -438,94 +438,141 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final visible = model.roots
         .where((root) => !_hidden.contains(root.id))
         .toList();
-    final total = visible.fold(
-      Duration.zero,
-      (sum, node) => sum + node.duration,
-    );
+    final total = model.visibleTotal;
     return WorkspacePanel(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 260),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: Text(
-                  _compositionTitle,
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              AppSegmentedButton<_StatsDimension>(
-                segments: const [
-                  ButtonSegment(value: _StatsDimension.tag, label: Text('标签')),
-                  ButtonSegment(value: _StatsDimension.item, label: Text('事项')),
-                ],
-                selected: {_dimension},
-                onSelectionChanged: (values) => setState(() {
-                  _dimension = values.single;
-                  _selectedId = null;
-                  _selectedEvents.clear();
-                  _hidden.clear();
-                }),
-              ),
-            ],
-          ),
-          const SizedBox(height: 9),
-          if (visible.isEmpty)
-            Container(
-              height: 38,
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            )
-          else
-            SizedBox(
-              height: 38,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              Row(
                 children: [
-                  for (var index = 0; index < visible.length; index++) ...[
-                    if (index > 0) const SizedBox(width: 2),
+                  Expanded(
+                    child: Text(
+                      _compositionTitle,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  AppSegmentedButton<_StatsDimension>(
+                    segments: const [
+                      ButtonSegment(
+                        value: _StatsDimension.tag,
+                        label: Text('标签'),
+                      ),
+                      ButtonSegment(
+                        value: _StatsDimension.item,
+                        label: Text('事项'),
+                      ),
+                    ],
+                    selected: {_dimension},
+                    onSelectionChanged: (values) => setState(() {
+                      _dimension = values.single;
+                      _selectedId = null;
+                      _selectedEvents.clear();
+                      _hidden.clear();
+                    }),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 9),
+              Text(
+                '去重总时长 ${_compact(total)}',
+                key: const ValueKey('stats-unique-total'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              if (_dimension == _StatsDimension.tag)
+                Text(
+                  '同一事件可计入多个标签，覆盖率之和可能超过 100%。',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+              for (final node in visible)
+                _coverageBar(
+                  context,
+                  node,
+                  total,
+                  onTap: () => _toggleHidden(node.id),
+                ),
+              const SizedBox(height: 8),
+              _legend(context, model),
+              if (_hidden.isNotEmpty) ...[
+                const SizedBox(height: 7),
+                Row(
+                  children: [
                     Expanded(
-                      flex: math.max(1, visible[index].duration.inMinutes),
-                      child: InkWell(
-                        onTap: () => _toggleHidden(visible[index].id),
-                        borderRadius: BorderRadius.circular(4),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: visible[index].color,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
+                      child: Text(
+                        '已隐藏 ${_hidden.length} 项 · 当前 ${_compact(total)}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ),
-                  ],
-                ],
-              ),
-            ),
-          const SizedBox(height: 8),
-          _legend(context, model),
-          if (_hidden.isNotEmpty) ...[
-            const SizedBox(height: 7),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '已隐藏 ${_hidden.length} 项 · 当前 ${_compact(total)}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                    TextButton(
+                      onPressed: () => setState(() => _hidden.clear()),
+                      child: const Text('恢复全部'),
                     ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => setState(() => _hidden.clear()),
-                  child: const Text('恢复全部'),
+                  ],
                 ),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _coverageBar(
+    BuildContext context,
+    _StatsNode node,
+    Duration total, {
+    VoidCallback? onTap,
+    String? label,
+    Duration? duration,
+  }) {
+    final value = duration ?? node.duration;
+    final fraction = total.inMicroseconds <= 0
+        ? 0.0
+        : (value.inMicroseconds / total.inMicroseconds).clamp(0.0, 1.0);
+    return InkWell(
+      key: ValueKey('stats-coverage-${node.id}-${label ?? 'total'}'),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 120,
+              child: Text(
+                label ?? node.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: LinearProgressIndicator(
+                value: fraction,
+                color: node.color,
+                backgroundColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHigh,
+                minHeight: 8,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 110,
+              child: Text(
+                '${_compact(value)} · ${_percent(value, total)}%',
+                textAlign: TextAlign.right,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -618,7 +665,10 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Row(
               children: [
-                Text('标签明细', style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  _dimension == _StatsDimension.item ? '事项明细' : '标签明细',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const Spacer(),
               ],
             ),
@@ -1000,7 +1050,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
               Text('构成', style: Theme.of(context).textTheme.titleSmall),
               const Spacer(),
               Text(
-                '${kids.length} 个子标签',
+                '${kids.length} 个子${_dimension == _StatsDimension.item ? '事项' : '标签'}',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
@@ -1008,41 +1058,21 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
             ],
           ),
           const SizedBox(height: 7),
-          SizedBox(
-            height: 10,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (direct > Duration.zero) ...[
-                  Expanded(
-                    flex: math.max(1, direct.inMinutes),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: node.color.withValues(alpha: .5),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  if (kids.isNotEmpty) const SizedBox(width: 2),
-                ],
-                for (var index = 0; index < kids.length; index++) ...[
-                  if (index > 0) const SizedBox(width: 2),
-                  Expanded(
-                    flex: math.max(1, kids[index].duration.inMinutes),
-                    child: GestureDetector(
-                      onTap: () => _select(model, kids[index]),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: kids[index].color,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
+          if (direct > Duration.zero)
+            _coverageBar(
+              context,
+              node,
+              node.duration,
+              label: '直接记录',
+              duration: direct,
             ),
-          ),
+          for (final child in kids)
+            _coverageBar(
+              context,
+              child,
+              node.duration,
+              onTap: () => _select(model, child),
+            ),
           const SizedBox(height: 7),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -1561,14 +1591,20 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
         ? itemRoots
         : tagRoots;
     final unclassifiedEvents = store.events.values
-        .where((event) => !event.isUndefined && event.owner == null)
+        .where(
+          (event) =>
+              !event.isUndefined &&
+              (_dimension == _StatsDimension.item
+                  ? event.itemId == null
+                  : event.tagIds.isEmpty),
+        )
         .toList();
     final undefinedEvents = allEvents
         .where((event) => event.isUndefined)
         .toList();
     final unclassified = _StatsNode(
       id: _unclassifiedId,
-      name: '未分类',
+      name: _dimension == _StatsDimension.item ? '未关联事项' : '无标签',
       parentId: null,
       color: Colors.blueGrey.shade400,
       duration: splitOverlap
@@ -1607,9 +1643,13 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
       if (undefined.duration > Duration.zero) undefined,
     ]..sort((a, b) => b.duration.compareTo(a.duration));
     final roots = [...dimensionRoots, ...pseudo];
-    final visibleTotal = roots
-        .where((root) => !_hidden.contains(root.id))
-        .fold(Duration.zero, (sum, node) => sum + node.duration);
+    final visibleEvents = uniqueEvents([
+      for (final root in roots.where((root) => !_hidden.contains(root.id)))
+        ...root.events,
+    ]);
+    final visibleTotal = splitOverlap
+        ? profile.durationOf(visibleEvents)
+        : durationIn(window, visibleEvents);
     return _StatsModel(
       nodes: nodes,
       roots: roots,
@@ -1722,6 +1762,7 @@ class _MoveTargetDialogState extends State<_MoveTargetDialog> {
             child: SingleChildScrollView(
               child: OwnerChoices(
                 store: widget.store,
+                allowUnclassified: false,
                 query: _query,
                 itemId: widget.initialOwner?.isItem == true
                     ? widget.initialOwner!.id
@@ -1750,6 +1791,7 @@ class _MoveTargetDialogState extends State<_MoveTargetDialog> {
 
 String _compact(Duration value) {
   final minutes = value.inMinutes.abs();
+  if (value != Duration.zero && minutes == 0) return '<1m';
   if (minutes < 60) return '${minutes}m';
   final hours = minutes ~/ 60;
   final rest = minutes % 60;

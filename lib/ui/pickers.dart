@@ -454,6 +454,7 @@ class OwnerChoices extends StatefulWidget {
     this.query = '',
     this.highlighted = -1,
     this.includeItems = true,
+    this.allowUnclassified = true,
   });
   final Store store;
   final ValueChanged<OwnerRef?> onChoose;
@@ -464,6 +465,7 @@ class OwnerChoices extends StatefulWidget {
   /// Index in [OwnerChoicesState.visibleOwners] moved with the arrow keys.
   final int highlighted;
   final bool includeItems;
+  final bool allowUnclassified;
   @override
   State<OwnerChoices> createState() => OwnerChoicesState();
 }
@@ -498,7 +500,7 @@ class OwnerChoicesState extends State<OwnerChoices> {
       );
     }
     return [
-      null,
+      if (widget.allowUnclassified) null,
       for (final tag in widget.store.orderedTags())
         if (!_hidden(tag.id)) (id: tag.id, isItem: false),
       for (final (item, _) in orderedItems(widget.store.items))
@@ -511,7 +513,8 @@ class OwnerChoicesState extends State<OwnerChoices> {
   Widget build(BuildContext context) {
     final query = widget.query.trim();
     final noneMatches =
-        query.isEmpty || caseFold('未归类').contains(caseFold(query));
+        widget.allowUnclassified &&
+        (query.isEmpty || caseFold('未归类').contains(caseFold(query)));
     final owners = visibleOwners.whereType<OwnerRef>().toList();
     final tags = owners.where((owner) => !owner.isItem).toList();
     final items = owners.where((owner) => owner.isItem).toList();

@@ -42,7 +42,11 @@ class EventGroup {
   bool get isDraft => key.draftId != null;
   bool get isUnclassified =>
       key.tagId == null && key.itemId == null && !isDraft;
-  bool get hasSummary => !isDraft && (isUnclassified || events.length > 1);
+  bool get hasSummary =>
+      !isDraft &&
+      (isUnclassified ||
+          events.length > 1 ||
+          events.any((event) => event.tagIds.length > 1));
   int get incompleteCount => events.where((event) => event.end == null).length;
 }
 
@@ -68,14 +72,20 @@ List<EventGroup> eventGroups(
         ..sort(compareEvents);
   for (final event in ordered) {
     final draft = draftIds.contains(event.id);
-    final owner = event.owner;
-    final unclassified = event.isUndefined || owner == null;
-    final key = (
-      tagId: draft || unclassified || owner.isItem ? null : owner.id,
-      itemId: draft || unclassified || !owner.isItem ? null : owner.id,
-      draftId: draft ? event.id : null,
-    );
-    (buckets[key] ??= []).add(event);
+    final keys = <EventGroupKey>[
+      if (draft)
+        (tagId: null, itemId: null, draftId: event.id)
+      else if (event.isUndefined || event.owner == null)
+        (tagId: null, itemId: null, draftId: null)
+      else if (event.tagIds.isNotEmpty)
+        for (final tag in event.tagIds)
+          (tagId: tag, itemId: null, draftId: null)
+      else
+        (tagId: null, itemId: event.itemId, draftId: null),
+    ];
+    for (final key in keys) {
+      (buckets[key] ??= []).add(event);
+    }
   }
   return [
     for (final entry in buckets.entries)
@@ -87,6 +97,10 @@ List<EventGroup> eventGroups(
       final duration = b.duration.compareTo(a.duration);
       if (duration != 0) return duration;
     }
-    return compareEvents(a.events.first, b.events.first);
+    final time = compareEvents(a.events.first, b.events.first);
+    if (time != 0) return time;
+    return (a.key.tagId ?? a.key.itemId ?? '').compareTo(
+      b.key.tagId ?? b.key.itemId ?? '',
+    );
   });
 }

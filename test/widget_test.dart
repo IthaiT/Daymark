@@ -2359,6 +2359,33 @@ void main() {
     },
   );
 
+  testWidgets('a record in two tag groups edits once and selects once', (
+    tester,
+  ) async {
+    await journal.store.replaceEvents({
+      'a': journal.event('a')!.copyWith(tagIds: ['work', 'linux']),
+    });
+    await open(tester, grouped: true);
+    await tester.tap(group('linux'));
+    await tester.pumpAndSettle();
+    await tester.tap(group('work'));
+    await tester.pumpAndSettle();
+    final table = tester.state<EventTableState>(find.byType(EventTable));
+    expect(table.selectionOrder, ['a']);
+    final second = find.byKey(const ValueKey('cell-a-title-work'));
+    await tester.tap(second);
+    await tester.pumpAndSettle();
+    await tester.tap(second);
+    await tester.pumpAndSettle();
+    expect(input('a', 'title'), findsOneWidget);
+    await tester.enterText(input('a', 'title'), '煮牛肉面');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.store.events['a']!.title, '煮牛肉面');
+    expect(find.text('煮牛肉面'), findsNWidgets(2));
+    expect(journal.selected, {'a'});
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('summary rows follow the shared overlap setting', (tester) async {
     final store = journal.store;
     await store.replaceEvents({});

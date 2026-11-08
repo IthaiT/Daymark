@@ -15,7 +15,12 @@ import 'obsidian_text.dart';
 
 enum EventTableMode { summary, chronological }
 
-typedef _TableEntry = ({Event? event, EventGroup? group, bool nested});
+typedef _TableEntry = ({
+  Event? event,
+  EventGroup? group,
+  EventGroupKey? scope,
+  bool nested,
+});
 
 class EventTable extends StatefulWidget {
   const EventTable({
@@ -53,6 +58,8 @@ class EventTableState extends State<EventTable> {
   final _expanded = <EventGroupKey>{};
   EventTableMode get _mode => widget.mode;
   List<Event> get _rows => widget.events ?? widget.journal.rows;
+  EventGroupKey? _editingScope;
+  String? _editingEventId;
   Map<String, Event?> _lastSelection = {};
   late DateTime _day = widget.journal.day;
   static const _rowHeight = 40.0;
@@ -104,24 +111,30 @@ class EventTableState extends State<EventTable> {
   List<_TableEntry> get _entries {
     if (_mode == EventTableMode.chronological) {
       return [
-        for (final event in _rows) (event: event, group: null, nested: false),
+        for (final event in _rows)
+          (event: event, group: null, scope: null, nested: false),
       ];
     }
     return [
       for (final group in _groups)
         if (!group.hasSummary)
-          (event: group.events.single, group: null, nested: false)
+          (
+            event: group.events.single,
+            group: null,
+            scope: group.key,
+            nested: false,
+          )
         else ...[
-          (event: null, group: group, nested: false),
+          (event: null, group: group, scope: group.key, nested: false),
           if (_expanded.contains(group.key))
             for (final event in group.events)
-              (event: event, group: null, nested: true),
+              (event: event, group: null, scope: group.key, nested: true),
         ],
     ];
   }
 
   Iterable<String> get selectionOrder =>
-      _entries.map((entry) => entry.event?.id).nonNulls;
+      _entries.map((entry) => entry.event?.id).nonNulls.toSet();
 
   @override
   void didUpdateWidget(EventTable oldWidget) {
@@ -262,7 +275,20 @@ class EventTableState extends State<EventTable> {
     );
   }
 
-  Widget _eventRow(Event event, List<double> widths, {required bool nested}) {
+  Widget _eventRow(
+    Event event,
+    List<double> widths, {
+    required bool nested,
+    required EventGroupKey? scope,
+    required bool primary,
+  }) {
+    final editorScope =
+        (_editingEventId == widget.editorId ? _editingScope : null) ??
+        _entries
+            .where((entry) => entry.event?.id == widget.editorId)
+            .firstOrNull
+            ?.scope;
+    final suffix = primary ? '' : '-${scope?.tagId ?? scope?.itemId ?? 'gap'}';
     final interval = event.intervalOn(widget.journal.day);
     final shared = _sharedDuration(event);
     final labels = [
@@ -278,7 +304,7 @@ class EventTableState extends State<EventTable> {
     ];
     final selected = widget.journal.selected.contains(event.id);
     return GestureDetector(
-      key: ValueKey('row-${event.id}'),
+      key: ValueKey('row-${event.id}$suffix'),
       onSecondaryTapDown: (details) =>
           widget.onContext(details.globalPosition, event.id),
       child: ColoredBox(
@@ -293,15 +319,20 @@ class EventTableState extends State<EventTable> {
                 height: _rowHeight,
                 child:
                     widget.editorId == event.id &&
+                        scope == editorScope &&
                         widget.editorColumn == _columns[cell] &&
                         widget.editor != null
                     ? widget.editor!
                     : GestureDetector(
                         key: ValueKey(
-                          'cell-${event.id}-${_columns[cell]?.name ?? 'duration'}',
+                          'cell-${event.id}-${_columns[cell]?.name ?? 'duration'}$suffix',
                         ),
                         behavior: HitTestBehavior.opaque,
-                        onTap: () => widget.onCell(event.id, _columns[cell]),
+                        onTap: () {
+                          _editingScope = scope;
+                          _editingEventId = event.id;
+                          widget.onCell(event.id, _columns[cell]);
+                        },
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Padding(
@@ -498,6 +529,14 @@ class EventTableState extends State<EventTable> {
                                     entry.event!,
                                     widths,
                                     nested: entry.nested,
+                                    scope: entry.scope,
+                                    primary: !entries
+                                        .take(index)
+                                        .any(
+                                          (other) =>
+                                              other.event?.id ==
+                                              entry.event!.id,
+                                        ),
                                   );
                           },
                         ),
