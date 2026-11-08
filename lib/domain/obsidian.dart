@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:uuid/uuid.dart';
 import 'package:yaml/yaml.dart';
 
@@ -13,6 +15,8 @@ class ObsidianImport {
 }
 
 final _fileId = RegExp(r'^<!-- daymark-file:([a-zA-Z0-9_-]+) -->\s*$');
+final _fileBlockId = RegExp(r'^\^daymark-file-([a-zA-Z0-9-]+)\s*$');
+final _blockId = RegExp(r'(?:^|\s)\^([a-zA-Z0-9-]+)\s*$');
 final _taskId = RegExp(r'<!-- daymark:([a-zA-Z0-9_-]+) -->');
 final _checkbox = RegExp(r'^(\s*)(?:[-+*]|\d+[.)])\s+\[(.)\]\s*(.*)$');
 
@@ -22,6 +26,7 @@ ObsidianImport parseObsidian(
   Map<String, String> documents, {
   required String directory,
   String Function()? newId,
+  Map<String, String> knownBlockIds = const {},
 }) {
   newId ??= () => 'obsidian-${const Uuid().v4()}';
   final items = <String, Item>{};
@@ -29,6 +34,7 @@ ObsidianImport parseObsidian(
   final updated = <String, String>{};
   final roots = <String, String>{};
   final parents = <String, String>{};
+  final usedBlocks = <String>{};
   void add(Item item) {
     if (items.containsKey(item.id)) {
       throw FormatException(
@@ -57,7 +63,9 @@ ObsidianImport parseObsidian(
       body = end + 1;
     }
     String? rootId;
+    int? legacyRootLine;
     String? rootFence;
+    var rootComment = false;
     for (var index = body; index < lines.length; index++) {
       final code = RegExp(
         r'^(`{3,}|~{3,})',
@@ -73,15 +81,31 @@ ObsidianImport parseObsidian(
         continue;
       }
       if (rootFence != null) continue;
-      final match = _fileId.firstMatch(lines[index]);
-      if (match == null) continue;
+      final trimmedRoot = lines[index].trimLeft();
+      if (rootComment) {
+        if (trimmedRoot.contains('-->') || trimmedRoot.contains('%%'))
+          rootComment = false;
+        continue;
+      }
+      if ((trimmedRoot.startsWith('<!--') && !trimmedRoot.contains('-->')) ||
+          (trimmedRoot.startsWith('%%') &&
+              !trimmedRoot.substring(2).contains('%%'))) {
+        rootComment = true;
+        continue;
+      }
+      final legacy = _fileId.firstMatch(lines[index]);
+      final native = _fileBlockId.firstMatch(lines[index]);
+      if (legacy == null && native == null) continue;
       if (rootId != null) throw FormatException('$path 包含多个文件 ID。');
-      rootId = match[1];
+      rootId = legacy?[1] ?? _decodeId(native![1]!);
+      if (legacy != null) legacyRootLine = index;
     }
-    if (rootId == null) {
-      rootId = newId();
-      lines.insert(body, '<!-- daymark-file:$rootId -->');
+    if (rootFence != null || rootComment) {
+      throw FormatException('$path 的代码块或注释未结束，请补全后同步。');
     }
+    final needsRootBlock = rootId == null || legacyRootLine != null;
+    rootId ??= newId();
+    if (legacyRootLine != null) lines.removeAt(legacyRootLine);
     final name = path
         .replaceAll('\\', '/')
         .split('/')
@@ -141,8 +165,25 @@ ObsidianImport parseObsidian(
       if (ids.length > 1) {
         throw FormatException('$path 第 ${index + 1} 行包含多个 ID。');
       }
-      final id = ids.isEmpty ? newId() : ids.single[1]!;
-      if (ids.isEmpty) lines[index] = '$line <!-- daymark:$id -->';
+      final block = obsidianBlockId(line);
+      if (block != null && !usedBlocks.add(block)) {
+        throw FormatException('Markdown 中存在重复块 ID：$block。');
+      }
+      final legacyId = ids.isEmpty ? null : ids.single[1]!;
+      final nativeId = block?.startsWith('daymark-') == true
+          ? _decodeId(block!.substring('daymark-'.length))
+          : null;
+      if (legacyId != null && nativeId != null && legacyId != nativeId) {
+        throw FormatException('$path 第 ${index + 1} 行的旧 ID 与块 ID 冲突。');
+      }
+      final id =
+          legacyId ??
+          nativeId ??
+          knownBlockIds[block] ??
+          (block == null ? newId() : 'obsidian-block-$block');
+      var annotatedLine = line.replaceAll(_taskId, '').trimRight();
+      if (block == null) annotatedLine += ' ^daymark-${_encodeId(id)}';
+      lines[index] = annotatedLine;
       final (content, ownTags) = _inlineTags(match[3]!);
       tags[id] = ownTags;
       final fields = _fields(_cleanTask(content));
@@ -169,6 +210,10 @@ ObsidianImport parseObsidian(
         ),
       );
       stack.add((indent, id));
+    }
+    if (needsRootBlock) {
+      if (lines.last.isNotEmpty) lines.add('');
+      lines.addAll(['^daymark-file-${_encodeId(rootId)}', '']);
     }
     final annotated = '$bom${lines.join(eol)}';
     updated[path] = annotated;
@@ -197,6 +242,25 @@ ObsidianImport parseObsidian(
     Map.unmodifiable(tags),
     Map.unmodifiable(updated),
   );
+}
+
+/// Existing user block IDs are preserved; the stored tree remembers their alias.
+String? obsidianBlockId(String line) =>
+    _blockId.firstMatch(line.replaceAll(_taskId, '').trimRight())?[1];
+
+String _encodeId(String id) => RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(id)
+    ? id
+    : 'encoded-${utf8.encode(id).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
+String _decodeId(String id) {
+  if (!id.startsWith('encoded-')) return id;
+  final hex = id.substring(8);
+  if (hex.length.isOdd || !RegExp(r'^[0-9a-f]+$').hasMatch(hex)) {
+    throw const FormatException('事项块 ID 编码不正确。');
+  }
+  return utf8.decode([
+    for (var i = 0; i < hex.length; i += 2)
+      int.parse(hex.substring(i, i + 2), radix: 16),
+  ]);
 }
 
 String? _parent(Object? value, String path) {

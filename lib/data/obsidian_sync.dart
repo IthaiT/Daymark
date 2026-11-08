@@ -21,7 +21,22 @@ class ObsidianSync {
         sources[name] = await entity.readAsString();
       }
     }
-    final parsed = parseObsidian(sources, directory: root.path);
+    final aliases = <String, String>{};
+    for (final item in store.items.values) {
+      final source = item.source;
+      if (source?.directory != root.path || source?.kind != 'task') continue;
+      final block = obsidianBlockId(source!.raw);
+      if (block == null) continue;
+      if (aliases.containsKey(block) && aliases[block] != item.id) {
+        throw FormatException('历史事项中存在重名块 ID：$block。');
+      }
+      aliases[block] = item.id;
+    }
+    final parsed = parseObsidian(
+      sources,
+      directory: root.path,
+      knownBlockIds: aliases,
+    );
     await store.importObsidian(
       parsed,
       directory: root.path,

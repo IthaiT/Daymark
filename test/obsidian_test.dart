@@ -133,4 +133,49 @@ void main() {
       expect(result.tagNames[literal.id], ['有效_tag']);
     },
   );
+  test('legacy IDs migrate to native blocks without changing identities', () {
+    final result = parse({
+      'A.md':
+          '<!-- daymark-file:old-file -->\n- [ ] 名称 <!-- daymark:old-task -->\n',
+    });
+    expect(result.items['old-file']!.name, 'A');
+    expect(result.items['old-task']!.name, '名称');
+    expect(result.documents['A.md'], contains('^daymark-old-task'));
+    expect(result.documents['A.md'], contains('^daymark-file-old-file'));
+    expect(result.documents['A.md'], isNot(contains('<!-- daymark')));
+    expect(parse(result.documents).documents, result.documents);
+  });
+  test('existing native block links are retained during migration', () {
+    final result = parse({
+      'A.md': '- [ ] 名称 ^existing-link <!-- daymark:old-task -->\n',
+    });
+    expect(result.items['old-task']!.name, '名称');
+    expect(result.documents['A.md'], contains('名称 ^existing-link'));
+    expect(result.documents['A.md'], isNot(contains('<!-- daymark')));
+    final second = parseObsidian(
+      result.documents,
+      directory: 'vault/Daymark',
+      knownBlockIds: {'existing-link': 'old-task'},
+    );
+    expect(second.items['old-task']!.name, '名称');
+  });
+  test(
+    'whole source line cut retains the native ID after moving and renaming',
+    () {
+      final first = parse({'A.md': '- [ ] 原名\n', 'B.md': ''});
+      final task = first.items.values.singleWhere((n) => n.name == '原名');
+      final source = first.documents['A.md']!;
+      final line = source.split('\n').singleWhere((s) => s.startsWith('- ['));
+      final moved = parse({
+        'A.md': source.replaceFirst('$line\n', ''),
+        'B.md':
+            '${first.documents['B.md']}\n${line.replaceFirst('原名', '新名')}\n',
+      });
+      expect(moved.items[task.id]!.name, '新名');
+      expect(
+        moved.items[task.id]!.parentId,
+        moved.items.values.singleWhere((n) => n.name == 'B').id,
+      );
+    },
+  );
 }

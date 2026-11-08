@@ -128,7 +128,7 @@ void main() {
       expect(store.items, isEmpty);
       expect(store.tags, previousTags);
       final annotated = await a.readAsString();
-      expect(annotated, contains('<!-- daymark:'));
+      expect(annotated, contains('^daymark-obsidian-'));
       failItems = false;
       await const ObsidianSync().synchronize(store, vault);
       expect(await a.readAsString(), annotated);
@@ -177,4 +177,27 @@ void main() {
       expect(task.objective, '描述');
     },
   );
+  test('existing block aliases survive reload and a cross-file cut', () async {
+    final a = File('${vault.path}/A.md');
+    final b = File('${vault.path}/B.md');
+    await a.writeAsString(
+      '<!-- daymark-file:file-a -->\n- [ ] 旧事项 ^custom-link <!-- daymark:historical-id -->\n',
+    );
+    await b.writeAsString('');
+    const sync = ObsidianSync();
+    await sync.synchronize(store, vault);
+    final old = store.items['historical-id']!;
+    expect(await a.readAsString(), isNot(contains('<!-- daymark')));
+    final content = await a.readAsString();
+    final line = content.split('\n').singleWhere((s) => s.startsWith('- ['));
+    await a.writeAsString(content.replaceFirst('$line\n', ''));
+    await b.writeAsString(
+      '${await b.readAsString()}\n${line.replaceFirst('旧事项', '新事项')}\n',
+    );
+    final reopened = await Store.open(store.directory, backupTrees: true);
+    await sync.synchronize(reopened, vault);
+    expect(reopened.items[old.id]!.name, '新事项');
+    expect(reopened.items[old.id]!.source!.path, 'B.md');
+    expect(reopened.items[old.id]!.source!.missing, false);
+  });
 }

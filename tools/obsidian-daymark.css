@@ -1,0 +1,7 @@
+/* Enable in Obsidian Settings > Appearance > CSS snippets.
+   Hide block IDs only in Live Preview; Source mode remains inspectable.
+   Opacity preserves the editor's text geometry and source clipboard data.
+   This affects every native block ID, including existing user block IDs. */
+.markdown-source-view.mod-cm6.is-live-preview .cm-blockid {
+  opacity: 0;
+}
