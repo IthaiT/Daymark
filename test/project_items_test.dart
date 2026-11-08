@@ -128,17 +128,14 @@ void main() {
     expect(store.events['e']!.tagIds.length, 2);
   });
 
-  test('clearing the owner is not undone by the record title', () async {
+  test('item-only records retain their last classification', () async {
     await store.saveItem(const Item(id: 'resume', name: '改简历'));
     await store.saveEvent(record('e', '改简历', itemId: 'resume'));
-
-    await journal.editCell('e', EventColumn.tag, null);
-
-    expect(store.events['e']!.itemId, isNull);
-    expect(store.events['e']!.tagIds, isEmpty);
-    // A later title edit must not reattach it either.
-    await journal.editCell('e', EventColumn.title, '改简历');
-    expect(store.events['e']!.itemId, isNull);
+    await expectLater(
+      journal.editCell('e', EventColumn.tag, null),
+      throwsFormatException,
+    );
+    expect(store.events['e']!.itemId, 'resume');
   });
 
   test('undo after deleting a project no longer fails', () async {
@@ -212,9 +209,9 @@ void main() {
     expect(store.events['e']!.itemId, 'job');
     expect(store.events['e']!.tagIds, containsAll(['work']));
 
-    await journal.assignOwner(['e'], null);
-    expect(store.events['e']!.itemId, isNull);
-    expect(store.events['e']!.tagIds, isEmpty);
+    await expectLater(journal.assignOwner(['e'], null), throwsFormatException);
+    expect(store.events['e']!.itemId, 'job');
+    expect(store.events['e']!.tagIds, ['work']);
   });
 
   test('a status change is kept in the item trail', () async {

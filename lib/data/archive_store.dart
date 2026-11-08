@@ -132,8 +132,9 @@ class ArchiveStore {
     // Startup archives before reconciliation. Include bounded gaps even when
     // their mirror rows have not yet been written to the working CSV.
     final covered = {
-      for (final gap in undefinedEvents(current.values)) gap.id: gap,
-      ...current,
+      for (final event in current.values)
+        if (!event.isUndefined) event.id: event,
+      for (final gap in currentGaps(current.values)) gap.id: gap,
     };
     final desiredEvents = {..._events};
     for (final id in editedIds) {

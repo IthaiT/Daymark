@@ -355,6 +355,40 @@ List<Event> undefinedEvents(Iterable<Event> events, [DateTime? day]) {
       : gaps.where((gap) => gap.intervalOn(day) != null).toList();
 }
 
+/// Recompute gap boundaries from saved classified events; stored rows supply
+/// annotations only. Never pass in-memory drafts to this function.
+List<Event> currentGaps(Iterable<Event> savedEvents) {
+  final saved = savedEvents.toList();
+  final previous = {
+    for (final event in saved)
+      if (event.isUndefined) event.id: event,
+  };
+  return [
+    for (final gap in undefinedEvents(
+      saved.where((event) => event.owner != null),
+    ))
+      _annotatedGap(gap, previous),
+  ];
+}
+
+Event _annotatedGap(Event gap, Map<String, Event> previous) {
+  var annotation = previous[gap.id];
+  if (annotation == null && dayStart(gap.start).isBefore(dayStart(gap.end!))) {
+    final legacy = previous[undefinedHeadId(gap.end!)];
+    if (legacy?.end == gap.end && legacy!.start == dayStart(gap.end!)) {
+      annotation = legacy;
+    }
+  }
+  return annotation?.copyWith(
+        id: gap.id,
+        start: gap.start,
+        end: gap.end,
+        clearTags: true,
+        clearItem: true,
+      ) ??
+      gap;
+}
+
 class TimelineSegment {
   const TimelineSegment(
     this.event,

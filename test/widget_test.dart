@@ -1,3 +1,4 @@
+import 'package:daymark/ui/inline_editor.dart';
 import 'support/screenshot_fonts.dart';
 import 'package:daymark/ui/workspace_style.dart';
 import 'dart:async';
@@ -127,8 +128,8 @@ void main() {
     await open(tester);
     final table = tester.state<EventTableState>(find.byType(EventTable));
     final order = table.selectionOrder.toList();
-    final gap = journal.rows.singleWhere((event) => event.isUndefined);
-    expect(order, ['early', gap.id, 'a', 'b']);
+    expect(journal.rows.where((event) => event.isUndefined), isEmpty);
+    expect(order, ['early', 'a', 'b']);
     for (var index = 1; index < order.length; index++) {
       expect(
         tester.getTopLeft(cell(order[index], 'title')).dy,
@@ -149,7 +150,7 @@ void main() {
     await tester.tap(cell('a', 'title'));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pumpAndSettle();
-    expect(journal.selected, {'early', gap.id, 'a'});
+    expect(journal.selected, {'early', 'a'});
   });
   Future<void> key(
     WidgetTester tester,
@@ -695,7 +696,7 @@ void main() {
   );
 
   testWidgets(
-    'add and Ctrl+N create independent drafts, title Enter promotes, Esc discards current',
+    'add and Ctrl+N create independent drafts, title Enter keeps an unclassified draft, Esc discards current',
     (tester) async {
       await open(tester);
       await tester.tap(find.byKey(const ValueKey('add-event')));
@@ -713,8 +714,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(input(first, 'title'), '保存草稿');
       await key(tester, LogicalKeyboardKey.enter);
-      expect(journal.drafts, isEmpty);
-      expect(journal.store.events[first]!.title, '保存草稿');
+      expect(journal.drafts[first]!.title, '保存草稿');
+      expect(journal.store.events.containsKey(first), isFalse);
     },
   );
 
@@ -770,7 +771,12 @@ void main() {
       expect(journal.event('a')!.tagId, tag.id);
       await tester.enterText(input('a', 'tag'), '未归类');
       await key(tester, LogicalKeyboardKey.enter);
-      expect(journal.event('a')!.tagId, isNull);
+      expect(journal.event('a')!.tagId, isNotNull);
+      expect(input('a', 'tag'), findsOneWidget);
+      expect(
+        tester.widget<InlineEditor>(find.byType(InlineEditor)).session.error,
+        isNotNull,
+      );
     },
   );
 
@@ -1254,7 +1260,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(journal.store.events['a']!.tagId, isNull);
+    expect(journal.store.events['a']!.tagId, 'work');
   });
 
   testWidgets('tag picker shares sidebar styling and folds without choosing', (

@@ -108,6 +108,7 @@ void main() {
         start: day.add(const Duration(hours: 27)),
       );
       await journal.editCell(id, EventColumn.title, '今天');
+      await journal.editCell(id, EventColumn.tag, (id: 'work', isItem: false));
       final saved = store.events[id]!;
       await expectLater(
         journal.updateEvent(

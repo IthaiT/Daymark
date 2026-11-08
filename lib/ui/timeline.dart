@@ -129,7 +129,9 @@ class TimelineState extends State<Timeline> {
     ..._events,
     if (widget.journal.autoUndefined)
       for (final gap in undefinedEvents([
-        for (final event in widget.journal.regularEvents)
+        for (final event in widget.journal.store.events.values.where(
+          (event) => !event.isUndefined,
+        ))
           event.id == _preview?.id ? _preview! : event,
       ], widget.journal.day))
         gap.copyWith(

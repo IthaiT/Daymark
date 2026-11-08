@@ -51,6 +51,59 @@ void main() {
   );
 
   test(
+    'named drafts leave gap annotations untouched until classification',
+    () async {
+      await store.replaceEvents({
+        'a': item('a', 9, 10),
+        'b': item('b', 12, 13),
+      });
+      await controller.initialize();
+      final gap = controller.rows.singleWhere((e) => e.isUndefined);
+      await controller.editCell(gap.id, EventColumn.title, '散步');
+      final annotated = store.events[gap.id]!;
+      final before = await store.eventsFile.readAsBytes();
+      final id = await controller.addDraft(
+        start: day.add(const Duration(hours: 10)),
+      );
+      await controller.editCell(id, EventColumn.title, '煮牛肉面');
+      expect(store.events[gap.id], annotated);
+      expect(await store.eventsFile.readAsBytes(), before);
+      expect(store.events.containsKey(id), isFalse);
+      await controller.discardDraft(id);
+      expect(store.events[gap.id], annotated);
+      await controller.undo();
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'linux',
+        isItem: false,
+      ));
+      expect(controller.drafts, isEmpty);
+      expect(store.events[id]!.itemId, isNull);
+      expect(store.events.containsKey(gap.id), isFalse);
+      expect(controller.rows.singleWhere((e) => e.isUndefined).title, '空档');
+      await controller.undo();
+      expect(store.events[gap.id], annotated);
+      expect(controller.drafts[id]!.title, '煮牛肉面');
+    },
+  );
+
+  test('last classification cannot be removed from a saved event', () async {
+    await store.replaceEvents({'a': item('a', 9, 10)});
+    await expectLater(
+      controller.setEventTags(['a'], []),
+      throwsFormatException,
+    );
+    await expectLater(
+      controller.assignOwner(['a'], null),
+      throwsFormatException,
+    );
+    await expectLater(
+      controller.editCell('a', EventColumn.tag, null),
+      throwsFormatException,
+    );
+    expect(store.events['a']!.tagIds, ['linux']);
+  });
+
+  test(
     'range selection can follow displayed group order while timeline stays chronological',
     () async {
       await store.replaceEvents({
@@ -142,13 +195,13 @@ void main() {
       ]);
       await controller.deleteTag(removed.id);
       final ids = await controller.pasteEvents(clipboard);
-      expect(store.events[ids[0]]!.tagId, isNull);
+      expect(controller.drafts[ids[0]]!.tagId, isNull);
       expect(controller.drafts[ids[1]]!.title, '');
       expect(store.events.containsKey(ids[1]), isFalse);
       expect(store.events[ids[2]]!.end, isNull);
       expect(store.events[ids[2]]!.start.second, 35);
-      expect(store.events[ids[3]]!.isUndefined, isFalse);
-      expect(store.events[ids[3]]!.title, '改名空档');
+      expect(controller.drafts[ids[3]]!.isUndefined, isFalse);
+      expect(controller.drafts[ids[3]]!.title, '改名空档');
       await controller.shiftDay(1);
       expect(controller.drafts, isEmpty);
     },
@@ -209,7 +262,7 @@ void main() {
   );
 
   test(
-    'multiple drafts independently move and become saved only when named',
+    'multiple drafts independently move and become saved only when classified',
     () async {
       final first = await controller.addDraft();
       final second = await controller.addDraft(
@@ -221,10 +274,15 @@ void main() {
       expect(controller.drafts.length, 2);
       expect(store.events.values.where((event) => !event.isUndefined), isEmpty);
       await controller.editCell(first, EventColumn.title, '独立命名');
+      expect(controller.drafts.length, 2);
+      await controller.editCell(first, EventColumn.tag, (
+        id: 'linux',
+        isItem: false,
+      ));
       expect(controller.drafts.keys, [second]);
       expect(store.events[first]!.start.hour, 13);
       await controller.undo();
-      expect(controller.drafts[first]!.title, '');
+      expect(controller.drafts[first]!.title, '独立命名');
       await controller.redo();
       expect(store.events[first]!.title, '独立命名');
     },
@@ -272,7 +330,10 @@ void main() {
         isItem: false,
       ));
       expect(store.events[id]!.title, '自定义名称');
-      await controller.editCell(id, EventColumn.tag, null);
+      await expectLater(
+        controller.editCell(id, EventColumn.tag, null),
+        throwsFormatException,
+      );
       expect(store.events[id]!.title, '自定义名称');
     },
   );
@@ -327,7 +388,10 @@ void main() {
     'failed time write retains suggested end and explicit confirmation for retry',
     () async {
       final id = await controller.addDraft();
-      await controller.editCell(id, EventColumn.title, '新事件');
+      await controller.editCell(id, EventColumn.tag, (
+        id: 'linux',
+        isItem: false,
+      ));
       final before = await store.eventsFile.readAsBytes();
       final original = controller.event(id)!;
       failWrites = true;
@@ -507,7 +571,10 @@ void main() {
       final oldRows = controller.rows;
       failWrites = true;
       await expectLater(
-        controller.editCell(draft, EventColumn.title, '未保存'),
+        controller.editCell(draft, EventColumn.tag, (
+          id: 'linux',
+          isItem: false,
+        )),
         throwsFileSystemException,
       );
       expect(controller.drafts[draft]!.title, '');
@@ -571,13 +638,17 @@ void main() {
   test('failed undo keeps history available for retry', () async {
     final id = await controller.addDraft();
     await controller.editCell(id, EventColumn.title, '记录');
+    await controller.editCell(id, EventColumn.tag, (
+      id: 'linux',
+      isItem: false,
+    ));
     failWrites = true;
     await expectLater(controller.undo(), throwsFileSystemException);
     expect(controller.history.canUndo, isTrue);
     expect(store.events[id]!.title, '记录');
     failWrites = false;
     expect(await controller.undo(), isTrue);
-    expect(controller.drafts[id]!.title, '');
+    expect(controller.drafts[id]!.title, '记录');
   });
 
   test(
@@ -810,8 +881,9 @@ void main() {
     await controller.editCell(id, EventColumn.title, '改简历');
     // Choosing a suggestion is what attaches; typing the same words is not a
     // selection, otherwise clearing an owner could never stick.
-    expect(store.events[id]!.itemId, isNull);
-    expect(store.events[id]!.tagIds, isEmpty);
+    expect(controller.drafts[id]!.itemId, isNull);
+    expect(controller.drafts[id]!.tagIds, isEmpty);
+    expect(store.events.containsKey(id), isFalse);
   });
 
   test('a chosen suggestion carries the title and the project', () async {

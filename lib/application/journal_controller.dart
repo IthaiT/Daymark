@@ -146,45 +146,14 @@ class JournalController extends ChangeNotifier {
 
   JournalSnapshot _capture() =>
       JournalSnapshot(store.events, _drafts, suggestedEndIds: _suggestedEndIds);
-  Map<String, Event> _reconcile(
-    Map<String, Event> events,
-    Map<String, Event> drafts,
-  ) {
-    final storedGaps = {
-      for (final item in events.values.where((event) => event.isUndefined))
-        item.id: item,
-    };
+  Map<String, Event> _reconcile(Map<String, Event> events) {
     final regular = {
       for (final item in events.values.where((event) => !event.isUndefined))
         item.id: item,
     };
     final result = {...regular};
-    if (!_settings.autoUndefined) {
-      // Switching the feature off only hides derived rows. Their names and
-      // notes stay on disk so enabling it again restores the same records.
-      return {...result, ...storedGaps};
-    }
-    for (final gap in undefinedEvents([...regular.values, ...drafts.values])) {
-      var previous = storedGaps[gap.id];
-      if (previous == null &&
-          dayStart(gap.start).isBefore(dayStart(gap.end!))) {
-        // Older versions persisted only the next day's leading portion.
-        // Carry its name and notes into the complete cross-day gap once.
-        final legacyHead = storedGaps[undefinedHeadId(gap.end!)];
-        if (legacyHead?.end == gap.end &&
-            legacyHead!.start == dayStart(gap.end!)) {
-          previous = legacyHead;
-        }
-      }
-      result[gap.id] =
-          previous?.copyWith(
-            id: gap.id,
-            start: gap.start,
-            end: gap.end,
-            clearTags: true,
-            clearItem: true,
-          ) ??
-          gap;
+    for (final gap in currentGaps(events.values)) {
+      result[gap.id] = gap;
     }
     return result;
   }
@@ -214,7 +183,18 @@ class JournalController extends ChangeNotifier {
           id,
     };
     final desiredDay = day ?? _day;
-    final desired = _reconcile(events, drafts);
+    // New formal records always need a tag or an item. Preserve imported
+    // legacy unclassified rows until the user explicitly classifies them.
+    for (final event in events.values) {
+      if (record &&
+          !event.isUndefined &&
+          event.owner == null &&
+          (store.events[event.id] == null ||
+              store.events[event.id]!.owner != null)) {
+        throw const FormatException('请至少选择一个标签或关联事项。');
+      }
+    }
+    final desired = _reconcile(events);
     if (!mapEquals(desired, store.events)) await store.replaceEvents(desired);
     _editedArchivedIds.addAll(edited);
     _drafts = Map.of(drafts);
@@ -381,7 +361,7 @@ class JournalController extends ChangeNotifier {
         pasted.title.trim().isEmpty ? pasted.copyWith(title: '新事件') : pasted,
         allowIncomplete: true,
       );
-      if (pasted.title.trim().isEmpty) {
+      if (pasted.title.trim().isEmpty || pasted.owner == null) {
         drafts[id] = pasted;
       } else {
         events[id] = pasted;
@@ -467,7 +447,7 @@ class JournalController extends ChangeNotifier {
       store.validateEvent(
         changed.title.isEmpty ? changed.copyWith(title: '新事件') : changed,
       );
-      if (changed.title.isEmpty) {
+      if (changed.title.isEmpty || changed.owner == null) {
         drafts[id] = changed;
       } else {
         drafts.remove(id);
@@ -511,7 +491,12 @@ class JournalController extends ChangeNotifier {
       store.validateEvent(
         changed.copyWith(title: changed.title.isEmpty ? '新事件' : changed.title),
       );
-      drafts[changed.id] = changed;
+      if (changed.title.trim().isNotEmpty && changed.owner != null) {
+        drafts.remove(changed.id);
+        events[changed.id] = changed;
+      } else {
+        drafts[changed.id] = changed;
+      }
     } else {
       store.validateEvent(changed);
       events[changed.id] = changed;
@@ -587,8 +572,7 @@ class JournalController extends ChangeNotifier {
       });
 
   /// Batch classification used by the statistics screen. A tag replaces the
-  /// tags, an item is added together with its inherited tags, and null files
-  /// the records as unclassified again.
+  /// tags, an item is added together with its inherited tags, and clearing the last classification is rejected.
   Future<void> assignOwner(Iterable<String> ids, OwnerRef? owner) {
     if (owner == null) {
       return _run(() async {

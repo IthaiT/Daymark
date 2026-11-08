@@ -107,27 +107,28 @@ void main() {
     expect(controller.rows.where((event) => event.isUndefined), isEmpty);
   });
 
-  test('failed re-enable keeps the previous setting and stored rows', () async {
-    await controller.applySettings(const AppSettings(autoUndefined: false));
-    // Move a neighbour while hidden so enabling must persist new boundaries.
-    await controller.editCell(
-      'b',
-      EventColumn.start,
-      day.add(const Duration(hours: 11, minutes: 30)),
-    );
-    final before = Map.of(store.events);
-    failWrites = true;
-    await expectLater(
-      controller.applySettings(const AppSettings()),
-      throwsA(isA<FileSystemException>()),
-    );
-    expect(controller.autoUndefined, isFalse);
-    expect(store.events, before);
-    failWrites = false;
-    await controller.applySettings(const AppSettings());
-    expect(controller.autoUndefined, isTrue);
-    expect(gapIds(controller.rows), isNotEmpty);
-  });
+  test(
+    'hidden gaps stay current and visibility changes need no write',
+    () async {
+      await controller.applySettings(const AppSettings(autoUndefined: false));
+      // Move a neighbour while hidden so enabling must persist new boundaries.
+      await controller.editCell(
+        'b',
+        EventColumn.start,
+        day.add(const Duration(hours: 11, minutes: 30)),
+      );
+      final before = Map.of(store.events);
+      failWrites = true;
+      await controller.applySettings(const AppSettings());
+      expect(controller.autoUndefined, isTrue);
+      expect(store.events, before);
+      expect(
+        store.events.values.singleWhere((e) => e.isUndefined).end,
+        day.add(const Duration(hours: 11, minutes: 30)),
+      );
+      expect(gapIds(controller.rows), isNotEmpty);
+    },
+  );
 
   test('renamed gaps survive switching the feature off and on', () async {
     final gap = store.events.values.firstWhere((event) => event.isUndefined);
