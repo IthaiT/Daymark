@@ -14,10 +14,14 @@ class ObsidianImport {
   final Map<String, String> documents;
 }
 
-final _fileId = RegExp(r'^<!-- daymark-file:([a-zA-Z0-9_-]+) -->\s*$');
-final _fileBlockId = RegExp(r'^\^daymark-file-([a-zA-Z0-9-]+)\s*$');
-final _blockId = RegExp(r'(?:^|\s)\^([a-zA-Z0-9-]+)\s*$');
-final _taskId = RegExp(r'<!-- daymark:([a-zA-Z0-9_-]+) -->');
+final _itemId = RegExp(
+  r'^\^daymark-obsidian-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+);
+final _blockId = RegExp(r'(?:^|\s)(\^[a-zA-Z0-9-]+)\s*$');
+final _multipleBlocks = RegExp(r'(?:\s+\^[a-zA-Z0-9-]+){2,}\s*$');
+final _unsupportedIdentity = RegExp(
+  r'<!--\s*daymark(?:-file)?\s*:|\^daymark-file-',
+);
 final _checkbox = RegExp(r'^(\s*)(?:[-+*]|\d+[.)])\s+\[(.)\]\s*(.*)$');
 
 /// Parses only immediate Markdown children of the selected Daymark folder.
@@ -26,15 +30,13 @@ ObsidianImport parseObsidian(
   Map<String, String> documents, {
   required String directory,
   String Function()? newId,
-  Map<String, String> knownBlockIds = const {},
 }) {
-  newId ??= () => 'obsidian-${const Uuid().v4()}';
+  newId ??= () => '^daymark-obsidian-${const Uuid().v4()}';
   final items = <String, Item>{};
   final tags = <String, List<String>>{};
   final updated = <String, String>{};
   final roots = <String, String>{};
   final parents = <String, String>{};
-  final usedBlocks = <String>{};
   void add(Item item) {
     if (items.containsKey(item.id)) {
       throw FormatException(
@@ -63,55 +65,7 @@ ObsidianImport parseObsidian(
       body = end + 1;
     }
     final propertyId = _noteId(properties?['daymark-id'], path);
-    var rootId = propertyId;
-    final oldRootLines = <int>[];
-    String? rootFence;
-    var rootComment = false;
-    for (var index = body; index < lines.length; index++) {
-      final code = RegExp(
-        r'^(`{3,}|~{3,})',
-      ).firstMatch(lines[index].trimLeft());
-      if (code != null) {
-        final marker = code[1]!;
-        if (rootFence == null) {
-          rootFence = marker;
-        } else if (marker.startsWith(rootFence[0]) &&
-            marker.length >= rootFence.length) {
-          rootFence = null;
-        }
-        continue;
-      }
-      if (rootFence != null) continue;
-      final trimmedRoot = lines[index].trimLeft();
-      if (rootComment) {
-        if (trimmedRoot.contains('-->') || trimmedRoot.contains('%%')) {
-          rootComment = false;
-        }
-        continue;
-      }
-      if ((trimmedRoot.startsWith('<!--') && !trimmedRoot.contains('-->')) ||
-          (trimmedRoot.startsWith('%%') &&
-              !trimmedRoot.substring(2).contains('%%'))) {
-        rootComment = true;
-        continue;
-      }
-      final legacy = _fileId.firstMatch(lines[index]);
-      final native = _fileBlockId.firstMatch(lines[index]);
-      if (legacy == null && native == null) continue;
-      if (oldRootLines.isNotEmpty) {
-        throw FormatException('$path 包含多个旧文件 ID。');
-      }
-      final oldId = legacy?[1] ?? _decodeId(native![1]!);
-      if (propertyId != null && propertyId != oldId) {
-        throw FormatException('$path 的 daymark-id 属性与旧文件 ID 冲突，请确认后再同步。');
-      }
-      rootId = oldId;
-      oldRootLines.add(index);
-    }
-    if (rootFence != null || rootComment) {
-      throw FormatException('$path 的代码块或注释未结束，请补全后同步。');
-    }
-    rootId ??= newId();
+    final rootId = propertyId ?? _requireId(newId(), path);
     final name = path
         .replaceAll('\\', '/')
         .split('/')
@@ -151,6 +105,11 @@ ObsidianImport parseObsidian(
         comment = true;
         continue;
       }
+      if (_unsupportedIdentity.hasMatch(line)) {
+        throw FormatException(
+          '$path 第 ${index + 1} 行的旧身份标识不受支持，请使用完整的 ^daymark-obsidian-UUID。',
+        );
+      }
       final match = _checkbox.firstMatch(line);
       if (match == null) continue;
       final status = switch (match[2]) {
@@ -167,28 +126,12 @@ ObsidianImport parseObsidian(
       while (stack.isNotEmpty && stack.last.$1 >= indent) {
         stack.removeLast();
       }
-      final ids = _taskId.allMatches(line).toList();
-      if (ids.length > 1) {
-        throw FormatException('$path 第 ${index + 1} 行包含多个 ID。');
+      if (_multipleBlocks.hasMatch(line)) {
+        throw FormatException('$path 第 ${index + 1} 行包含多个块 ID。');
       }
-      final block = obsidianBlockId(line);
-      if (block != null && !usedBlocks.add(block)) {
-        throw FormatException('Markdown 中存在重复块 ID：$block。');
-      }
-      final legacyId = ids.isEmpty ? null : ids.single[1]!;
-      final nativeId = block?.startsWith('daymark-') == true
-          ? _decodeId(block!.substring('daymark-'.length))
-          : null;
-      if (legacyId != null && nativeId != null && legacyId != nativeId) {
-        throw FormatException('$path 第 ${index + 1} 行的旧 ID 与块 ID 冲突。');
-      }
-      final id =
-          legacyId ??
-          nativeId ??
-          knownBlockIds[block] ??
-          (block == null ? newId() : 'obsidian-block-$block');
-      var annotatedLine = line.replaceAll(_taskId, '').trimRight();
-      if (block == null) annotatedLine += ' ^daymark-${_encodeId(id)}';
+      final block = _blockId.firstMatch(line)?[1];
+      final id = _requireId(block ?? newId(), '$path 第 ${index + 1} 行');
+      final annotatedLine = block == null ? '${line.trimRight()} $id' : line;
       lines[index] = annotatedLine;
       final (content, ownTags) = _inlineTags(match[3]!);
       tags[id] = ownTags;
@@ -217,8 +160,8 @@ ObsidianImport parseObsidian(
       );
       stack.add((indent, id));
     }
-    for (final index in oldRootLines.reversed) {
-      lines.removeAt(index);
+    if (fence != null || comment) {
+      throw FormatException('$path 的代码块或注释未结束，请补全后同步。');
     }
     if (propertyId == null) {
       if (body == 0) {
@@ -260,8 +203,19 @@ ObsidianImport parseObsidian(
 
 String? _noteId(Object? value, String path) {
   if (value == null || (value is String && value.trim().isEmpty)) return null;
-  if (value is! String || !RegExp(r'^[a-zA-Z0-9_.:-]+$').hasMatch(value)) {
-    throw FormatException('$path 的 daymark-id 必须是由字母、数字或 _ . : - 组成的文本 ID。');
+  if (value is! String) {
+    throw FormatException(
+      '$path 的 daymark-id 必须是完整的 ^daymark-obsidian-UUID 文本。',
+    );
+  }
+  return _requireId(value, '$path 的 daymark-id');
+}
+
+String _requireId(String value, String location) {
+  if (!_itemId.hasMatch(value)) {
+    throw FormatException(
+      '$location 的事项 ID 必须使用完整的 ^daymark-obsidian-UUID 格式。',
+    );
   }
   return value;
 }
@@ -299,23 +253,10 @@ String _withNoteId(String yaml, YamlMap? properties, String id, String eol) {
   return updated;
 }
 
-/// Existing user block IDs are preserved; the stored tree remembers their alias.
-String? obsidianBlockId(String line) =>
-    _blockId.firstMatch(line.replaceAll(_taskId, '').trimRight())?[1];
-
-String _encodeId(String id) => RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(id)
-    ? id
-    : 'encoded-${utf8.encode(id).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
-String _decodeId(String id) {
-  if (!id.startsWith('encoded-')) return id;
-  final hex = id.substring(8);
-  if (hex.length.isOdd || !RegExp(r'^[0-9a-f]+$').hasMatch(hex)) {
-    throw const FormatException('事项块 ID 编码不正确。');
-  }
-  return utf8.decode([
-    for (var i = 0; i < hex.length; i += 2)
-      int.parse(hex.substring(i, i + 2), radix: 16),
-  ]);
+/// Returns the complete canonical block ID, including its caret.
+String? obsidianBlockId(String line) {
+  final block = _blockId.firstMatch(line)?[1];
+  return block != null && _itemId.hasMatch(block) ? block : null;
 }
 
 String? _parent(Object? value, String path) {

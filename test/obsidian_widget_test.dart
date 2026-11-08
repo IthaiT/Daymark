@@ -16,6 +16,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/screenshot_fonts.dart';
+import 'support/obsidian_ids.dart';
 
 void main() {
   late Directory directory;
@@ -32,7 +33,7 @@ void main() {
       parseObsidian(
         {'工作计划.md': source},
         directory: 'synthetic/Daymark',
-        newId: () => 'node-${counter++}',
+        newId: () => obsidianId(counter++),
       ),
       directory: 'synthetic/Daymark',
     );
@@ -94,7 +95,7 @@ void main() {
       expect(find.text('解析 Obsidian 的事项'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('project-open-obsidian')));
       await tester.pumpAndSettle();
-      expect(opened, ['工作计划.md#^daymark-${task.id}']);
+      expect(opened, ['工作计划.md#${task.id}']);
       if (const bool.fromEnvironment('DAYMARK_CAPTURE_UI')) {
         await tester.runAsync(() async {
           final image =

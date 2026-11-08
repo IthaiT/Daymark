@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/obsidian_ids.dart';
+
 void main() {
   test(
     'official path URI round trips Unicode, spaces, ampersands and block anchors',
@@ -19,12 +21,12 @@ void main() {
       expect(uri.toString(), isNot(contains('+')));
     },
   );
-  test('item targets use native blocks, including existing user blocks', () {
+  test('item targets use the same complete identity as the source', () {
     final parsed = parseObsidian({
-      'A.md': '- [ ] 原生 ^my-existing-block',
+      'A.md': '- [ ] 原生 ${obsidianId(1)}',
     }, directory: 'synthetic');
     final item = parsed.items.values.singleWhere((item) => item.name == '原生');
-    expect(obsidianItemTarget(item), 'A.md#^my-existing-block');
+    expect(obsidianItemTarget(item), 'A.md#${obsidianId(1)}');
   });
   testWidgets(
     'wikilink aliases open their actual destination and current-note anchors',

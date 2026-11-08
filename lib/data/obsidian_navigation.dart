@@ -15,7 +15,7 @@ Uri obsidianOpenUri(String path) => Uri(
 String obsidianItemTarget(Item item) {
   final source = item.source!;
   final block = source.kind == 'task' ? obsidianBlockId(source.raw) : null;
-  return block == null ? source.path : '${source.path}#^$block';
+  return block == null ? source.path : '${source.path}#$block';
 }
 
 Future<void> openObsidianNote(String directory, String target) async {

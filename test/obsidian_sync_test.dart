@@ -5,8 +5,9 @@ import 'package:daymark/data/atomic_file.dart';
 import 'package:daymark/data/obsidian_sync.dart';
 import 'package:daymark/data/store.dart';
 import 'package:daymark/domain/model.dart';
-import 'package:daymark/domain/item.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'support/obsidian_ids.dart';
 
 void main() {
   late Directory directory;
@@ -104,8 +105,7 @@ void main() {
     'duplicate IDs fail before any source is annotated or data replaced',
     () async {
       final a = File('${vault.path}/A.md');
-      final source =
-          '- [ ] one <!-- daymark:same -->\n- [ ] two <!-- daymark:same -->';
+      final source = '- [ ] one ${obsidianId(99)}\n- [ ] two ${obsidianId(99)}';
       await a.writeAsString(source);
       await expectLater(
         const ObsidianSync().synchronize(store, vault),
@@ -178,108 +178,60 @@ void main() {
       expect(task.objective, '描述');
     },
   );
-  test('existing block aliases survive reload and a cross-file cut', () async {
-    final a = File('${vault.path}/A.md');
-    final b = File('${vault.path}/B.md');
-    await a.writeAsString(
-      '<!-- daymark-file:file-a -->\n- [ ] 旧事项 ^custom-link <!-- daymark:historical-id -->\n',
-    );
-    await b.writeAsString('');
-    const sync = ObsidianSync();
-    await sync.synchronize(store, vault);
-    final old = store.items['historical-id']!;
-    expect(await a.readAsString(), isNot(contains('<!-- daymark')));
-    final content = await a.readAsString();
-    final line = content.split('\n').singleWhere((s) => s.startsWith('- ['));
-    await a.writeAsString(content.replaceFirst('$line\n', ''));
-    await b.writeAsString(
-      '${await b.readAsString()}\n${line.replaceFirst('旧事项', '新事项')}\n',
-    );
-    final reopened = await Store.open(store.directory, backupTrees: true);
-    await sync.synchronize(reopened, vault);
-    expect(reopened.items[old.id]!.name, '新事项');
-    expect(reopened.items[old.id]!.source!.path, 'B.md');
-    expect(reopened.items[old.id]!.source!.missing, false);
-  });
-
   test(
-    'note ID migration preserves project and task records after restart and rename',
+    'note to task to note uses one unchanged ID across restart and saved records',
     () async {
-      final path = await vault.resolveSymbolicLinks();
-      final file = File('$path/A.md');
-      const original =
-          '---\ntags: [主业]\n---\n- [ ] 任务 ^daymark-task-a\n\n^daymark-file-file-a\n';
-      await file.writeAsString(original);
-      await store.saveItem(
-        Item(
-          id: 'file-a',
-          name: 'A',
-          tagIds: ['work'],
-          source: ItemSource(
-            directory: path,
-            path: 'A.md',
-            kind: 'file',
-            order: 0,
-            raw: original,
-          ),
-        ),
+      final jobFile = File('${vault.path}/跳槽.md');
+      final workFile = File('${vault.path}/主业.md');
+      await jobFile.writeAsString(
+        '---\ntags: [副业]\n---\n- [ ] 修改简历 | 描述 | 结果\n',
       );
-      await store.saveItem(
-        Item(
-          id: 'task-a',
-          name: '任务',
-          parentId: 'file-a',
-          source: ItemSource(
-            directory: path,
-            path: 'A.md',
-            kind: 'task',
-            order: 0,
-            raw: '- [ ] 任务 ^daymark-task-a',
-          ),
-        ),
-      );
-      final projectRecord = Event(
-        'project-record',
-        '原笔记记录',
-        'work',
-        DateTime.utc(2026, 11, 8, 8),
-        DateTime.utc(2026, 11, 8, 9),
-        '保留备注',
-        'file-a',
-      );
-      final taskRecord = Event(
-        'task-record',
-        '原任务记录',
-        'side',
-        DateTime.utc(2026, 11, 8, 9),
-        DateTime.utc(2026, 11, 8, 10),
-        '',
-        'task-a',
-      );
-      await store.saveEvent(projectRecord);
-      await store.saveEvent(taskRecord);
+      await workFile.writeAsString('---\ntags: [主业]\n---\n');
       const sync = ObsidianSync();
       await sync.synchronize(store, vault);
-      final migrated = await file.readAsString();
-      expect(migrated, contains('daymark-id: "file-a"'));
-      expect(migrated, isNot(contains('^daymark-file-')));
-      expect(migrated, contains('- [ ] 任务 ^daymark-task-a'));
-      final originals = await Directory(
-        '${store.directory.path}/obsidian-originals',
-      ).list().toList();
-      final backup =
-          jsonDecode(await (originals.single as File).readAsString()) as Map;
-      expect((backup['documents'] as Map)['A.md'], original);
-      await file.rename('$path/重命名.md');
+      final job = store.items.values.singleWhere((n) => n.name == '跳槽');
+      final resume = store.items.values.singleWhere((n) => n.name == '修改简历');
+      final work = store.items.values.singleWhere((n) => n.name == '主业');
+      final originalWork = await workFile.readAsString();
+      expect(await jobFile.readAsString(), contains('daymark-id: "${job.id}"'));
+      expect(resume.source!.raw, endsWith(resume.id));
+      final records = {
+        'job': Event(
+          'job',
+          '跳槽记录',
+          ['work'],
+          DateTime.utc(2026, 11, 8, 9),
+          DateTime.utc(2026, 11, 8, 10),
+          '原备注',
+          job.id,
+        ),
+        'resume': Event(
+          'resume',
+          '简历记录',
+          ['side'],
+          DateTime.utc(2026, 11, 8, 10),
+          DateTime.utc(2026, 11, 8, 11),
+          '',
+          resume.id,
+        ),
+      };
+      await store.replaceEvents(records);
+      // The user copies the note property's complete value directly onto the new line.
+      await workFile.writeAsString(
+        '$originalWork\n- [ ] 跳槽 #副业 ${job.id}\n    ${resume.source!.raw}\n',
+      );
+      await jobFile.delete();
       final reopened = await Store.open(store.directory, backupTrees: true);
       await sync.synchronize(reopened, vault);
-      expect(reopened.items['file-a']!.name, '重命名');
-      expect(reopened.items['file-a']!.source!.path, '重命名.md');
-      expect(reopened.items['file-a']!.source!.missing, false);
-      expect(reopened.items['task-a']!.parentId, 'file-a');
-      expect(reopened.events['project-record'], projectRecord);
-      expect(reopened.events['task-record'], taskRecord);
-      expect(await File('$path/重命名.md').readAsString(), migrated);
+      expect(reopened.items.length, 3);
+      expect(reopened.items[job.id]!.source!.kind, 'task');
+      expect(reopened.items[job.id]!.parentId, work.id);
+      expect(reopened.items[resume.id]!.parentId, job.id);
+      expect(reopened.items[resume.id]!.objective, '描述');
+      expect(reopened.items[resume.id]!.outcome, '结果');
+      expect(reopened.items[resume.id]!.source!.path, '主业.md');
+      expect(reopened.deletedObsidianReferences, isEmpty);
+      expect(reopened.events, records);
       final snapshot =
           jsonDecode(
                 await File(
@@ -287,16 +239,52 @@ void main() {
                 ).readAsString(),
               )
               as Map;
-      final snapshotEvents = snapshot['events'] as List;
-      expect(snapshotEvents.map((e) => (e as Map)['item_id']).toSet(), {
-        'file-a',
-        'task-a',
-      });
+      expect(
+        (snapshot['events'] as List).map((e) => (e as Map)['item_id']).toSet(),
+        {job.id, resume.id},
+      );
+      // The reverse operation copies the same task ID into a new note's property.
+      await workFile.writeAsString(originalWork);
+      await File('${vault.path}/换工作.md').writeAsString(
+        '---\ndaymark-id: "${job.id}"\ntags: [副业]\n---\n${resume.source!.raw}\n',
+      );
+      final split = await Store.open(store.directory, backupTrees: true);
+      await sync.synchronize(split, vault);
+      expect(split.items[job.id]!.name, '换工作');
+      expect(split.items[job.id]!.source!.kind, 'file');
+      expect(split.items[job.id]!.parentId, isNull);
+      expect(split.items[resume.id]!.parentId, job.id);
+      expect(split.items[resume.id]!.source!.path, '换工作.md');
+      expect(split.events, records);
+      expect(split.deletedObsidianReferences, isEmpty);
+      expect((await Store.open(store.directory)).events, records);
     },
   );
 
   test(
-    'conflicting note properties fail before any file or stored data changes',
+    'leaving a note and a task with the same ID rejects the entire sync',
+    () async {
+      final a = File('${vault.path}/A.md');
+      final b = File('${vault.path}/B.md');
+      await a.writeAsString('- [ ] 原任务');
+      await b.writeAsString('');
+      const sync = ObsidianSync();
+      await sync.synchronize(store, vault);
+      final rootId = store.items.values.singleWhere((n) => n.name == 'A').id;
+      final oldItems = store.items;
+      final originalA = await a.readAsString();
+      final duplicate = '${await b.readAsString()}\n- [ ] 合并但未删除原文件 $rootId\n';
+      await b.writeAsString(duplicate);
+      await expectLater(sync.synchronize(store, vault), throwsFormatException);
+      expect(await a.readAsString(), originalA);
+      expect(await b.readAsString(), duplicate);
+      expect(store.items, oldItems);
+      expect((await Store.open(store.directory)).items, oldItems);
+    },
+  );
+
+  test(
+    'unsupported IDs fail without rewriting any Markdown or stored data',
     () async {
       final a = File('${vault.path}/A.md');
       final b = File('${vault.path}/B.md');
@@ -306,15 +294,22 @@ void main() {
       final oldItems = store.items;
       final oldTags = store.tags;
       final originalA = await a.readAsString();
-      const conflict =
-          '---\ndaymark-id: property-id\n---\n- [ ] 不应写入\n^daymark-file-other-id\n';
-      await b.writeAsString(conflict);
-      await expectLater(sync.synchronize(store, vault), throwsFormatException);
-      expect(await a.readAsString(), originalA);
-      expect(await b.readAsString(), conflict);
-      expect(store.items, oldItems);
-      expect(store.tags, oldTags);
-      expect((await Store.open(store.directory)).items, oldItems);
+      for (final invalid in [
+        '---\ndaymark-id: obsidian-00000000-0000-4000-8000-000000000001\n---\n- [ ] 不应写入\n',
+        '<!-- daymark-file:old -->\n- [ ] 不应写入\n',
+        '- [ ] 不应写入 ^custom-link\n',
+      ]) {
+        await b.writeAsString(invalid);
+        await expectLater(
+          sync.synchronize(store, vault),
+          throwsFormatException,
+        );
+        expect(await a.readAsString(), originalA);
+        expect(await b.readAsString(), invalid);
+        expect(store.items, oldItems);
+        expect(store.tags, oldTags);
+        expect((await Store.open(store.directory)).items, oldItems);
+      }
     },
   );
 }

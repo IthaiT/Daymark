@@ -15,6 +15,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/screenshot_fonts.dart';
+import 'support/obsidian_ids.dart';
 
 void main() {
   late Directory directory;
@@ -34,7 +35,7 @@ void main() {
     await store.importObsidian(
       parseObsidian({
         'A.md':
-            '---\ndaymark-id: note-a\ntags: [主业]\n---\n- [ ] 有记录 | 实际描述 | 实际结果 ^daymark-task-a\n- [x] 无记录 ^daymark-task-b\n',
+            '---\ndaymark-id: "${obsidianId(1)}"\ntags: [主业]\n---\n- [ ] 有记录 | 实际描述 | 实际结果 ${obsidianId(2)}\n- [x] 无记录 ${obsidianId(3)}\n',
       }, directory: folder),
       directory: folder,
     );
@@ -46,7 +47,7 @@ void main() {
         day.add(const Duration(hours: 9)),
         day.add(const Duration(hours: 10)),
         '原备注',
-        'task-a',
+        obsidianId(2),
       ),
     );
   });
@@ -112,9 +113,9 @@ void main() {
       expect(find.text('实际描述'), findsOneWidget);
       expect(find.text('实际结果'), findsOneWidget);
       expect(find.byKey(const ValueKey('project-open-obsidian')), findsNothing);
-      expect(find.byKey(const ValueKey('project-note-a')), findsNothing);
-      expect(find.byKey(const ValueKey('project-task-b')), findsNothing);
-      expect(store.events['e']!.itemId, 'task-a');
+      expect(find.byKey(ValueKey('project-${obsidianId(1)}')), findsNothing);
+      expect(find.byKey(ValueKey('project-${obsidianId(3)}')), findsNothing);
+      expect(store.events['e']!.itemId, obsidianId(2));
       if (const bool.fromEnvironment('DAYMARK_CAPTURE_UI')) {
         await tester.runAsync(() async {
           final image =
