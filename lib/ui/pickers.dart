@@ -324,12 +324,20 @@ List<OwnerRef?> matchingOwners(
 /// A title offered while typing in the name column, together with the owner
 /// that will be attached when it is chosen.
 class TitleChoice {
-  const TitleChoice(this.title, this.owner, this.subtitle);
+  const TitleChoice(
+    this.title,
+    this.owner,
+    this.subtitle, {
+    this.depth = 0,
+    this.completed = false,
+  });
   final String title;
   final OwnerRef owner;
 
   /// Where the owner sits: the parent path for an item, the full path for a tag.
   final String subtitle;
+  final int depth;
+  final bool completed;
 }
 
 String _titleSubtitle(Store store, OwnerRef owner) {
@@ -342,43 +350,52 @@ String _titleSubtitle(Store store, OwnerRef owner) {
 
 /// Candidates for the name column.
 ///
-/// Only todo items take part, so a freely
-/// typed phrase never turns yesterday's wording into a suggestion. Exact
-/// matches rank first, then prefixes, then anything containing the query.
-List<TitleChoice> titleChoices(Store store, String query, {int limit = 8}) {
+/// A matching ancestor includes its recordable descendants in tree order.
+/// Matching subtrees rank by exact name, prefix, substring, then full path.
+List<TitleChoice> titleChoices(Store store, String query, {int? limit}) {
   final needle = caseFold(query.trim());
   if (needle.isEmpty) return const [];
-  final exact = <TitleChoice>[];
-  final prefix = <TitleChoice>[];
-  final contains = <TitleChoice>[];
-  final seen = <String>{};
-
-  void add(String title, OwnerRef owner) {
-    final trimmed = title.trim();
-    if (trimmed.isEmpty) return;
-    final folded = caseFold(trimmed);
-    final List<TitleChoice> bucket;
-    if (folded == needle) {
-      bucket = exact;
-    } else if (folded.startsWith(needle)) {
-      bucket = prefix;
-    } else if (folded.contains(needle)) {
-      bucket = contains;
-    } else {
-      return;
-    }
-    if (!seen.add('${owner.isItem ? 'item' : 'tag'}:${owner.id}')) return;
-    bucket.add(TitleChoice(trimmed, owner, _titleSubtitle(store, owner)));
+  final matched = <String, (String, int)>{};
+  final groups = <String, (int, List<TitleChoice>)>{};
+  final now = store.clock();
+  for (final (item, depth) in orderedItems(store.items)) {
+    final inherited = matched[item.parentId];
+    final name = caseFold(item.name.trim());
+    final rank = name == needle
+        ? 0
+        : name.startsWith(needle)
+        ? 1
+        : name.contains(needle)
+        ? 2
+        : caseFold(store.itemPath(item.id)).contains(needle)
+        ? 3
+        : null;
+    if (inherited == null && rank == null) continue;
+    final (anchor, anchorDepth) = inherited ?? (item.id, depth);
+    matched[item.id] = (anchor, anchorDepth);
+    final group = groups.putIfAbsent(anchor, () => (rank!, <TitleChoice>[]));
+    if (!item.canRecordOn(now)) continue;
+    final owner = (id: item.id, isItem: true);
+    group.$2.add(
+      TitleChoice(
+        item.name.trim(),
+        owner,
+        _titleSubtitle(store, owner),
+        depth: depth - anchorDepth,
+        completed: item.status == ItemStatus.done,
+      ),
+    );
   }
-
-  for (final (item, _) in orderedItems(store.items)) {
-    if (item.isTodo) add(item.name, (id: item.id, isItem: true));
-  }
-  return [...exact, ...prefix, ...contains].take(limit).toList();
+  final result = [
+    for (var rank = 0; rank < 4; rank++)
+      for (final group in groups.values)
+        if (group.$1 == rank) ...group.$2,
+  ];
+  return limit == null ? result : result.take(limit).toList();
 }
 
 /// Name-column suggestions: choosing one fills both the title and its owner.
-class TitleChoices extends StatelessWidget {
+class TitleChoices extends StatefulWidget {
   const TitleChoices({
     super.key,
     required this.store,
@@ -390,52 +407,84 @@ class TitleChoices extends StatelessWidget {
   final String query;
   final int selected;
   final ValueChanged<TitleChoice> onChoose;
+  @override
+  State<TitleChoices> createState() => _TitleChoicesState();
+}
+
+class _TitleChoicesState extends State<TitleChoices> {
+  final _scroll = ScrollController();
+  static const _rowHeight = 64.0;
+
+  @override
+  void didUpdateWidget(TitleChoices oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected == widget.selected &&
+        oldWidget.query == widget.query) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final top = widget.selected * _rowHeight;
+      final bottom = top + _rowHeight;
+      final view = _scroll.position.viewportDimension;
+      final target = top < _scroll.offset
+          ? top
+          : bottom > _scroll.offset + view
+          ? bottom - view
+          : _scroll.offset;
+      _scroll.jumpTo(target.clamp(0.0, _scroll.position.maxScrollExtent));
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final choices = titleChoices(store, query);
+    final choices = titleChoices(widget.store, widget.query);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 320),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (var index = 0; index < choices.length; index++)
-              ListTile(
-                key: ValueKey(
-                  'title-choice-${choices[index].owner.isItem ? 'item' : 'tag'}-${choices[index].owner.id}',
-                ),
-                dense: true,
-                selected: index == selected,
-                selectedTileColor: Theme.of(
-                  context,
-                ).colorScheme.secondaryContainer,
-                selectedColor: Theme.of(
-                  context,
-                ).colorScheme.onSecondaryContainer,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                leading: Icon(
-                  choices[index].owner.isItem
-                      ? Icons.workspaces_outline
-                      : Icons.label_outline,
-                  size: 18,
-                ),
-                title: Text(
-                  choices[index].title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  choices[index].subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () => onChoose(choices[index]),
-              ),
-          ],
+      child: ListView.builder(
+        controller: _scroll,
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemExtent: _rowHeight,
+        itemCount: choices.length,
+        itemBuilder: (context, index) => Tooltip(
+          message: '${choices[index].subtitle}\n${choices[index].title}',
+          child: ListTile(
+            key: ValueKey(
+              'title-choice-${choices[index].owner.isItem ? 'item' : 'tag'}-${choices[index].owner.id}',
+            ),
+            dense: true,
+            selected: index == widget.selected,
+            selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
+            selectedColor: Theme.of(context).colorScheme.onSecondaryContainer,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            contentPadding: EdgeInsets.only(
+              left: 12 + choices[index].depth.clamp(0, 3) * 12.0,
+              right: 12,
+            ),
+            title: Text(
+              choices[index].title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              choices[index].subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: choices[index].completed
+                ? Text('已完成', style: Theme.of(context).textTheme.labelSmall)
+                : null,
+            onTap: () => widget.onChoose(choices[index]),
+          ),
         ),
       ),
     );
