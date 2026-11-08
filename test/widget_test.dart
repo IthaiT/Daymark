@@ -896,9 +896,9 @@ void main() {
         expect(journal.event('a')!.tagId, 'embedded');
         final field = tester.widget<TextField>(input('a', 'tag'));
         expect(field.focusNode!.hasPrimaryFocus, isTrue);
-        expect(field.controller!.text, '嵌入式 · 生活');
-        expect(journal.event('a')!.tagIds, ['embedded', 'life']);
-        expect(field.controller!.selection, TextSelection.collapsed(offset: 8));
+        expect(field.controller!.text, '嵌入式');
+        expect(journal.event('a')!.tagIds, ['embedded']);
+        expect(field.controller!.selection, TextSelection.collapsed(offset: 3));
         expect(find.byType(OwnerChoices), findsNothing);
       }
     },
@@ -932,6 +932,77 @@ void main() {
           isTrue,
         );
       }
+    },
+  );
+
+  testWidgets(
+    'typed tag lists replace old tags and retain the item association',
+    (tester) async {
+      final chore = await journal.store.saveTag('chore', null);
+      await journal.store.saveItem(const Item(id: 'task', name: '事项'));
+      await journal.store.replaceEvents({
+        ...journal.store.events,
+        'a': journal
+            .event('a')!
+            .copyWith(itemId: 'task', tagIds: ['work', chore.id]),
+      });
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      for (final (text, tags) in [
+        ('chore', [chore.id]),
+        ('主业 chore', ['work', chore.id]),
+        ('主业 cho', ['work', chore.id]),
+        ('主业', ['work']),
+        ('', <String>[]),
+      ]) {
+        await tester.enterText(input('a', 'tag'), text);
+        await key(tester, LogicalKeyboardKey.enter);
+        expect(journal.event('a')!.tagIds, unorderedEquals(tags));
+        expect(journal.event('a')!.itemId, 'task');
+        expect(journal.selected, {'a'});
+        expect(
+          tester
+              .widget<TextField>(input('a', 'tag'))
+              .focusNode!
+              .hasPrimaryFocus,
+          isTrue,
+        );
+      }
+      // A completed token followed by Tab saves the list without adding a choice.
+      await tester.enterText(input('a', 'tag'), '主业 chore ');
+      await key(tester, LogicalKeyboardKey.tab);
+      expect(journal.event('a')!.tagIds, unorderedEquals(['work', chore.id]));
+      expect(input('a', 'title'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'failed tag replacement preserves old tags and retries the full list',
+    (tester) async {
+      final chore = await journal.store.saveTag('chore', null);
+      await journal.store.replaceEvents({
+        ...journal.store.events,
+        'a': journal.event('a')!.copyWith(tagIds: ['work', 'life']),
+      });
+      await open(tester);
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.tap(cell('a', 'tag'));
+      await tester.pumpAndSettle();
+      await tester.enterText(input('a', 'tag'), 'cho');
+      failWrites = true;
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.event('a')!.tagIds, ['work', 'life']);
+      expect(
+        tester.widget<TextField>(input('a', 'tag')).controller!.text,
+        'cho',
+      );
+      failWrites = false;
+      await key(tester, LogicalKeyboardKey.enter);
+      expect(journal.event('a')!.tagIds, [chore.id]);
     },
   );
 
@@ -1004,7 +1075,7 @@ void main() {
       expect(journal.event('a')!.tagId, 'work');
       expect(
         tester.widget<TextField>(input('a', 'tag')).controller!.text,
-        '主业 · 生活',
+        '主业',
       );
       await key(tester, LogicalKeyboardKey.tab);
       expect(input('a', 'title'), findsOneWidget);
@@ -1294,6 +1365,44 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagId, 'work');
+  });
+
+  testWidgets('changing the name suggestion replaces inherited tags', (
+    tester,
+  ) async {
+    await journal.store.saveItem(
+      const Item(id: 'project', name: '项目', tagIds: ['work']),
+    );
+    await journal.store.saveItem(
+      const Item(
+        id: 'first',
+        name: '第一事项',
+        parentId: 'project',
+        tagIds: ['linux'],
+      ),
+    );
+    await journal.store.saveItem(
+      const Item(id: 'second', name: '第二事项', tagIds: ['embedded']),
+    );
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.enterText(input('a', 'title'), '第一');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.event('a')!.tagIds, ['life', 'work', 'linux']);
+    await tester.enterText(input('a', 'title'), '第二');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.event('a')!.itemId, 'second');
+    expect(journal.event('a')!.tagIds, ['life', 'embedded']);
+    await key(tester, LogicalKeyboardKey.tab);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.enterText(input('a', 'title'), '第一');
+    await key(tester, LogicalKeyboardKey.enter);
+    expect(journal.event('a')!.itemId, 'first');
+    expect(journal.event('a')!.tagIds, ['life', 'work', 'linux']);
   });
 
   testWidgets('tag picker shares sidebar styling and folds without choosing', (

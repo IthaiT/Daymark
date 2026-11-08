@@ -5,6 +5,7 @@ import '../application/journal_controller.dart';
 import '../data/store.dart';
 import '../domain/model.dart';
 import 'pickers.dart';
+import 'tag_input.dart';
 
 /// Where one record is filed while it is being edited: an optional project and
 /// any number of tags. The two are independent, so a record may carry both.
@@ -86,6 +87,8 @@ class InlineEditor extends StatefulWidget {
 class _InlineEditorState extends State<InlineEditor> {
   final _ownerChoices = GlobalKey<OwnerChoicesState>();
   String _ownerQuery = '';
+  List<String> _ownerPrefix = const [];
+  bool _ownerTextChanged = false;
   TextRange _composing = TextRange.empty;
 
   /// One arrow press is handled inside a single frame; a second delivery of
@@ -101,11 +104,9 @@ class _InlineEditorState extends State<InlineEditor> {
     if (_isComposing) return;
     final session = widget.session;
     if (session.column == EventColumn.tag) {
-      if (session.pickerOpen) {
-        _applyPendingOwner();
-        widget.onCompleteChoice();
-        return;
-      }
+      _applyPendingOwner();
+      widget.onCompleteChoice();
+      return;
     }
     if (session.column == EventColumn.title && session.pickerOpen) {
       final choices = titleChoices(widget.store, session.text.text);
@@ -120,10 +121,15 @@ class _InlineEditorState extends State<InlineEditor> {
   /// Applies what the owner list is pointing at.
   ///
   /// Arrows win when used; otherwise typing then Enter or Tab takes the first
-  /// match. An empty query points at nothing, so it never clears the owner.
+  /// match. With no typed query, only an explicit arrow selection is applied.
   void _applyPendingOwner() {
     final session = widget.session;
     if (session.column != EventColumn.tag || !session.pickerOpen) return;
+    if (_ownerTextChanged &&
+        session.ownerInputValid &&
+        session.ownerIndex < 0) {
+      return;
+    }
     final options = _ownerOptions();
     final index = session.ownerIndex >= 0
         ? session.ownerIndex.clamp(0, options.length - 1)
@@ -134,7 +140,7 @@ class _InlineEditorState extends State<InlineEditor> {
     final option = options[index];
     // Enter can arrive from both the field and the wrapper; applying twice
     // would toggle the same tag back off.
-    if (_isCurrent(option)) return;
+    if (!_ownerTextChanged && _isCurrent(option)) return;
     _applyOwner(option);
   }
 
@@ -155,9 +161,12 @@ class _InlineEditorState extends State<InlineEditor> {
         offset: choice.title.length,
       );
       if (choice.owner.isItem) {
+        final previousDefaults = session.itemId == null
+            ? const <String>[]
+            : widget.store.effectiveItemTagIds(session.itemId!);
         session.itemId = choice.owner.id;
         session.tagIds = normalizeTagIds([
-          ...session.tagIds,
+          ...session.tagIds.where((id) => !previousDefaults.contains(id)),
           ...widget.store.effectiveItemTagIds(choice.owner.id),
         ]);
       } else {
@@ -177,8 +186,8 @@ class _InlineEditorState extends State<InlineEditor> {
 
   /// Applies one owner choice to the pending classification.
   ///
-  /// An item is single-valued and brings the tags it inherits; a tag toggles,
-  /// so the same list both adds and removes. Nothing is written until commit.
+  /// Typed text replaces the list; browsing without typing toggles a tag.
+  /// Nothing is written until commit.
   void _applyOwner(OwnerRef? owner) {
     final session = widget.session;
     setState(() {
@@ -190,6 +199,8 @@ class _InlineEditorState extends State<InlineEditor> {
           ...session.tagIds,
           ...widget.store.effectiveItemTagIds(owner.id),
         ]);
+      } else if (_ownerTextChanged) {
+        session.tagIds = normalizeTagIds([..._ownerPrefix, owner.id]);
       } else {
         session.tagIds = session.tagIds.contains(owner.id)
             ? normalizeTagIds(session.tagIds.where((id) => id != owner.id))
@@ -206,9 +217,10 @@ class _InlineEditorState extends State<InlineEditor> {
     // The wrapper Focus below already receives key events from the field, so
     // attaching the handler to the node as well would run it twice per press.
     if (widget.session.column == EventColumn.tag) {
-      widget.session.text.text = widget.session.tagIds
-          .map(widget.store.tagName)
-          .join(' · ');
+      widget.session.text.text = tagInputText(
+        widget.store,
+        widget.session.tagIds,
+      );
     }
     // Ending an IME composition may not change the text at all, so the value
     // listener is what makes suggestions appear again after the candidate is
@@ -354,7 +366,7 @@ class _InlineEditorState extends State<InlineEditor> {
           autofocus: true,
           decoration: InputDecoration(
             hintText: switch (session.column) {
-              EventColumn.tag => '输入标签搜索',
+              EventColumn.tag => '输入标签，以空格分隔',
               EventColumn.start || EventColumn.end => '例如 2021 或 20:21',
               EventColumn.title => null,
             },
@@ -376,13 +388,12 @@ class _InlineEditorState extends State<InlineEditor> {
           onChanged: (text) => setState(() {
             session.error = null;
             if (session.column == EventColumn.tag) {
-              _ownerQuery = text;
-              final options = matchingOwners(
-                widget.store,
-                text,
-                includeItems: false,
-              );
-              session.ownerInputValid = options.isNotEmpty;
+              final input = parseTagInput(widget.store, text);
+              _ownerTextChanged = true;
+              _ownerPrefix = input.prefix;
+              _ownerQuery = input.query;
+              session.tagIds = input.tagIds;
+              session.ownerInputValid = input.valid;
               session.ownerIndex = -1;
               session.pickerOpen = true;
             } else if (session.column == EventColumn.title) {
