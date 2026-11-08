@@ -258,8 +258,24 @@ $taskProperty = [regex]::Match($taskAnnotated, '(?m)^daymark-id: "(' + $taskIdPa
 if ([regex]::Matches($taskAnnotated, $taskIdPattern).Count -ne 5 -or $taskProperty.Groups[1].Value -ne $taskFileId) {
     throw 'Note properties, task blocks and stored item IDs do not share the same complete identity.'
 }
-# Merge a note into a task by copying its property value unchanged.
 $taskRetainedId = ($taskImported | Where-Object { $_.status -eq 'active' }).id
+# No editor plugin or date metadata: observe completion and reopening on startup.
+$taskNotePath = Join-Path $taskObsidian '合成事项.md'
+[IO.File]::WriteAllText($taskNotePath, $taskAnnotated.Replace('- [ ] 待办事项', '- [x] 待办事项'), [Text.UTF8Encoding]::new($false))
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+$taskCompletedTree = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskCompleted = $taskCompletedTree.items | Where-Object { $_.id -eq $taskRetainedId }
+if ($taskCompleted.status -ne 'done' -or $taskCompleted.completed_on -ne $taskDay) {
+    throw 'Plugin-free completion did not persist the observed completion date.'
+}
+[IO.File]::WriteAllText($taskNotePath, $taskAnnotated, [Text.UTF8Encoding]::new($false))
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+$taskReopenedTree = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskReopened = $taskReopenedTree.items | Where-Object { $_.id -eq $taskRetainedId }
+if ($taskReopened.status -ne 'active' -or $taskReopened.completed_on) {
+    throw 'Reopening a completed item did not clear the prior completion date.'
+}
+# Merge a note into a task by copying its property value unchanged.
 $taskCsvPath = Join-Path $taskDirectory 'events.csv'
 $taskHeader = [IO.File]::ReadAllLines($taskCsvPath)[0]
 if (-not $taskHeader.EndsWith(',item_id')) { throw 'The current CSV owner column is missing.' }
@@ -292,4 +308,4 @@ if ($taskRemaining.Count -ne 2 -or @($taskRemaining | Where-Object { $_.source.m
 if (($taskAfterDeletion.events | Where-Object { $_.id -eq 'note-ref' }).item_id -ne $taskFileId -or ($taskAfterDeletion.events | Where-Object { $_.id -eq 'source-ref' }).item_id -ne $taskRetainedId) {
     throw 'Source deletion changed the saved record associations.'
 }
-Write-Output "Native smoke passed: unified note/task identities, note-to-task merge with unchanged record associations, four item states, source deletion and complete tree backup, Release fonts, isolated desktop, window bounds, BOM/cross-midnight gaps, archive backup, ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: plugin-free completion observation and reopening, unified note/task identities, note-to-task merge with unchanged record associations, four item states, source deletion and complete tree backup, Release fonts, isolated desktop, window bounds, BOM/cross-midnight gaps, archive backup, ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
