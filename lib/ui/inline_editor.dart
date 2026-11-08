@@ -68,7 +68,7 @@ class InlineEditor extends StatefulWidget {
     required this.store,
     required this.day,
     required this.onCommit,
-    required this.onCompleteTag,
+    required this.onCompleteChoice,
     required this.onCancel,
     required this.onNext,
   });
@@ -76,7 +76,7 @@ class InlineEditor extends StatefulWidget {
   final Store store;
   final DateTime day;
   final Future<bool> Function() onCommit;
-  final VoidCallback onCompleteTag;
+  final VoidCallback onCompleteChoice;
   final VoidCallback onCancel;
   final void Function(bool backwards) onNext;
   @override
@@ -103,7 +103,7 @@ class _InlineEditorState extends State<InlineEditor> {
     if (session.column == EventColumn.tag) {
       if (session.pickerOpen) {
         _applyPendingOwner();
-        widget.onCompleteTag();
+        widget.onCompleteChoice();
         return;
       }
     }
@@ -166,7 +166,7 @@ class _InlineEditorState extends State<InlineEditor> {
       session.pickerOpen = false;
       session.titleIndex = 0;
     });
-    widget.onCommit();
+    widget.onCompleteChoice();
   }
 
   /// Options for the current query, computed from the live text rather than
@@ -310,7 +310,8 @@ class _InlineEditorState extends State<InlineEditor> {
     }
     if ((event.logicalKey == LogicalKeyboardKey.enter ||
             event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
-        session.column == EventColumn.tag) {
+        (session.column == EventColumn.tag ||
+            session.column == EventColumn.title)) {
       _submit();
       return KeyEventResult.handled;
     }
@@ -425,7 +426,7 @@ class _InlineEditorState extends State<InlineEditor> {
               // still enough; Enter and Tab go through the same path.
               _applyOwner(value);
               close();
-              widget.onCompleteTag();
+              widget.onCompleteChoice();
             },
           ),
           _ => DateTimeChoices(

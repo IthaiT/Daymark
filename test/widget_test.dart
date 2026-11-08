@@ -1234,6 +1234,39 @@ void main() {
     expect(journal.store.events['a']!.itemId, 'resume');
     // Choosing a project adds its tags and keeps the ones set by hand.
     expect(journal.store.events['a']!.tagIds, containsAll(['life']));
+    expect(journal.selected, {'a'});
+    expect(
+      tester.widget<TextField>(input('a', 'title')).focusNode!.hasPrimaryFocus,
+      isTrue,
+    );
+    expect(find.byType(TitleChoices), findsNothing);
+  });
+
+  testWidgets('name Enter completion keeps focus and accepts another item', (
+    tester,
+  ) async {
+    await journal.store.saveItem(const Item(id: 'job', name: '跳槽'));
+    await journal.store.saveItem(const Item(id: 'resume', name: '改简历'));
+    await open(tester);
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    await tester.tap(cell('a', 'title'));
+    await tester.pumpAndSettle();
+    for (final (query, id, enter) in [
+      ('跳', 'job', LogicalKeyboardKey.enter),
+      ('简历', 'resume', LogicalKeyboardKey.numpadEnter),
+    ]) {
+      await tester.enterText(input('a', 'title'), query);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(enter);
+      await tester.pumpAndSettle();
+      expect(journal.event('a')!.itemId, id);
+      expect(journal.selected, {'a'});
+      final field = tester.widget<TextField>(input('a', 'title'));
+      expect(field.focusNode!.hasPrimaryFocus, isTrue);
+      expect(field.controller!.selection.isCollapsed, isTrue);
+      expect(find.byType(TitleChoices), findsNothing);
+    }
   });
 
   testWidgets('tag tree picker accepts parent and unclassified choices', (

@@ -512,17 +512,14 @@ class JournalScreenState extends State<JournalScreen> {
         });
   }
 
-  Future<void> _completeTag() async {
+  Future<void> _completeChoice() async {
     final session = _edit;
-    if (session == null ||
-        session.column != EventColumn.tag ||
-        !await commit() ||
-        !mounted) {
+    if (session == null || !await commit() || !mounted) {
       return;
     }
     await _startEdit(
       session.committedId ?? session.event.id,
-      EventColumn.tag,
+      session.column,
       pickerOpen: false,
       selectAll: false,
     );
@@ -536,7 +533,7 @@ class JournalScreenState extends State<JournalScreen> {
           store: widget.journal.store,
           day: widget.journal.day,
           onCommit: commit,
-          onCompleteTag: () => _queueKeyboard(_completeTag),
+          onCompleteChoice: () => _queueKeyboard(_completeChoice),
           onCancel: () => unawaited(_cancelEdit()),
           onNext: (backwards) => _queueKeyboard(() => _next(backwards)),
         );

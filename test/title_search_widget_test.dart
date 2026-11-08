@@ -72,7 +72,7 @@ void main() {
                     store: store,
                     day: today,
                     onCommit: () async => true,
-                    onCompleteTag: () {},
+                    onCompleteChoice: () {},
                     onCancel: () {},
                     onNext: (_) {},
                   ),
