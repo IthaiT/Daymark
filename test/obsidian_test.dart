@@ -264,6 +264,8 @@ void main() {
       '- [ ] 名称 ^existing-link\n',
       '- [ ] 名称 ^daymark-encoded-6f6c64\n',
       '- [ ] 名称 ^daymark-obsidian-invalid\n',
+      '- [ ] 名称 ^daymark-invalid_id\n',
+      '- [ ] 名称 ^daymark-invalid.id\n',
     ]) {
       expect(
         () => parse({'A.md': source}),

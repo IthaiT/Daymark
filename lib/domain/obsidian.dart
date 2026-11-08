@@ -17,8 +17,8 @@ class ObsidianImport {
 final _itemId = RegExp(
   r'^\^daymark-obsidian-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
 );
-final _blockId = RegExp(r'(?:^|\s)(\^[a-zA-Z0-9-]+)\s*$');
-final _multipleBlocks = RegExp(r'(?:\s+\^[a-zA-Z0-9-]+){2,}\s*$');
+final _blockId = RegExp(r'(?:^|\s)(\^[a-zA-Z0-9_.:-]+)\s*$');
+final _multipleBlocks = RegExp(r'(?:\s+\^[a-zA-Z0-9_.:-]+){2,}\s*$');
 final _unsupportedIdentity = RegExp(
   r'<!--\s*daymark(?:-file)?\s*:|\^daymark-file-',
 );
