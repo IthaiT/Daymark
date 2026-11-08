@@ -136,7 +136,9 @@ class Store {
     if (needle.isEmpty) return null;
     String? found;
     for (final item in _items.values) {
-      if (!item.isTodo || caseFold(item.name.trim()) != needle) continue;
+      if (!item.canRecordOn(clock()) || caseFold(item.name.trim()) != needle) {
+        continue;
+      }
       if (found != null) return null;
       found = item.id;
     }
@@ -297,6 +299,7 @@ class Store {
         'status',
         'started_on',
         'ended_on',
+        'completed_on',
         'objective',
         'outcome',
         'tag_ids',
@@ -313,6 +316,7 @@ class Store {
             (row['parent_id'] != null && row['parent_id'] is! String) ||
             (row['started_on'] != null && row['started_on'] is! String) ||
             (row['ended_on'] != null && row['ended_on'] is! String) ||
+            (row['completed_on'] != null && row['completed_on'] is! String) ||
             (row['objective'] != null && row['objective'] is! String) ||
             (row['outcome'] != null && row['outcome'] is! String) ||
             !_stringList(row['tag_ids']) ||
@@ -584,6 +588,14 @@ class Store {
         for (final name in imported.tagNames[item.id] ?? const <String>[])
           resolveTag(name),
       ];
+      final completedOn = item.status != ItemStatus.done
+          ? null
+          : item.completedOn ??
+                (previous?.status == ItemStatus.done
+                    ? previous?.completedOn
+                    : previous == null
+                    ? null
+                    : dayStart(clock()));
       items[item.id] = (previous ?? item).copyWith(
         name: item.name,
         parentId: item.parentId,
@@ -591,6 +603,8 @@ class Store {
         objective: item.objective,
         outcome: item.outcome,
         status: item.status,
+        completedOn: completedOn,
+        clearCompletedOn: completedOn == null,
         tagIds: normalizeTagIds(tagIds),
         excludedTagIds: const [],
         source: item.source,
@@ -696,6 +710,19 @@ class Store {
   Future<Item> saveItem(Item item) async {
     if (_items[item.id]?.source != null && _items[item.id] != item) {
       throw const FormatException('此事项由 Obsidian 管理，请修改 Markdown 后同步。');
+    }
+    if (item.source == null) {
+      final previous = _items[item.id];
+      final completedOn = item.status != ItemStatus.done
+          ? null
+          : item.completedOn ??
+                (previous?.status == ItemStatus.done
+                    ? previous?.completedOn ?? previous?.endedOn
+                    : item.endedOn ?? dayStart(clock()));
+      item = item.copyWith(
+        completedOn: completedOn,
+        clearCompletedOn: completedOn == null,
+      );
     }
     final desired = {..._items, item.id: item};
     validateItems(desired);

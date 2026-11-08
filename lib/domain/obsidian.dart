@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:yaml/yaml.dart';
 
 import 'item.dart';
+import 'model.dart' show parseDate;
 import 'unicode.dart';
 
 /// A fully validated import, before any source file is changed.
@@ -148,6 +149,9 @@ ObsidianImport parseObsidian(
           objective: fields.length > 1 ? fields[1].trim() : '',
           outcome: fields.length > 2 ? fields[2].trim() : '',
           status: status,
+          completedOn: status == ItemStatus.done
+              ? _completionDate(content, '$path 第 ${index + 1} 行')
+              : null,
           parentId: stack.isEmpty ? rootId : stack.last.$2,
           source: ItemSource(
             directory: directory,
@@ -348,6 +352,57 @@ List<String> _tags(Object? value, String path) {
     text.write(value[index++]);
   }
   return (text.toString(), names);
+}
+
+DateTime? _completionDate(String value, String location) {
+  // Dates inside code, wiki links, escaped text and comments are literal.
+  final text = StringBuffer();
+  var ticks = 0;
+  var wiki = false;
+  for (var index = 0; index < value.length;) {
+    if (value[index] == '\\' && index + 1 < value.length) {
+      text.write('  ');
+      index += 2;
+      continue;
+    }
+    if (value[index] == '`') {
+      var end = index;
+      while (end < value.length && value[end] == '`') {
+        end++;
+      }
+      final count = end - index;
+      if (ticks == 0) {
+        ticks = count;
+      } else if (ticks == count) {
+        ticks = 0;
+      }
+      text.write(' ');
+      index = end;
+      continue;
+    }
+    if (ticks == 0 && value.startsWith('[[', index)) wiki = true;
+    if (ticks == 0 && value.startsWith(']]', index)) {
+      wiki = false;
+      text.write('  ');
+      index += 2;
+      continue;
+    }
+    text.write(ticks == 0 && !wiki ? value[index] : ' ');
+    index++;
+  }
+  final dates = RegExp(
+    r'✅\s*(\d{4}-\d{2}-\d{2})|\[completion::\s*(\d{4}-\d{2}-\d{2})\s*\]|\(completion::\s*(\d{4}-\d{2}-\d{2})\s*\)',
+    caseSensitive: false,
+  ).allMatches(text.toString());
+  DateTime? result;
+  for (final match in dates) {
+    final date = parseDate(match[1] ?? match[2] ?? match[3]!);
+    if (result != null && result != date) {
+      throw FormatException('$location 包含互相冲突的完成日期。');
+    }
+    result = date;
+  }
+  return result;
 }
 
 String _cleanTask(String value) => value

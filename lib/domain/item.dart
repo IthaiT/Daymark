@@ -33,6 +33,7 @@ class Item {
     this.status = ItemStatus.active,
     this.startedOn,
     this.endedOn,
+    this.completedOn,
     this.objective = '',
     this.outcome = '',
     this.tagIds = const [],
@@ -48,6 +49,9 @@ class Item {
   final ItemStatus status;
   final DateTime? startedOn;
   final DateTime? endedOn;
+
+  /// Explicit completion date, or the day a known imported item became done.
+  final DateTime? completedOn;
 
   /// What finishing this item should achieve, written before any time is
   /// booked against it.
@@ -72,6 +76,17 @@ class Item {
   /// Lossless Markdown source, also retained when the source disappears.
   final ItemSource? source;
   bool get isTodo => status == ItemStatus.active && !(source?.missing ?? false);
+
+  /// Recently completed items remain available when recording time later.
+  bool canRecordOn(DateTime now) {
+    if (source?.missing ?? false) return false;
+    if (status == ItemStatus.active) return true;
+    if (status != ItemStatus.done) return false;
+    final completed = completedOn ?? (source == null ? endedOn : null);
+    if (completed == null) return false;
+    final age = dayStart(now).difference(dayStart(completed)).inDays;
+    return age >= 0 && age < 7;
+  }
 
   /// Reads one node from `items.json` or an archive backup.
   factory Item.fromJson(Map<String, Object?> row) {
@@ -108,6 +123,9 @@ class Item {
       endedOn: row['ended_on'] == null
           ? null
           : parseDate(row['ended_on']! as String),
+      completedOn: row['completed_on'] == null
+          ? null
+          : parseDate(row['completed_on']! as String),
       objective: row['objective'] as String? ?? '',
       outcome: row['outcome'] as String? ?? '',
       tagIds: strings(row['tag_ids']),
@@ -129,6 +147,8 @@ class Item {
     bool clearStartedOn = false,
     DateTime? endedOn,
     bool clearEndedOn = false,
+    DateTime? completedOn,
+    bool clearCompletedOn = false,
     String? objective,
     String? outcome,
     List<String>? tagIds,
@@ -143,6 +163,7 @@ class Item {
     status: status ?? this.status,
     startedOn: clearStartedOn ? null : startedOn ?? this.startedOn,
     endedOn: clearEndedOn ? null : endedOn ?? this.endedOn,
+    completedOn: clearCompletedOn ? null : completedOn ?? this.completedOn,
     objective: objective ?? this.objective,
     outcome: outcome ?? this.outcome,
     tagIds: tagIds ?? this.tagIds,
@@ -159,6 +180,7 @@ class Item {
     'status': status.name,
     'started_on': startedOn == null ? null : dateText(startedOn!),
     'ended_on': endedOn == null ? null : dateText(endedOn!),
+    if (completedOn != null) 'completed_on': dateText(completedOn!),
     'objective': objective,
     'outcome': outcome,
     'tag_ids': tagIds,
@@ -177,6 +199,7 @@ class Item {
       status == other.status &&
       startedOn == other.startedOn &&
       endedOn == other.endedOn &&
+      completedOn == other.completedOn &&
       objective == other.objective &&
       outcome == other.outcome &&
       source == other.source &&
@@ -193,6 +216,7 @@ class Item {
     status,
     startedOn,
     endedOn,
+    completedOn,
     objective,
     outcome,
     source,
@@ -252,7 +276,7 @@ void validateItems(Map<String, Item> items) {
     if (parentId != null && !items.containsKey(parentId)) {
       throw FormatException('事项「${item.name}」的父事项不存在。');
     }
-    for (final date in [item.startedOn, item.endedOn]) {
+    for (final date in [item.startedOn, item.endedOn, item.completedOn]) {
       if (date == null) continue;
       if (date.year < 1 || date.year > 9999 || date != dayStart(date)) {
         throw FormatException('事项「${item.name}」的日期不正确。');
