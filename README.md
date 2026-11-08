@@ -15,6 +15,8 @@ flutter run -d windows
 ./tools/build_windows.ps1
 ```
 
+如果开发时软件仍在运行，已验证的新构建可以暂存到 `build/windows/x64/runner/Release.pending/`。关闭旧窗口后再次运行 `start.cmd`，启动器会先整体替换构建，再启动新版；保留旧构建用于回退，不改动用户数据。可运行 `./tools/test_release_delivery.ps1` 验证替换与失败回退。
+
 发行时复制整个 `build/windows/x64/runner/Release/` 目录，包含 DLL 和 Flutter 的 `data/` 资源；单独复制 EXE 不足以运行。独立发行版默认将用户记录保存在 EXE 旁的 `journal/`，也可传入 `--data-dir`。仓库启动脚本始终默认使用项目原有的 `data/`。
 
 ## 功能

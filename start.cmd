@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-if not exist "build\windows\x64\runner\Release\daymark.exe" (
+if not exist "build\windows\x64\runner\Release\daymark.exe" if not exist "build\windows\x64\runner\Release.pending\daymark.exe" (
     echo Build the application first:
     echo flutter pub get
     echo flutter build windows --release

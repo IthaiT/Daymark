@@ -1,9 +1,5 @@
 $ErrorActionPreference = 'Stop'
 $taskExecutable = Join-Path $PSScriptRoot 'build/windows/x64/runner/Release/daymark.exe'
-if (-not (Test-Path -LiteralPath $taskExecutable)) {
-    Write-Error 'Build the application first: flutter pub get; flutter build windows --release'
-}
-
 # Daymark is single-instance per data directory. If a window is already open,
 # bring it to the front instead of starting a second copy that can only show
 # the "data directory is already open" error.
@@ -19,6 +15,12 @@ if ($existing) {
     [void][Native.Window]::ShowWindow($existing.MainWindowHandle, 9)
     [void][Native.Window]::SetForegroundWindow($existing.MainWindowHandle)
     exit 0
+}
+
+# A validated bundle staged during a running session becomes active on restart.
+& (Join-Path $PSScriptRoot 'tools/activate_release.ps1')
+if (-not (Test-Path -LiteralPath $taskExecutable)) {
+    throw 'Build the application first: flutter pub get; flutter build windows --release'
 }
 
 $taskArguments = if ($args.Count -eq 0) {
