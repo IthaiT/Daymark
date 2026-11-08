@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
 import '../data/store.dart';
+import '../data/obsidian_navigation.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
 import '../domain/unicode.dart';
@@ -13,13 +14,21 @@ import 'pickers.dart' show PickerPopup;
 import 'theme.dart'
     show tagColorOverrides, tagDisplayOverrides, tagEventColorsFor, tagDot;
 import 'workspace_style.dart';
+import 'tag_chips.dart';
+import 'obsidian_text.dart';
 
 /// Project workspace: a tree of projects and planned items, edited in place
 /// with three fields — name, description and result.
 class ProjectScreen extends StatefulWidget {
-  const ProjectScreen({super.key, required this.journal, this.focusNode});
+  const ProjectScreen({
+    super.key,
+    required this.journal,
+    this.focusNode,
+    this.openNote = openObsidianNote,
+  });
   final JournalController journal;
   final FocusNode? focusNode;
+  final Future<void> Function(String, String) openNote;
   @override
   State<ProjectScreen> createState() => ProjectScreenState();
 }
@@ -205,6 +214,15 @@ class ProjectScreenState extends State<ProjectScreen> {
     return KeyEventResult.ignored;
   }
 
+  Future<void> _syncObsidian() async {
+    await _flush();
+    await _run(() async {
+      await widget.journal.syncObsidian(
+        widget.journal.settings.obsidianDirectory,
+      );
+    });
+  }
+
   Future<void> _delete(Item item) async {
     if (item.source != null) return;
     final confirmed = await showDialog<bool>(
@@ -315,7 +333,17 @@ class ProjectScreenState extends State<ProjectScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const WorkspaceSectionHeader(title: '事项'),
+          WorkspaceSectionHeader(
+            title: '事项',
+            actions: [
+              IconButton(
+                key: const ValueKey('project-sync'),
+                tooltip: '同步事项',
+                onPressed: _saving ? null : () => unawaited(_syncObsidian()),
+                icon: const Icon(Icons.sync),
+              ),
+            ],
+          ),
           _addField(
             key: const ValueKey('project-add'),
             controller: _rootAdd,
@@ -493,67 +521,81 @@ class ProjectScreenState extends State<ProjectScreen> {
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  key: const ValueKey('project-name'),
-                  controller: _name,
-                  readOnly: item.source != null,
-                  focusNode: _nameFocus,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                    hintText: '名字',
-                  ),
-                  onChanged: (_) => _scheduleSave(),
-                  onTapOutside: (_) => unawaited(_flush()),
-                ),
+                child: item.source != null
+                    ? ObsidianText(
+                        key: const ValueKey('project-imported-name'),
+                        text: item.name,
+                        directory: item.source!.directory,
+                        sourcePath: item.source!.path,
+                        openNote: widget.openNote,
+                        style: Theme.of(context).textTheme.headlineSmall,
+                      )
+                    : TextField(
+                        key: const ValueKey('project-name'),
+                        controller: _name,
+                        readOnly: item.source != null,
+                        focusNode: _nameFocus,
+                        style: Theme.of(context).textTheme.headlineSmall,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          border: InputBorder.none,
+                          hintText: '名字',
+                        ),
+                        onChanged: (_) => _scheduleSave(),
+                        onTapOutside: (_) => unawaited(_flush()),
+                      ),
               ),
               const SizedBox(width: 12),
               if (item.source == null)
                 SizedBox(width: 260, child: _tagSearch(item)),
-              IconButton(
-                key: const ValueKey('project-delete'),
-                tooltip: '删除',
-                onPressed: _saving || item.source != null
-                    ? null
-                    : () => unawaited(_delete(item)),
-                icon: const Icon(Icons.delete_outline, size: 20),
-              ),
+              if (item.source != null)
+                IconButton(
+                  key: const ValueKey('project-open-obsidian'),
+                  tooltip: '在 Obsidian 中打开',
+                  icon: const Icon(Icons.open_in_new, size: 20),
+                  onPressed: () => unawaited(
+                    _run(
+                      () => widget.openNote(
+                        item.source!.directory,
+                        obsidianItemTarget(item),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 6),
           _selectedTags(item),
           const SizedBox(height: 4),
-          Text(
-            item.source == null
-                ? item.status.label
-                : 'Obsidian · ${item.source!.path} · ${item.status.label}${item.source!.missing ? ' · 源中已移除，历史保留' : ''}，请在 Obsidian 中修改',
-            key: const ValueKey('item-source-status'),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
           const SizedBox(height: 8),
           Expanded(
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _field(
-                    key: const ValueKey('project-description'),
-                    controller: _description,
-                    label: '描述',
-                    readOnly: item.source != null,
-                    hint: item.source == null ? '这件事是做什么的，为什么做' : '暂无描述',
-                    minLines: 3,
-                  ),
+                  if (item.source != null)
+                    _importedField(item, '描述', item.objective)
+                  else
+                    _field(
+                      key: const ValueKey('project-description'),
+                      controller: _description,
+                      label: '描述',
+                      readOnly: item.source != null,
+                      hint: item.source == null ? '这件事是做什么的，为什么做' : '暂无描述',
+                      minLines: 3,
+                    ),
                   const SizedBox(height: 14),
-                  _field(
-                    key: const ValueKey('project-result'),
-                    controller: _result,
-                    label: '结果',
-                    readOnly: item.source != null,
-                    hint: item.source == null ? '做完之后得到了什么，放弃了也写在这里' : '暂无结果',
-                    minLines: 3,
-                  ),
+                  if (item.source != null)
+                    _importedField(item, '结果', item.outcome)
+                  else
+                    _field(
+                      key: const ValueKey('project-result'),
+                      controller: _result,
+                      label: '结果',
+                      readOnly: item.source != null,
+                      hint: item.source == null ? '做完之后得到了什么，放弃了也写在这里' : '暂无结果',
+                      minLines: 3,
+                    ),
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -578,13 +620,14 @@ class ProjectScreenState extends State<ProjectScreen> {
                   const SizedBox(height: 4),
                   for (final child in children)
                     _childRow(child, durations[child.id] ?? Duration.zero),
-                  _addField(
-                    key: const ValueKey('project-add-child'),
-                    controller: _childAdd,
-                    focusNode: _childFocus,
-                    hint: '新增子事项，回车创建；可粘贴多行',
-                    parentId: item.id,
-                  ),
+                  if (item.source == null)
+                    _addField(
+                      key: const ValueKey('project-add-child'),
+                      controller: _childAdd,
+                      focusNode: _childFocus,
+                      hint: '新增子事项，回车创建；可粘贴多行',
+                      parentId: item.id,
+                    ),
                 ],
               ),
             ),
@@ -795,7 +838,30 @@ class ProjectScreenState extends State<ProjectScreen> {
     );
   }
 
-  /// The tags this node adds and the ones it inherits, as removable chips.
+  /// Imported fields keep their layout while making wikilinks actionable.
+  Widget _importedField(Item item, String label, String text) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(label, style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 4),
+      Container(
+        constraints: const BoxConstraints(minHeight: 88),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: ObsidianText(
+          text: text.isEmpty ? '暂无$label' : text,
+          directory: item.source!.directory,
+          sourcePath: item.source!.path,
+          openNote: widget.openNote,
+        ),
+      ),
+    ],
+  );
+
+  /// Own and inherited tags share the established per-tag colors.
   Widget _selectedTags(Item item) {
     final own = item.tagIds;
     final inherited = [
@@ -803,10 +869,7 @@ class ProjectScreenState extends State<ProjectScreen> {
         if (!own.contains(id)) id,
     ];
     if (own.isEmpty && inherited.isEmpty) {
-      return Text(
-        item.source == null ? '还没有标签，在右上角搜索添加。' : '没有标签，可在 Obsidian 文件属性中添加。',
-        style: Theme.of(context).textTheme.bodySmall,
-      );
+      return const SizedBox.shrink();
     }
     return Wrap(
       spacing: 6,
@@ -828,10 +891,21 @@ class ProjectScreenState extends State<ProjectScreen> {
       selected: !inherited,
       tagDisplays: tagDisplayOverrides(context),
     );
+    if (item.source != null) {
+      return TagToken(
+        key: ValueKey(
+          inherited ? 'project-chip-inherited-$id' : 'project-chip-$id',
+        ),
+        label: _store.tagName(id),
+        background: background,
+        foreground: foreground,
+      );
+    }
     return InputChip(
       key: ValueKey(
         inherited ? 'project-chip-inherited-$id' : 'project-chip-$id',
       ),
+      avatar: Icon(Icons.label_outline, size: 12, color: foreground),
       label: Text(_store.tagName(id)),
       labelStyle: TextStyle(
         color: foreground,

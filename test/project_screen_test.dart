@@ -39,6 +39,10 @@ void main() {
   });
 
   Future<void> pump(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 820);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(body: ProjectScreen(journal: journal)),
@@ -198,7 +202,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byKey(const ValueKey('project-chip-inherited-work')),
-        matching: find.byType(Icon),
+        matching: find.byIcon(Icons.clear),
       ),
     );
     await settleWrite(tester);

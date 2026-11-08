@@ -54,13 +54,20 @@ void main() {
       final journal = JournalController(store);
       addTearDown(journal.dispose);
       final boundary = GlobalKey();
+      final opened = <String>[];
       await tester.pumpWidget(
         MaterialApp(
           theme: daymarkTheme(),
           home: Scaffold(
             body: RepaintBoundary(
               key: boundary,
-              child: ProjectScreen(journal: journal),
+              child: ProjectScreen(
+                journal: journal,
+                openNote: (directory, path) async {
+                  expect(directory, 'synthetic/Daymark');
+                  opened.add(path);
+                },
+              ),
             ),
           ),
         ),
@@ -70,21 +77,22 @@ void main() {
       await tester.tap(find.byKey(ValueKey('project-${task.id}')));
       await tester.pumpAndSettle();
       expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('project-name')))
-            .readOnly,
-        true,
+        find.byKey(const ValueKey('project-imported-name')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('project-open-obsidian')),
+        findsOneWidget,
       );
       expect(find.text('暂停'), findsOneWidget);
       expect(find.text('已完成'), findsOneWidget);
       expect(find.text('已取消'), findsOneWidget);
-      expect(find.textContaining('Obsidian · 工作计划.md'), findsOneWidget);
-      expect(
-        tester
-            .widget<IconButton>(find.byKey(const ValueKey('project-delete')))
-            .onPressed,
-        isNull,
-      );
+      expect(find.byKey(const ValueKey('item-source-status')), findsNothing);
+      expect(find.byKey(const ValueKey('project-delete')), findsNothing);
+      expect(find.byKey(const ValueKey('project-sync')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('project-open-obsidian')));
+      await tester.pumpAndSettle();
+      expect(opened, ['工作计划.md#^daymark-${task.id}']);
       if (const bool.fromEnvironment('DAYMARK_CAPTURE_UI')) {
         await tester.runAsync(() async {
           final image =
@@ -114,13 +122,7 @@ void main() {
         journal.settings.copyWith(splitOverlap: true),
       );
       await tester.pumpAndSettle();
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('project-name')))
-            .controller!
-            .text,
-        '导入已更新',
-      );
+      expect(find.text('导入已更新'), findsWidgets);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

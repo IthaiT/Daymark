@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../application/journal_controller.dart';
+import '../data/obsidian_navigation.dart';
 import '../domain/appearance.dart';
 import '../domain/calendar_activity.dart';
 import '../domain/event_clipboard.dart';
@@ -572,6 +573,11 @@ class JournalScreenState extends State<JournalScreen> {
         if (event?.isUndefined == true)
           const PopupMenuItem(value: 'tag', child: Text('设置标签')),
         if (event != null && !event.isUndefined) ...[
+          if (widget.journal.store.items[event.itemId]?.source != null)
+            const PopupMenuItem(
+              value: 'obsidian',
+              child: Text('在 Obsidian 中打开'),
+            ),
           PopupMenuItem(
             value: 'delete',
             enabled: _canDeleteSelection,
@@ -594,6 +600,14 @@ class JournalScreenState extends State<JournalScreen> {
         await _startEdit(id!, EventColumn.tag);
       case 'delete':
         await _action(widget.journal.deleteSelected);
+      case 'obsidian':
+        final item = widget.journal.store.items[event!.itemId]!;
+        await _action(
+          () => openObsidianNote(
+            item.source!.directory,
+            obsidianItemTarget(item),
+          ),
+        );
       case 'details':
         await showEventEditor(context, widget.journal, event!);
     }

@@ -9,7 +9,8 @@ import '../application/journal_controller.dart';
 import '../domain/event_stats.dart';
 import '../domain/event_summary.dart';
 import '../domain/model.dart';
-import 'theme.dart';
+import 'tag_chips.dart';
+import 'obsidian_text.dart';
 
 enum EventTableMode { summary, chronological }
 
@@ -223,40 +224,33 @@ class EventTableState extends State<EventTable> {
   String _clock(DateTime value) => dayStart(value) == widget.journal.day
       ? clockText(value)
       : '${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')} ${clockText(value)}';
-  Widget _tagCell(Event event) {
-    final (background, foreground) = eventColors(
-      context,
-      widget.journal.store,
-      event,
+  Widget _tagCell(Event event) =>
+      RecordTagChips(store: widget.journal.store, event: event);
+
+  Widget _textCell(Event event, String label, int cell, bool selected) {
+    final style = TextStyle(
+      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
     );
-    final owner = event.owner;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (owner != null && owner.isItem) ...[
-            Icon(Icons.workspaces_outline, size: 12, color: foreground),
-            const SizedBox(width: 4),
-          ],
-          Flexible(
-            child: Text(
-              widget.journal.store.ownerName(event),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: foreground,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
-      ),
+    final source = widget.journal.store.items[event.itemId]?.source;
+    final directory =
+        source?.directory ?? widget.journal.settings.obsidianDirectory;
+    if (_columns[cell] == EventColumn.title &&
+        label.contains('[[') &&
+        directory.isNotEmpty) {
+      return ObsidianText(
+        text: label,
+        directory: directory,
+        sourcePath: source?.path ?? '',
+        selectable: false,
+        maxLines: 1,
+        style: style,
+      );
+    }
+    return Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: style,
     );
   }
 
@@ -309,15 +303,11 @@ class EventTableState extends State<EventTable> {
                             ),
                             child: _columns[cell] == EventColumn.tag
                                 ? _tagCell(event)
-                                : Text(
+                                : _textCell(
+                                    event,
                                     labels[cell],
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: selected
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
+                                    cell,
+                                    selected,
                                   ),
                           ),
                         ),
