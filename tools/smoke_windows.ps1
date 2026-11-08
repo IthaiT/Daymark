@@ -119,7 +119,7 @@ public static class DaymarkPrivateDesktop {
             0xe25c, 0xf1be, 0xee33, 0xf266, 0xf37d, 0xf3ca, 0xf2ef,
             0xf336, 0xe364, 0xe44c, 0xf231, 0xe124,
             0xe168, // Material 3 heatmap chip removal (Icons.clear).
-            0xf090, 0xe62f // Obsidian folder picker and synchronization.
+            0xf090, 0xe62f, 0xe45c // Obsidian folder, synchronization and open-in-new.
         });
         CheckGlyphs(Path.Combine(assets, "assets", "fonts", "NotoSansSC.ttf"), new[] {
             0x0030, 0x0041, 0x0061, 0x00a5, 0x4e2d, 0x6587, 0x65f6, 0x95f4, 0x9910, 0x996e,
@@ -252,7 +252,7 @@ if ($taskTree.version -ne 1 -or $taskImported.Count -ne 4 -or @($taskImported.st
     throw 'Startup synchronization or the complete tree backup lost imported states or saved records.'
 }
 $taskAnnotated = [IO.File]::ReadAllText((Join-Path $taskObsidian '合成事项.md'))
-if ([regex]::Matches($taskAnnotated, '<!-- daymark:').Count -ne 4 -or -not $taskAnnotated.Contains('<!-- daymark-file:')) {
+if ([regex]::Matches($taskAnnotated, '\^daymark-obsidian-').Count -ne 4 -or -not $taskAnnotated.Contains('^daymark-file-')) {
     throw 'Startup synchronization did not write stable hidden identities.'
 }
 Write-Output "Native smoke passed: Obsidian startup synchronization, four item states and complete tree backup, journal and ledger icons in Release font, isolated desktop, startup window within work area, obsolete leading-gap cleanup, BOM/cross-midnight gaps, completed-day archive backup and graceful close, linked ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"

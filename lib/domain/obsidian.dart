@@ -21,7 +21,7 @@ final _taskId = RegExp(r'<!-- daymark:([a-zA-Z0-9_-]+) -->');
 final _checkbox = RegExp(r'^(\s*)(?:[-+*]|\d+[.)])\s+\[(.)\]\s*(.*)$');
 
 /// Parses only immediate Markdown children of the selected Daymark folder.
-/// Native hidden comments carry identity, independently of title and location.
+/// Native block references carry identity, independently of title and location.
 ObsidianImport parseObsidian(
   Map<String, String> documents, {
   required String directory,
@@ -83,8 +83,9 @@ ObsidianImport parseObsidian(
       if (rootFence != null) continue;
       final trimmedRoot = lines[index].trimLeft();
       if (rootComment) {
-        if (trimmedRoot.contains('-->') || trimmedRoot.contains('%%'))
+        if (trimmedRoot.contains('-->') || trimmedRoot.contains('%%')) {
           rootComment = false;
+        }
         continue;
       }
       if ((trimmedRoot.startsWith('<!--') && !trimmedRoot.contains('-->')) ||
