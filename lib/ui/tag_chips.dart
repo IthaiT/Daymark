@@ -54,6 +54,37 @@ class TagToken extends StatelessWidget {
   );
 }
 
+/// The owning item uses a dark neutral badge, outside the tag color palette.
+class RecordItemBadge extends StatelessWidget {
+  const RecordItemBadge({super.key, required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: '所属事项：$label',
+    child: Container(
+      constraints: const BoxConstraints(maxWidth: 160),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade800,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        '事项 · $label',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TagToken.textStyle.copyWith(color: Colors.white),
+      ),
+    ),
+  );
+}
+
+class _RecordLabel {
+  const _RecordLabel(this.label, this.child);
+  final String label;
+  final Widget child;
+}
+
 /// A fixed-height strip with a count menu for labels that do not fit.
 class RecordTagChips extends StatelessWidget {
   const RecordTagChips({super.key, required this.store, required this.event});
@@ -62,33 +93,43 @@ class RecordTagChips extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = <TagToken>[];
+    final tokens = <_RecordLabel>[];
     if (event.itemId != null) {
-      final (bg, fg) = tagEventColors(context, store, event.tagId);
+      final name = store.ownerLabels(event).first;
       tokens.add(
-        TagToken(
-          key: ValueKey('record-item-${event.id}'),
-          label: store.ownerLabels(event).first,
-          background: bg,
-          foreground: fg,
+        _RecordLabel(
+          '事项 · $name',
+          RecordItemBadge(
+            key: ValueKey('record-item-${event.id}'),
+            label: name,
+          ),
         ),
       );
     }
     for (final id in event.tagIds) {
       if (!store.tags.containsKey(id)) continue;
       final (bg, fg) = tagEventColors(context, store, id);
+      final name = store.tagName(id);
       tokens.add(
-        TagToken(
-          key: ValueKey('record-tag-${event.id}-$id'),
-          label: store.tagName(id),
-          background: bg,
-          foreground: fg,
+        _RecordLabel(
+          name,
+          TagToken(
+            key: ValueKey('record-tag-${event.id}-$id'),
+            label: name,
+            background: bg,
+            foreground: fg,
+          ),
         ),
       );
     }
     if (tokens.isEmpty) {
       final (bg, fg) = tagEventColors(context, store, null);
-      tokens.add(TagToken(label: '未归类', background: bg, foreground: fg));
+      tokens.add(
+        _RecordLabel(
+          '未归类',
+          TagToken(label: '未归类', background: bg, foreground: fg),
+        ),
+      );
     }
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -111,11 +152,15 @@ class RecordTagChips extends StatelessWidget {
 
         final widths = [
           for (final token in tokens)
-            math.min(
-              160.0,
-              measure(token.label) + (token.icon == null ? 17 : 33),
-            ),
+            math.min(160.0, measure(token.label) + 17),
         ];
+        // Keep the item visible before folding tags, truncating a long name.
+        if (event.itemId != null && tokens.length > 1) {
+          final itemSpace = available - measure('+${tokens.length - 1}') - 28;
+          if (itemSpace >= measure('事项 · ') + 17) {
+            widths[0] = math.min(widths[0], itemSpace);
+          }
+        }
         var used = 0.0;
         var visible = 0;
         for (var index = 0; index < tokens.length; index++) {
@@ -137,7 +182,7 @@ class RecordTagChips extends StatelessWidget {
                 width: tokens.length == 1
                     ? math.min(widths[index], available)
                     : widths[index],
-                child: tokens[index],
+                child: tokens[index].child,
               ),
             ],
             if (hidden.isNotEmpty) ...[
@@ -152,7 +197,7 @@ class RecordTagChips extends StatelessWidget {
                       PopupMenuItem<void>(
                         enabled: false,
                         height: 36,
-                        child: token,
+                        child: token.child,
                       ),
                   ],
                   child: Container(
