@@ -116,7 +116,7 @@ class _HiddenEventsDialogState extends State<_HiddenEventsDialog> {
                             const DataColumn(label: Text('开始时间')),
                             const DataColumn(label: Text('结束时间')),
                             const DataColumn(
-                              label: Text('本日用时'),
+                              label: Text('本日时段长度'),
                               numeric: true,
                             ),
                             if (notes) const DataColumn(label: Text('备注')),

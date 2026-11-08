@@ -211,7 +211,7 @@ void main() {
       expect(find.text('日常睡眠'), findsOneWidget);
       expect(find.text('已经填写的空档'), findsOneWidget);
       expect(find.text('未分类的真实记录'), findsOneWidget);
-      for (final heading in ['名称', '标签', '开始时间', '结束时间', '本日用时']) {
+      for (final heading in ['名称', '标签', '开始时间', '结束时间', '本日时段长度']) {
         expect(
           find.descendant(
             of: find.byType(DataTable),

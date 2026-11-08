@@ -554,10 +554,10 @@ class TimelineState extends State<Timeline> {
             .where((span) => span.start == _hoverFoldStart)
             .firstOrNull;
         final hoverText = hover != null
-            ? '${hover.title}\n${widget.journal.store.tagOutline(hover.tagId)}\n'
+            ? '${hover.title}\n${widget.journal.store.ownerName(hover)}\n'
                   '${_clock(hover.intervalOn(widget.journal.day)!.start)} — '
                   '${_clock(hover.intervalOn(widget.journal.day)!.end)} · '
-                  '${durationText(hover.intervalOn(widget.journal.day)!.duration)}'
+                  '时段长度 ${durationText(hover.intervalOn(widget.journal.day)!.duration)}'
             : hoverFold == null
             ? null
             : _foldDescription(hoverFold);
