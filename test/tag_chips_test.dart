@@ -173,17 +173,28 @@ void main() {
 
       await show(700);
       await capture('record-owner-tags');
-      expect(find.text('事项 · 主业'), findsOneWidget);
-      expect(find.text('主业'), findsOneWidget);
-      expect(find.byType(TagToken), findsNWidgets(4));
+      expect(find.text('事项 · 主业'), findsNothing);
+      expect(find.text('主业'), findsNWidgets(2));
+      expect(find.byType(TagToken), findsNWidgets(5));
       expect(find.byTooltip('所属事项：主业'), findsOneWidget);
       final badge = itemDecoration();
-      for (final token in tester.widgetList<TagToken>(find.byType(TagToken))) {
+      for (final id in event.tagIds) {
+        final token = tester.widget<TagToken>(
+          find.byKey(ValueKey('record-tag-owned-$id')),
+        );
         expect(badge.color, isNot(token.background));
         expect(token.foreground, isNot(Colors.white));
       }
       expect(
-        tester.widget<Text>(find.text('事项 · 主业')).style!.color,
+        tester
+            .widget<Text>(
+              find.descendant(
+                of: find.byType(RecordItemBadge),
+                matching: find.text('主业'),
+              ),
+            )
+            .style!
+            .color,
         Colors.white,
       );
       await show(700, routine: true);
@@ -223,7 +234,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byType(RecordItemBadge), findsOneWidget);
-      expect(find.byType(TagToken), findsNWidgets(4));
+      expect(find.byType(TagToken), findsNWidgets(5));
       expect(tester.takeException(), isNull);
     },
   );

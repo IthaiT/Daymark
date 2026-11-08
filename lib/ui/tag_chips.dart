@@ -14,18 +14,20 @@ class TagToken extends StatelessWidget {
     required this.background,
     required this.foreground,
     this.icon,
+    this.tooltip,
     this.maxWidth = 160,
   });
   final String label;
   final Color background;
   final Color foreground;
   final IconData? icon;
+  final String? tooltip;
   final double maxWidth;
   static const textStyle = TextStyle(fontSize: 12, fontWeight: FontWeight.w600);
 
   @override
   Widget build(BuildContext context) => Tooltip(
-    message: label,
+    message: tooltip ?? label,
     child: Container(
       constraints: BoxConstraints(maxWidth: maxWidth),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -60,22 +62,11 @@ class RecordItemBadge extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => Tooltip(
-    message: '所属事项：$label',
-    child: Container(
-      constraints: const BoxConstraints(maxWidth: 160),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade800,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        '事项 · $label',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TagToken.textStyle.copyWith(color: Colors.white),
-      ),
-    ),
+  Widget build(BuildContext context) => TagToken(
+    label: label,
+    background: Colors.grey.shade800,
+    foreground: Colors.white,
+    tooltip: '所属事项：$label',
   );
 }
 
@@ -98,7 +89,7 @@ class RecordTagChips extends StatelessWidget {
       final name = store.ownerLabels(event).first;
       tokens.add(
         _RecordLabel(
-          '事项 · $name',
+          name,
           RecordItemBadge(
             key: ValueKey('record-item-${event.id}'),
             label: name,
@@ -157,7 +148,7 @@ class RecordTagChips extends StatelessWidget {
         // Keep the item visible before folding tags, truncating a long name.
         if (event.itemId != null && tokens.length > 1) {
           final itemSpace = available - measure('+${tokens.length - 1}') - 28;
-          if (itemSpace >= measure('事项 · ') + 17) {
+          if (itemSpace >= measure('…') + 17) {
             widths[0] = math.min(widths[0], itemSpace);
           }
         }
