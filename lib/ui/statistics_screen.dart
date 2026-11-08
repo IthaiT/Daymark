@@ -1460,7 +1460,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final splitOverlap = widget.journal.settings.splitOverlap;
     // Every event decides how much of an instant each tag may own, so the
     // profile is built once from the whole store and shared by all nodes.
-    final allEvents = store.events.values.toList();
+    final allEvents = accountingEvents(store.events.values);
     final profile = ConcurrencyProfile.of(window, allEvents);
     final previousProfile = ConcurrencyProfile.of(window.previous, allEvents);
     final nodes = <String, _StatsNode>{};
@@ -1563,7 +1563,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     final unclassifiedEvents = store.events.values
         .where((event) => !event.isUndefined && event.owner == null)
         .toList();
-    final undefinedEvents = store.events.values
+    final undefinedEvents = allEvents
         .where((event) => event.isUndefined)
         .toList();
     final unclassified = _StatsNode(

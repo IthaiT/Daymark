@@ -418,7 +418,7 @@ Map<String, Duration> itemDurations(
 }) {
   final completed = [
     for (final event in events)
-      if (event.end != null) event,
+      if (!event.isUndefined && event.end != null) event,
   ];
   final direct = <String, List<Event>>{};
   for (final event in completed) {

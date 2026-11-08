@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -66,13 +67,21 @@ class EventTableState extends State<EventTable> {
   /// Day-wide concurrency profile, built only when shared accounting is on.
   /// It covers every row of the day, so a tag sees the other tags that run
   /// in parallel with it instead of claiming the whole span.
+  Map<String, Event>? _profileEvents;
+  ConcurrencyProfile? _cachedProfile;
   ConcurrencyProfile? get _profile {
     if (!widget.journal.splitOverlap) return null;
     final day = widget.journal.day;
-    return ConcurrencyProfile.of(
-      StatsWindow.days(day, day),
-      widget.journal.rows,
-    );
+    final saved = widget.journal.store.events;
+    final window = StatsWindow.days(day, day);
+    if (_cachedProfile?.window != window || !mapEquals(_profileEvents, saved)) {
+      _profileEvents = saved;
+      _cachedProfile = ConcurrencyProfile.of(
+        window,
+        accountingEvents(saved.values),
+      );
+    }
+    return _cachedProfile;
   }
 
   List<EventGroup> get _groups => eventGroups(
@@ -82,11 +91,10 @@ class EventTableState extends State<EventTable> {
     profile: _profile,
   );
 
-  /// Duration shown on one row under the summary grouping, or null when the
-  /// row keeps its own clock time (chronological mode or shared accounting
-  /// disabled).
+  /// Both table modes use the same saved-event allocation. Draft clock
+  /// lengths are previews and never reduce another event's credited time.
   Duration? _sharedDuration(Event event) {
-    if (_mode != EventTableMode.summary) return null;
+    if (widget.journal.drafts.containsKey(event.id)) return null;
     final profile = _profile;
     if (profile == null) return null;
     if (event.intervalOn(widget.journal.day) == null) return null;

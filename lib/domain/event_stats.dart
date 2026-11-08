@@ -1,5 +1,15 @@
 import 'model.dart';
 
+/// One record per identity, with current derived gaps instead of stale CSV
+/// intervals. Callers supply saved records only; drafts never enter accounting.
+List<Event> accountingEvents(Iterable<Event> savedEvents) {
+  final saved = uniqueEvents(savedEvents);
+  return [...saved.where((event) => !event.isUndefined), ...currentGaps(saved)];
+}
+
+List<Event> uniqueEvents(Iterable<Event> events) =>
+    {for (final event in events) event.id: event}.values.toList();
+
 /// Half-open civil-time window used by every statistics view.
 ///
 /// [from] is the start of the first day and [toExclusive] is the start of the
@@ -193,7 +203,7 @@ class ConcurrencyProfile {
 
   factory ConcurrencyProfile.of(StatsWindow window, Iterable<Event> events) {
     final deltas = <DateTime, int>{};
-    for (final event in events) {
+    for (final event in uniqueEvents(events)) {
       final interval = clippedInterval(event, window);
       if (interval == null) continue;
       deltas.update(interval.start, (value) => value + 1, ifAbsent: () => 1);
@@ -224,7 +234,7 @@ class ConcurrencyProfile {
     bool Function(Event event)? where,
   ) {
     final intervals = <Interval>[];
-    for (final event in events) {
+    for (final event in uniqueEvents(events)) {
       if (where != null && !where(event)) continue;
       final interval = clippedInterval(event, window);
       if (interval != null) intervals.add(interval);
