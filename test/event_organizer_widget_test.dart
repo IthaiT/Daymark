@@ -48,8 +48,8 @@ void main() {
         'a',
         '内核调度',
         'linux',
-        day,
-        day.add(const Duration(hours: 1)),
+        day.add(const Duration(hours: 23)),
+        day.add(const Duration(days: 1, hours: 1)),
         '迁移备注',
       ),
       'b': Event(
@@ -124,6 +124,31 @@ void main() {
     expect(find.text('内核调度'), findsOneWidget);
   });
 
+  testWidgets('date filters include cross-midnight records and reset cleanly', (
+    tester,
+  ) async {
+    await mount(tester);
+    await tester.tap(find.byTooltip('筛选日期'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+    final inputs = find.descendant(
+      of: find.byType(DateRangePickerDialog),
+      matching: find.byType(TextField),
+    );
+    expect(inputs, findsNWidgets(2));
+    await tester.enterText(inputs.at(0), '01/06/2024');
+    await tester.enterText(inputs.at(1), '01/06/2024');
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 0 / 2 条'), findsOneWidget);
+    expect(find.text('内核调度'), findsOneWidget);
+    expect(find.text('会议'), findsOneWidget);
+    await tester.tap(find.byTooltip('清除日期筛选'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 0 / 3 条'), findsOneWidget);
+  });
+
   testWidgets('tag moves preserve records and can be undone and redone', (
     tester,
   ) async {
@@ -141,10 +166,10 @@ void main() {
     expect(journal.store.events['a']!.tagIds, ['life']);
     expect(journal.store.events['c']!.end, isNull);
     expect(journal.store.events['a']!.notes, '迁移备注');
-    await tester.tap(find.byTooltip('撤销整理'));
+    await tester.tap(find.byTooltip('撤销最近修改'));
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagIds, ['linux']);
-    await tester.tap(find.byTooltip('重做整理'));
+    await tester.tap(find.byTooltip('重做最近修改'));
     await tester.pumpAndSettle();
     expect(journal.store.events['a']!.tagIds, ['life']);
   });
@@ -263,7 +288,7 @@ void main() {
     await tester.pumpAndSettle();
     // The root overlay contains the target dialog, outside the home boundary.
     final root = tester.renderObject<RenderRepaintBoundary>(
-      find.byType(RepaintBoundary).first,
+      find.byKey(const ValueKey('organize-move-capture')),
     );
     await capture(root, 'event-organizer-target');
     expect(tester.takeException(), isNull);

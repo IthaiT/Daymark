@@ -99,6 +99,7 @@ class _EventOrganizerState extends State<EventOrganizer> {
       initialDateRange: _range,
       helpText: '筛选事件日期',
       saveText: '应用',
+      confirmText: '应用',
     );
     if (result != null && mounted) _filter(() => _range = result);
   }
@@ -112,7 +113,10 @@ class _EventOrganizerState extends State<EventOrganizer> {
     final moved = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _MoveDialog(journal: journal, ids: {..._selected}),
+      builder: (_) => RepaintBoundary(
+        key: const ValueKey('organize-move-capture'),
+        child: _MoveDialog(journal: journal, ids: {..._selected}),
+      ),
     );
     if (!mounted) return;
     setState(() {
@@ -249,14 +253,14 @@ class _EventOrganizerState extends State<EventOrganizer> {
                         ),
                       ),
                       IconButton(
-                        tooltip: '撤销整理',
+                        tooltip: '撤销最近修改',
                         onPressed: !_busy && journal.history.canUndo
                             ? () => _history(false)
                             : null,
                         icon: const Icon(Icons.undo),
                       ),
                       IconButton(
-                        tooltip: '重做整理',
+                        tooltip: '重做最近修改',
                         onPressed: !_busy && journal.history.canRedo
                             ? () => _history(true)
                             : null,
@@ -325,6 +329,19 @@ class _EventOrganizerState extends State<EventOrganizer> {
     final records = journal.store.events.values
         .where((event) => !event.isUndefined)
         .toList();
+    final counts = <String, int>{};
+    for (final event in records) {
+      final scope = event.tagIds.toSet();
+      if (_descendants) {
+        for (final id in event.tagIds) {
+          scope.addAll(journal.store.ancestors(id).map((tag) => tag.id));
+        }
+      }
+      if (scope.isEmpty) scope.add('');
+      for (final id in scope) {
+        counts.update(id, (count) => count + 1, ifAbsent: () => 1);
+      }
+    }
     Widget source(String? id, String name) => ListTile(
       key: ValueKey('organize-source-${id ?? 'all'}'),
       selected: _tagId == id,
@@ -338,7 +355,7 @@ class _EventOrganizerState extends State<EventOrganizer> {
       ),
       title: Text(name, style: const TextStyle(fontSize: 16)),
       trailing: Text(
-        '${records.where((event) => _inTag(event, id)).length}',
+        '${id == null ? records.length : counts[id] ?? 0}',
         style: const TextStyle(fontSize: 16),
       ),
       onTap: _busy ? null : () => _filter(() => _tagId = id),
