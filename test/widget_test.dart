@@ -935,6 +935,73 @@ void main() {
     },
   );
 
+  for (final column in ['title', 'tag']) {
+    for (final method in ['enter', 'keypad', 'action', 'mouse']) {
+      testWidgets(
+        '$column choice confirmation then Enter exits using $method',
+        (tester) async {
+          final isTitle = column == 'title';
+          if (isTitle) {
+            await journal.store.saveItem(const Item(id: 'job', name: '跳槽'));
+          }
+          await open(tester);
+          await tester.tap(cell('a', column));
+          await tester.pumpAndSettle();
+          await tester.tap(cell('a', column));
+          await tester.pumpAndSettle();
+          await tester.enterText(input('a', column), isTitle ? '跳' : '主');
+          await tester.pumpAndSettle();
+
+          Future<void> enter() async {
+            if (method == 'action') {
+              await tester.testTextInput.receiveAction(TextInputAction.done);
+            } else {
+              await tester.sendKeyEvent(
+                method == 'keypad'
+                    ? LogicalKeyboardKey.numpadEnter
+                    : LogicalKeyboardKey.enter,
+              );
+            }
+            await tester.pumpAndSettle();
+          }
+
+          if (method == 'mouse') {
+            await tester.tap(
+              find.byKey(
+                ValueKey(
+                  isTitle ? 'title-choice-item-job' : 'tag-choice-embedded',
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+          } else {
+            if (!isTitle) await key(tester, LogicalKeyboardKey.arrowDown);
+            await enter();
+          }
+          final saved = journal.event('a')!;
+          expect(
+            isTitle ? saved.itemId : saved.tagId,
+            isTitle ? 'job' : 'embedded',
+          );
+          expect(
+            tester
+                .widget<TextField>(input('a', column))
+                .focusNode!
+                .hasPrimaryFocus,
+            isTrue,
+          );
+          expect(find.byType(TitleChoices), findsNothing);
+          expect(find.byType(OwnerChoices), findsNothing);
+
+          await enter();
+          expect(find.byType(InlineEditor), findsNothing);
+          expect(journal.event('a'), saved);
+          expect(journal.selected, {'a'});
+        },
+      );
+    }
+  }
+
   testWidgets(
     'typed tag lists replace old tags and retain the item association',
     (tester) async {

@@ -103,16 +103,20 @@ class _InlineEditorState extends State<InlineEditor> {
   void _submit() {
     if (_isComposing) return;
     final session = widget.session;
-    if (session.column == EventColumn.tag) {
-      _applyPendingOwner();
-      widget.onCompleteChoice();
-      return;
-    }
-    if (session.column == EventColumn.title && session.pickerOpen) {
-      final choices = titleChoices(widget.store, session.text.text);
-      if (choices.isNotEmpty) {
-        _applyTitle(choices[session.titleIndex.clamp(0, choices.length - 1)]);
+    // Confirming a suggestion keeps editing. With its popup closed, the next
+    // Enter finishes the edit for either column.
+    if (session.pickerOpen) {
+      if (session.column == EventColumn.tag) {
+        _applyPendingOwner();
+        widget.onCompleteChoice();
         return;
+      }
+      if (session.column == EventColumn.title) {
+        final choices = titleChoices(widget.store, session.text.text);
+        if (choices.isNotEmpty) {
+          _applyTitle(choices[session.titleIndex.clamp(0, choices.length - 1)]);
+          return;
+        }
       }
     }
     widget.onCommit();
