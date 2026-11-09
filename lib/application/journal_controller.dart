@@ -581,32 +581,65 @@ class JournalController extends ChangeNotifier {
         if (changed) await _apply(events, _drafts);
       });
 
-  /// Batch classification used by the statistics screen. A tag replaces the
-  /// tags, an item is added together with its inherited tags, and clearing the last classification is rejected.
-  Future<void> assignOwner(Iterable<String> ids, OwnerRef? owner) {
-    if (owner == null) {
-      return _run(() async {
-        final wanted = ids.toSet();
-        if (wanted.isEmpty) return;
+  /// Historical reclassification replaces tags, including when moving to an
+  /// item. Unlike recording-time defaults, obsolete tags must not accumulate.
+  /// A tag move preserves an existing item association.
+  Future<void> moveEventsTo(Iterable<String> ids, OwnerRef owner) =>
+      _run(() async {
+        if (owner.isItem
+            ? !store.items.containsKey(owner.id)
+            : !store.tags.containsKey(owner.id)) {
+          throw const FormatException('目标标签或事项不存在。');
+        }
+        final tags = owner.isItem
+            ? store.effectiveItemTagIds(owner.id)
+            : [owner.id];
         final events = {...store.events};
         var changed = false;
-        for (final id in wanted) {
+        for (final id in ids.toSet()) {
           final event = events[id];
-          if (event == null || event.isUndefined || event.owner == null) {
-            continue;
-          }
-          final next = event.copyWith(clearTags: true, clearItem: true);
+          if (event == null || event.isUndefined) continue;
+          final next = event.copyWith(
+            tagIds: tags,
+            itemId: owner.isItem ? owner.id : event.itemId,
+          );
+          if (next == event) continue;
           store.validateEvent(next, allowIncomplete: event.end == null);
           events[id] = next;
           changed = true;
         }
         if (changed) await _apply(events, _drafts);
       });
+
+  /// Unreferenced branches only: keep ancestors of any tag used by a saved
+  /// event, a draft or an item's additions/exclusions.
+  Set<String> get unusedTagIds {
+    final used = <String>{
+      for (final event in [...store.events.values, ..._drafts.values])
+        ...event.tagIds,
+      for (final item in store.items.values) ...[
+        ...item.tagIds,
+        ...item.excludedTagIds,
+      ],
+    };
+    for (final id in used.toList()) {
+      used.addAll(store.ancestors(id).map((tag) => tag.id));
     }
-    return owner.isItem
-        ? setEventItem(ids, owner.id)
-        : setEventTag(ids, owner.id);
+    return store.tags.keys.toSet().difference(used);
   }
+
+  Future<void> deleteUnusedTags(Set<String> ids) => _run(() async {
+    if (ids.isEmpty) return;
+    if (!unusedTagIds.containsAll(ids)) {
+      throw const FormatException('部分标签正在使用，请重新检查后再清理。');
+    }
+    await store.replaceTags(
+      {...store.tags}..removeWhere((id, _) => ids.contains(id)),
+    );
+    // Event snapshots can reference these tags; never offer a partial restore.
+    history.clear();
+    notifyListeners();
+  });
 
   Future<void> deleteSelected() => _run(() async {
     final ids = {..._selected};

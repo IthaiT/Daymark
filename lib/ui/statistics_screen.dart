@@ -298,7 +298,7 @@ class _StatisticsScreenState extends State<StatisticsScreen> {
     );
     if (result == null || !mounted) return;
     try {
-      await widget.journal.assignOwner(ids, result.owner);
+      await widget.journal.moveEventsTo(ids, result.owner!);
       if (!mounted) return;
       setState(() {
         _editing = false;

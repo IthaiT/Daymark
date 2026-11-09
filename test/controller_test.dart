@@ -154,10 +154,6 @@ void main() {
       throwsFormatException,
     );
     await expectLater(
-      controller.assignOwner(['a'], null),
-      throwsFormatException,
-    );
-    await expectLater(
       controller.editCell('a', EventColumn.tag, null),
       throwsFormatException,
     );

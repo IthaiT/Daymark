@@ -212,22 +212,22 @@ void main() {
     expect(reopened.events['e']!.tagIds, ['life']);
   });
 
-  test('batch classification handles tags, projects and clearing', () async {
-    await store.saveItem(const Item(id: 'job', name: '跳槽', tagIds: ['work']));
-    await store.saveEvent(record('e', '研究', tags: ['life']));
+  test(
+    'batch moves replace tags and inherit the destination item tags',
+    () async {
+      await store.saveItem(const Item(id: 'job', name: '跳槽', tagIds: ['work']));
+      await store.saveEvent(record('e', '研究', tags: ['life']));
 
-    await journal.assignOwner(['e'], (id: 'work', isItem: false));
-    expect(store.events['e']!.tagIds, ['work']);
-    expect(store.events['e']!.itemId, isNull);
+      await journal.moveEventsTo(['e'], (id: 'work', isItem: false));
+      expect(store.events['e']!.tagIds, ['work']);
+      expect(store.events['e']!.itemId, isNull);
 
-    await journal.assignOwner(['e'], (id: 'job', isItem: true));
-    expect(store.events['e']!.itemId, 'job');
-    expect(store.events['e']!.tagIds, containsAll(['work']));
-
-    await expectLater(journal.assignOwner(['e'], null), throwsFormatException);
-    expect(store.events['e']!.itemId, 'job');
-    expect(store.events['e']!.tagIds, ['work']);
-  });
+      await journal.setEventTags(['e'], ['life']);
+      await journal.moveEventsTo(['e'], (id: 'job', isItem: true));
+      expect(store.events['e']!.itemId, 'job');
+      expect(store.events['e']!.tagIds, ['work']);
+    },
+  );
 
   test('a status change is kept in the item trail', () async {
     await journal.saveItem(const Item(id: 'job', name: '跳槽'));
