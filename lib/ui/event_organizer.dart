@@ -196,6 +196,9 @@ class _EventOrganizerState extends State<EventOrganizer> {
             icon: const Icon(Icons.close),
           ),
           IconButton.filled(
+            style: IconButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
             tooltip: '确认删除空标签',
             onPressed: () => Navigator.pop(context, true),
             icon: const Icon(Icons.delete_outline),
@@ -465,6 +468,9 @@ class _EventOrganizerState extends State<EventOrganizer> {
               ),
             ),
             IconButton.filled(
+              style: IconButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              ),
               tooltip: '移动所选事件',
               onPressed: !_busy && _selected.isNotEmpty ? _move : null,
               icon: const Icon(Icons.drive_file_move_outline),
@@ -719,6 +725,9 @@ class _MoveDialogState extends State<_MoveDialog> {
             icon: const Icon(Icons.close),
           ),
           IconButton.filled(
+            style: IconButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
             tooltip: '确认移动',
             onPressed: !_saving && _target != null ? _save : null,
             icon: const Icon(Icons.check),
