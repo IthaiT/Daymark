@@ -11,6 +11,7 @@ Future<void> showSettingsDialog(
   Future<int> Function(String)? onSyncObsidian,
   bool allowHistoryEditing = false,
   ValueChanged<bool>? onHistoryEditingChanged,
+  Future<void> Function()? onOrganizeEvents,
 }) => showDialog<void>(
   context: context,
   builder: (_) => _SettingsDialog(
@@ -19,6 +20,7 @@ Future<void> showSettingsDialog(
     onSyncObsidian: onSyncObsidian,
     allowHistoryEditing: allowHistoryEditing,
     onHistoryEditingChanged: onHistoryEditingChanged,
+    onOrganizeEvents: onOrganizeEvents,
   ),
 );
 
@@ -29,12 +31,14 @@ class _SettingsDialog extends StatefulWidget {
     this.onSyncObsidian,
     required this.allowHistoryEditing,
     this.onHistoryEditingChanged,
+    this.onOrganizeEvents,
   });
   final AppSettings settings;
   final Future<void> Function(AppSettings) onSave;
   final Future<int> Function(String)? onSyncObsidian;
   final bool allowHistoryEditing;
   final ValueChanged<bool>? onHistoryEditingChanged;
+  final Future<void> Function()? onOrganizeEvents;
   @override
   State<_SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -126,6 +130,17 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.onOrganizeEvents != null) ...[
+                ListTile(
+                  key: const ValueKey('organize-events'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.drive_file_move_outline),
+                  title: const Text('历史事件整理', style: TextStyle(fontSize: 16)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _saving ? null : widget.onOrganizeEvents,
+                ),
+                const Divider(height: 24),
+              ],
               Text('时间记录', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 4),
               SwitchListTile(

@@ -14,7 +14,7 @@ import 'journal_screen.dart';
 import 'ledger_screen.dart';
 import 'project_screen.dart';
 import 'settings_dialog.dart';
-import 'statistics_screen.dart';
+import 'event_organizer.dart';
 import 'tag_map_screen.dart';
 import 'title_bar.dart';
 
@@ -53,12 +53,10 @@ class AppScreenState extends State<AppScreen> {
   final _ledgerFocus = FocusNode();
   final _projectFocus = FocusNode();
   final _journalScope = FocusScopeNode(debugLabel: 'journal-workspace');
-  final _statisticsScope = FocusScopeNode(debugLabel: 'statistics-workspace');
   late final TagMapController _tagMap = TagMapController(widget.journal);
   int _page = 0;
   bool _visitedLedger = false;
   bool _visitedTagMap = false;
-  bool _visitedStatistics = false;
   Future<bool> commit() =>
       _journal.currentState?.commit() ?? Future.value(true);
   @override
@@ -67,7 +65,6 @@ class AppScreenState extends State<AppScreen> {
     _ledgerFocus.dispose();
     _projectFocus.dispose();
     _journalScope.dispose();
-    _statisticsScope.dispose();
     super.dispose();
   }
 
@@ -79,8 +76,6 @@ class AppScreenState extends State<AppScreen> {
         _ledgerFocus.requestFocus();
       case 3:
         _tagMapScreen.currentState?.focus();
-      case 4:
-        _statisticsScope.requestFocus();
       default:
         _journalScope.requestFocus();
     }
@@ -108,7 +103,6 @@ class AppScreenState extends State<AppScreen> {
       _page = page;
       if (page == 2) _visitedLedger = true;
       if (page == 3) _visitedTagMap = true;
-      if (page == 4) _visitedStatistics = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusPage();
@@ -128,6 +122,7 @@ class AppScreenState extends State<AppScreen> {
       onSyncObsidian: widget.journal.syncObsidian,
       allowHistoryEditing: widget.journal.allowHistoryEditing,
       onHistoryEditingChanged: widget.journal.setAllowHistoryEditing,
+      onOrganizeEvents: () => showEventOrganizer(context, widget.journal),
       onSave: (value) async {
         await widget.journal.applySettings(value);
         await widget.settings.update(value);
@@ -241,8 +236,6 @@ class AppScreenState extends State<AppScreen> {
                       ),
                       const SizedBox(height: 8),
                       _mode(context, 3, '标签导图', Icons.account_tree_outlined),
-                      const SizedBox(height: 8),
-                      _mode(context, 4, '统计', Icons.insights_outlined),
                       const Spacer(),
                       _settingsButton(context),
                       const SizedBox(height: 16),
@@ -301,15 +294,6 @@ class AppScreenState extends State<AppScreen> {
                               key: _tagMapScreen,
                               controller: _tagMap,
                             )
-                          : const SizedBox.shrink(),
-                    ),
-                    FocusScope(
-                      node: _statisticsScope,
-                      canRequestFocus: _page == 4,
-                      descendantsAreFocusable: _page == 4,
-                      descendantsAreTraversable: _page == 4,
-                      child: _visitedStatistics
-                          ? StatisticsScreen(journal: widget.journal)
                           : const SizedBox.shrink(),
                     ),
                   ],

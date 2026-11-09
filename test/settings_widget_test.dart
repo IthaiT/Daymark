@@ -125,6 +125,21 @@ void main() {
       )
       .value;
 
+  testWidgets(
+    'historical organizer lives in settings and statistics navigation is removed',
+    (tester) async {
+      await openSettings(tester);
+      expect(find.byKey(const ValueKey('mode-4')), findsNothing);
+      expect(find.byTooltip('统计'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('organize-events')));
+      await tester.pumpAndSettle();
+      expect(find.text('已选 0 / 2 条'), findsOneWidget);
+      await tester.tap(find.byTooltip('关闭整理'));
+      await tester.pumpAndSettle();
+      expect(find.text('设置'), findsOneWidget);
+    },
+  );
+
   testWidgets('dialog shows defaults and cancel changes nothing', (
     tester,
   ) async {
