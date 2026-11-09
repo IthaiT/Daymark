@@ -119,7 +119,10 @@ public static class DaymarkPrivateDesktop {
             0xe25c, 0xf1be, 0xee33, 0xf266, 0xf37d, 0xf3ca, 0xf2ef,
             0xf336, 0xe364, 0xe44c, 0xf231, 0xe124,
             0xe168, // Material 3 heatmap chip removal (Icons.clear).
-            0xf090, 0xe62f, 0xe45c // Obsidian folder, synchronization and open-in-new.
+            0xf090, 0xe62f, 0xe45c, // Obsidian folder, synchronization and open-in-new.
+            // Historical organizer: move, no label, date filter, undo/redo and selection.
+            0xe20a, 0xf14c, 0xefa5, 0xe68c, 0xe512, 0xee6e,
+            0xe156, 0xe15a, 0xe1bb, 0xef28, 0xe47f, 0xe504, 0xe6f7
         });
         CheckGlyphs(Path.Combine(assets, "assets", "fonts", "NotoSansSC.ttf"), new[] {
             0x0030, 0x0041, 0x0061, 0x00a5, 0x4e2d, 0x6587, 0x65f6, 0x95f4, 0x9910, 0x996e,
