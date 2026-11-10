@@ -14,6 +14,7 @@ import 'data/appearance_store.dart';
 import 'data/archive_store.dart';
 import 'domain/appearance.dart';
 import 'domain/model.dart' show dayStart;
+import 'domain/obsidian.dart';
 import 'domain/journal_view_preferences.dart';
 import 'data/instance_lock.dart';
 import 'data/ledger_store.dart';
@@ -22,6 +23,7 @@ import 'data/store.dart';
 import 'ui/app_screen.dart';
 import 'ui/journal_screen.dart';
 import 'ui/startup_window.dart';
+import 'ui/obsidian_sync_error.dart';
 import 'ui/theme.dart';
 
 Directory dataDirectory(List<String> arguments, {String? executable}) {
@@ -155,6 +157,7 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
   late SettingsController _settings;
   late bool _ownsSettings;
   final _messenger = GlobalKey<ScaffoldMessengerState>();
+  final _navigator = GlobalKey<NavigatorState>();
   Set<String>? _colorRootIds;
   final _app = GlobalKey<AppScreenState>();
   final _journal = GlobalKey<JournalScreenState>();
@@ -169,6 +172,13 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
     try {
       await widget.journal.syncObsidian(path);
     } catch (error) {
+      if (mounted && error is ObsidianDuplicateIdException) {
+        final dialogContext = _navigator.currentContext;
+        if (dialogContext != null && dialogContext.mounted) {
+          await showObsidianDuplicateError(dialogContext, error);
+          return;
+        }
+      }
       if (mounted) _showAppearanceError('Obsidian 同步失败，已保留上次的事项：$error');
     }
   }
@@ -353,6 +363,7 @@ class _DaymarkAppState extends State<DaymarkApp> with WindowListener {
         tagDisplays: _appearance.state.tagDisplays,
       ),
       scaffoldMessengerKey: _messenger,
+      navigatorKey: _navigator,
       locale: const Locale('zh', 'CN'),
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       supportedLocales: const [Locale('zh', 'CN')],

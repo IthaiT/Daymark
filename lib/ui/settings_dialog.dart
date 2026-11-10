@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:file_selector/file_selector.dart';
 
 import '../domain/settings.dart';
+import '../domain/obsidian.dart';
 import 'dialogs.dart' show errorText;
+import 'obsidian_sync_error.dart';
 
 Future<void> showSettingsDialog(
   BuildContext context, {
@@ -85,6 +87,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       if (mounted) setState(() => _syncMessage = '已同步 $count 个事项');
     } catch (error) {
       if (mounted) setState(() => _error = errorText(error));
+      if (mounted && error is ObsidianDuplicateIdException) {
+        await showObsidianDuplicateError(context, error);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

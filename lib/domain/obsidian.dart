@@ -15,6 +15,11 @@ class ObsidianImport {
   final Map<String, String> documents;
 }
 
+/// A source conflict that should remain available for inspection and copying.
+class ObsidianDuplicateIdException extends FormatException {
+  const ObsidianDuplicateIdException(super.message);
+}
+
 final _itemId = RegExp(
   r'^\^daymark-obsidian-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
 );
@@ -38,12 +43,14 @@ ObsidianImport parseObsidian(
   final updated = <String, String>{};
   final roots = <String, String>{};
   final parents = <String, String>{};
-  void add(Item item) {
-    if (items.containsKey(item.id)) {
-      throw FormatException(
-        'Markdown 中存在重复事项 ID：${item.id}。请检查 daymark-id 属性和事项块 ID。',
-      );
-    }
+  final locations =
+      <String, List<({String name, String path, String position})>>{};
+  void add(Item item, String position) {
+    locations.putIfAbsent(item.id, () => []).add((
+      name: item.name,
+      path: item.source!.path,
+      position: position,
+    ));
     items[item.id] = item;
   }
 
@@ -161,6 +168,7 @@ ObsidianImport parseObsidian(
             raw: lines[index],
           ),
         ),
+        '第 ${index + 1} 行',
       );
       stack.add((indent, id));
     }
@@ -190,7 +198,26 @@ ObsidianImport parseObsidian(
           raw: annotated,
         ),
       ),
+      propertyId == null
+          ? '文件事项（将生成 daymark-id 属性）'
+          : '第 ${properties!.nodes['daymark-id']!.span.start.line + 2} 行（daymark-id 属性）',
     );
+  }
+  final duplicates = locations.entries.where((entry) => entry.value.length > 1);
+  if (duplicates.isNotEmpty) {
+    final message = StringBuffer('发现重复事项 ID，本次同步未执行。\n');
+    var group = 0;
+    for (final entry in duplicates) {
+      message.writeln('\n重复组 ${++group}：');
+      for (final location in entry.value) {
+        message.writeln(
+          '• 事项「${location.name}」— ${location.path} ${location.position}',
+        );
+      }
+      message.writeln('ID：${entry.key}');
+    }
+    message.write('请根据文件名和行号删除多余条目，或移除独立副本的 ID 后重试。原始文件和已保存数据均已保留。');
+    throw ObsidianDuplicateIdException(message.toString());
   }
   for (final entry in parents.entries) {
     final parentId = roots[caseFold(entry.value)];

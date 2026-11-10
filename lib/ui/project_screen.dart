@@ -8,6 +8,7 @@ import '../data/store.dart';
 import '../data/obsidian_navigation.dart';
 import '../domain/item.dart';
 import '../domain/model.dart';
+import '../domain/obsidian.dart';
 import '../domain/unicode.dart';
 import 'dialogs.dart';
 import 'pickers.dart' show PickerPopup;
@@ -16,6 +17,7 @@ import 'theme.dart'
 import 'workspace_style.dart';
 import 'tag_chips.dart';
 import 'obsidian_text.dart';
+import 'obsidian_sync_error.dart';
 
 /// Project workspace: a tree of projects and planned items, edited in place
 /// with three fields — name, description and result.
@@ -78,6 +80,10 @@ class ProjectScreenState extends State<ProjectScreen> {
       await action();
     } catch (error) {
       if (!mounted) return;
+      if (error is ObsidianDuplicateIdException) {
+        await showObsidianDuplicateError(context, error);
+        return;
+      }
       ScaffoldMessenger.of(context)
         ..removeCurrentSnackBar()
         ..showSnackBar(

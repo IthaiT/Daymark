@@ -116,6 +116,69 @@ void main() {
     validateItems(result.items);
     expect(result.items.length, 4);
   });
+  group('duplicate identity source locations', () {
+    String message(Map<String, String> documents) {
+      try {
+        parse(documents);
+      } on ObsidianDuplicateIdException catch (error) {
+        return error.message;
+      }
+      fail('Expected a duplicate identity error.');
+    }
+
+    test('same-name rows identify original lines before YAML is inserted', () {
+      final id = obsidianId(900);
+      final result = message({'计划.md': '- [ ] 准备面试 $id\n\n- [ ] 准备面试 $id\n'});
+      expect(result, contains('事项「准备面试」— 计划.md 第 1 行'));
+      expect(result, contains('事项「准备面试」— 计划.md 第 3 行'));
+      expect(result, contains('原始文件和已保存数据均已保留'));
+    });
+
+    test('reports every location in every duplicate group across files', () {
+      final first = obsidianId(901);
+      final second = obsidianId(902);
+      final result = message({
+        '工作.md': '- [ ] 准备面试 $first\n- [ ] 修改简历 $second\n',
+        '副本.md': '- [ ] 面试副本 $first\n- [ ] 简历副本 $second\n',
+        '归档.md': '归档正文\n- [x] 面试归档 $first\n',
+      });
+      expect(result, contains('重复组 1：'));
+      expect(result, contains('重复组 2：'));
+      expect(result, contains('事项「准备面试」— 工作.md 第 1 行'));
+      expect(result, contains('事项「修改简历」— 工作.md 第 2 行'));
+      expect(result, contains('事项「面试副本」— 副本.md 第 1 行'));
+      expect(result, contains('事项「简历副本」— 副本.md 第 2 行'));
+      expect(result, contains('事项「面试归档」— 归档.md 第 2 行'));
+      expect(result, contains('ID：$first'));
+      expect(result, contains('ID：$second'));
+    });
+
+    test(
+      'note properties and task rows report both names and property location',
+      () {
+        final id = obsidianId(903);
+        final result = message({
+          '原笔记.md': '\uFEFF---\r\n# 说明\r\n"daymark-id": "$id"\r\n---\r\n',
+          '合并.md': '目标正文\n- [ ] 原笔记的副本 $id\n',
+        });
+        expect(result, contains('事项「原笔记」— 原笔记.md 第 3 行（daymark-id 属性）'));
+        expect(result, contains('事项「原笔记的副本」— 合并.md 第 2 行'));
+      },
+    );
+
+    test(
+      'duplicate note properties point to each file, including multiline YAML',
+      () {
+        final id = obsidianId(904);
+        final result = message({
+          'A.md': '---\ndaymark-id: "$id"\n---\n',
+          'B.md': '---\ndaymark-id:\n  "$id"\n---\n',
+        });
+        expect(result, contains('事项「A」— A.md 第 2 行（daymark-id 属性）'));
+        expect(result, contains('事项「B」— B.md 第 3 行（daymark-id 属性）'));
+      },
+    );
+  });
   test(
     'inline tags in every field belong to their task, not link or code text',
     () {
