@@ -170,6 +170,21 @@ describe("task Enter semantics", () => {
     expect(view.state.doc.toString()).toBe(`  9. [x] 计划 ${id(1)}\n  10. [ ] 正文 ${id(10)}`);
   });
 
+  it("inserts a sibling after the original subtree so children retain their parent", () => {
+    const original = `- [ ] 父事项 ${id(1)}\n  - [ ] 子事项 ${id(2)}\n- [ ] 同级 ${id(3)}`;
+    const view = editor(original);
+    view.dispatch({ selection: { anchor: 9 } });
+    splitTask(view, options);
+    expect(view.state.doc.toString()).toBe(
+      `- [ ] 父事项 ${id(1)}\n  - [ ] 子事项 ${id(2)}\n- [ ]  ${id(10)}\n- [ ] 同级 ${id(3)}`,
+    );
+    view.dispatch({ changes: { from: view.state.selection.main.head, insert: "新同级" } });
+    expect(view.state.doc.line(3).text).toBe(`- [ ] 新同级 ${id(10)}`);
+    undo(view);
+    undo(view);
+    expect(view.state.doc.toString()).toBe(original);
+  });
+
   it("exits an empty task without leaving an orphan ID", () => {
     const view = editor(`  - [ ]  ${id(1)}`);
     view.dispatch({ selection: { anchor: 8 } });

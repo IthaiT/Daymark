@@ -10,7 +10,7 @@ import {
   type Extension,
 } from "@codemirror/state";
 import { Decoration, EditorView, keymap, type DecorationSet } from "@codemirror/view";
-import { newIdentity, scanIdentities, taskPrefix, type Identity } from "./identity";
+import { indentation, newIdentity, scanIdentities, taskPrefix, type Identity } from "./identity";
 
 // Only commands in this plugin receive this annotation; normal typing is filtered.
 export const structuralEdit = Annotation.define<boolean>();
@@ -90,10 +90,27 @@ export function splitTask(view: EditorView, options: GuardOptions): boolean {
   const nextPrefix = `${prefix[1]}${marker} [${originalOnRight ? prefix[3] : " "}] `;
   const firstPrefix = originalOnRight ? prefix[0].replace(/\[[ /xX-]\]/, "[ ]") : prefix[0];
   const first = `${firstPrefix}${left} ${originalOnRight ? nextId : span.id}`;
-  const insert = `${first}\n${nextPrefix}${right} ${originalOnRight ? span.id : nextId}`;
+  const second = `${nextPrefix}${right} ${originalOnRight ? span.id : nextId}`;
+  let subtreeTo = line.to;
+  if (!originalOnRight) {
+    const level = indentation(line.text);
+    for (let n = line.number + 1; n <= view.state.doc.lines; n++) {
+      const child = view.state.doc.line(n);
+      if (child.text.trim() && indentation(child.text) <= level) break;
+      if (child.text.trim()) subtreeTo = child.to;
+    }
+  }
+  // A new sibling belongs after the existing subtree, or the old children would
+  // silently become children of the newly inserted task on the next sync.
+  const changes = subtreeTo === line.to
+    ? [{ from: line.from, to: line.to, insert: `${first}\n${second}` }]
+    : [
+        { from: line.from, to: line.to, insert: first },
+        { from: subtreeTo, insert: `\n${second}` },
+      ];
   view.dispatch({
-    changes: { from: line.from, to: line.to, insert },
-    selection: { anchor: line.from + first.length + 1 + nextPrefix.length },
+    changes,
+    selection: { anchor: subtreeTo + first.length - line.length + 1 + nextPrefix.length },
     annotations: [structuralEdit.of(true), Transaction.userEvent.of("input")],
   });
   return true;
