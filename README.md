@@ -38,6 +38,8 @@ flutter run -d windows
 
 [Markdown 格式、稳定 ID 与完整备份说明](docs/obsidian.md)。
 
+需要在 Obsidian 编辑时隐藏并保护事项 ID，可安装项目内的 [Daymark 事项保护插件](plugins/daymark-id-guard/README.md)，支持整行和子树剪切、复制与临时解锁。
+
 ## 使用方法
 
 1. 在左侧标签上右键，选择「新增子标签」「修改标签」或「删除标签」。在树的空白处右键可新增一级标签；双击只展开或收起分支。

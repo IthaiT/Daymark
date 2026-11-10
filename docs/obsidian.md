@@ -48,9 +48,11 @@ Daymark 自行跟踪完成状态，不要求安装 Tasks 插件。同步时，�
 
 只接受这一种身份格式。旧注释、旧文件块标识、缺少前缀的属性、自定义事项块 ID 和编码 ID 都会报错，不做自动迁移或历史别名匹配。已保存的 Obsidian 事项 ID 也必须符合完整格式；旧存储身份会阻止同步，不会悄悄生成第二个事项或改绑记录。格式错误和重复身份会阻止本次同步，源文件与已保存数据保持原样。
 
-Obsidian 阅读模式会隐藏块 ID；实时预览仍可能显示，所以提供 [隐藏样式](../tools/obsidian-daymark.css)。把文件复制到仓库 `.obsidian/snippets/`，然后在 Obsidian「设置 → 外观 → CSS 代码片段」刷新并启用。它仅在实时预览中让 `.cm-blockid` 透明，源码模式仍可检查；所有原生块 ID 都受此样式影响。CSS 不改 Markdown、剪贴板或编辑命令，也不需要安装插件。 **此样式不保护 ID，编辑时仍可破坏它。** 无插件时建议改用[编辑行显示 ID 的样式](../tools/obsidian-daymark-reveal-on-edit.css)，减少盲改；需要始终隐藏并防误删时，参见[编辑保护调研](obsidian-id-protection.md)。
+需要编辑时始终隐藏并防误改，可安装 [Daymark 事项保护插件](../plugins/daymark-id-guard/README.md)。配置与同步目录对应的仓库内相对路径后，实时预览和源码模式都会隐藏有效的事项行末 ID，并拦截普通编辑对它的破坏；整行／子树剪切保留原 ID，复制分配新 ID，另有临时解锁命令。它不保护笔记 YAML 属性；当前已完成无窗口 CodeMirror 与宿主模拟测试，尚未在真实 Obsidian／Tasks 组合中运行验证。安装后请停用旧隐藏样式，以免解锁时 ID 仍被 CSS 隐藏。
 
-**剪切请使用整行或完整子树。** 无选区时将光标放在事项行，按 Ctrl+X，编辑器会剪切整行源码，包括不可见的行尾 ID；跨文件粘贴后 ID 不变。仅选择名称或一部分正文再剪切属于文本编辑，不能保证携带行尾 ID。复制建立独立事项时，应在源码模式移除副本 ID；重复 ID 会阻止同步，避免错误关联。笔记改名时保留 `daymark-id`；将文件事项合并为正文事项时，按上述规则转移同一个完整 ID。独立复制事项需要新的 ID。CSS 隐藏不等于不可删除，整行操作的说明不能代替当前 Obsidian 版本及其他插件组合下的实测。
+不使用插件时，仍提供 [隐藏样式](../tools/obsidian-daymark.css)。复制到仓库 `.obsidian/snippets/`，在 Obsidian「设置 → 外观 → CSS 代码片段」启用。它仅在实时预览中让所有 `.cm-blockid` 透明，源码模式仍可检查，**不保护 ID**。也可选用[编辑行显示 ID 的样式](../tools/obsidian-daymark-reveal-on-edit.css)，减少盲改；设计依据和限制见[编辑保护调研](obsidian-id-protection.md)。
+
+**剪切请使用整行或完整子树。** 无选区时将光标放在事项行，按 Ctrl+X，剪切整行源码，包括不可见的行尾 ID。使用保护插件时，在同一次插件运行期间跨文件粘贴，会检查原事项已移除再保留 ID；重复粘贴按复制处理。仅选择名称或一部分正文再剪切属于文本编辑，不能保证携带行尾 ID。不使用插件时，复制建立独立事项应在源码模式移除副本 ID；使用插件复制则自动分配新 ID。重复 ID 会阻止同步，避免错误关联。笔记改名时保留 `daymark-id`；将文件事项合并为正文事项时，先临时解锁，再按上述规则转移完整 ID。整行操作的说明和自动化测试不能代替当前 Obsidian 及其他插件组合下的实测。
 
 同步会保存需要更改的原始文件到数据目录 `obsidian-originals/*.json`，检查源内容是否已发生变化，再原子写入。除身份标识外保留原内容。若只完成部分文件写入，重试复用已有 ID；未闭合代码块或注释会阻止同步，以免新标识进入代码或注释中。
 
@@ -78,4 +80,4 @@ Markdown 是导入字段的来源，导入事项在 Daymark 事项页只读；�
 
 格式依据：[Tasks Emoji Format](https://github.com/obsidian-tasks-group/obsidian-tasks/blob/main/docs/Reference/Task%20Formats/Tasks%20Emoji%20Format.md)、[Dataview Format](https://github.com/obsidian-tasks-group/obsidian-tasks/blob/main/docs/Reference/Task%20Formats/Dataview%20Format.md)。
 
-隐藏与剪切方案参考：[Obsidian 原生块引用](https://help.obsidian.md/links#Link+to+a+block+in+a+note)、[官方论坛 Hide block IDs](https://forum.obsidian.md/t/hide-block-ids/81063)、[CodeMirror 剪贴板实现](https://github.com/codemirror/view/blob/main/src/input.ts)、[Obsidian URI](https://help.obsidian.md/uri)。原生块 ID 可直接作为链接目标，普通 HTML/`%%` 注释在实时预览中不能单靠语法保证隐藏；仅按名称或内容散列推断身份也无法可靠处理改名和重名事项，因此选择原生块 ID 加显示样式。
+隐藏与剪切方案参考：[Obsidian 原生块引用](https://help.obsidian.md/links#Link+to+a+block+in+a+note)、[官方论坛 Hide block IDs](https://forum.obsidian.md/t/hide-block-ids/81063)、[CodeMirror 剪贴板实现](https://github.com/codemirror/view/blob/main/src/input.ts)、[Obsidian URI](https://help.obsidian.md/uri)。原生块 ID 可直接作为链接目标，普通 HTML/`%%` 注释在实时预览中不能单靠语法保证隐藏；仅按名称或内容散列推断身份也无法可靠处理改名和重名事项，因此保留原生块 ID，并提供编辑保护插件和可选显示样式。
