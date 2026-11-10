@@ -126,13 +126,16 @@ void main() {
       fail('Expected a duplicate identity error.');
     }
 
-    test('same-name rows identify original lines before YAML is inserted', () {
-      final id = obsidianId(900);
-      final result = message({'计划.md': '- [ ] 准备面试 $id\n\n- [ ] 准备面试 $id\n'});
-      expect(result, contains('事项「准备面试」— 计划.md 第 1 行'));
-      expect(result, contains('事项「准备面试」— 计划.md 第 3 行'));
-      expect(result, contains('原始文件和已保存数据均已保留'));
-    });
+    test(
+      'same-name conflicting rows identify original lines before YAML is inserted',
+      () {
+        final id = obsidianId(900);
+        final result = message({'计划.md': '- [ ] 准备面试 $id\n\n- [/] 准备面试 $id\n'});
+        expect(result, contains('事项「准备面试」— 计划.md 第 1 行'));
+        expect(result, contains('事项「准备面试」— 计划.md 第 3 行'));
+        expect(result, contains('原始文件和已保存数据均已保留'));
+      },
+    );
 
     test('reports every location in every duplicate group across files', () {
       final first = obsidianId(901);
@@ -142,8 +145,8 @@ void main() {
         '副本.md': '- [ ] 面试副本 $first\n- [ ] 简历副本 $second\n',
         '归档.md': '归档正文\n- [x] 面试归档 $first\n',
       });
-      expect(result, contains('重复组 1：'));
-      expect(result, contains('重复组 2：'));
+      expect(result, contains('冲突组 1（差异：'));
+      expect(result, contains('冲突组 2（差异：'));
       expect(result, contains('事项「准备面试」— 工作.md 第 1 行'));
       expect(result, contains('事项「修改简历」— 工作.md 第 2 行'));
       expect(result, contains('事项「面试副本」— 副本.md 第 1 行'));

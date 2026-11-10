@@ -126,7 +126,7 @@ export class GuardClipboard {
     return true;
   }
 
-  /** Clipboard operations preserve identity; Daymark rejects duplicate IDs. */
+  /** Clipboard operations preserve identity; Daymark validates shared nodes. */
   paste(view: EditorView, input: string, linewiseHint = false): void {
     if (!this.options.enabled(view.state) || view.state.readOnly) return;
     if (view.state.selection.ranges.length !== 1) {

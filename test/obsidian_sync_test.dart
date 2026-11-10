@@ -140,7 +140,7 @@ void main() {
   );
   for (final changeCopy in [false, true]) {
     test(
-      'copying an ID across notes fails atomically (changed: $changeCopy), then deleting the source preserves history',
+      'copying an ID to a different file parent fails atomically (changed: $changeCopy), then moving it preserves history',
       () async {
         final a = File('${vault.path}/A.md');
         final b = File('${vault.path}/B.md');

@@ -11,7 +11,7 @@ Future<void> showObsidianDuplicateError(
   context: context,
   builder: (context) => AlertDialog(
     key: const ValueKey('obsidian-duplicate-dialog'),
-    title: const Text('Obsidian 事项 ID 重复'),
+    title: const Text('Obsidian 同 ID 事项冲突'),
     content: SizedBox(
       width: 640,
       child: SingleChildScrollView(child: SelectableText(error.message)),

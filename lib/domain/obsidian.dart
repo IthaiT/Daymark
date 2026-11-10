@@ -4,7 +4,7 @@ import 'package:uuid/uuid.dart';
 import 'package:yaml/yaml.dart';
 
 import 'item.dart';
-import 'model.dart' show parseDate;
+import 'model.dart' show dateText, parseDate;
 import 'unicode.dart';
 
 /// A fully validated import, before any source file is changed.
@@ -15,9 +15,56 @@ class ObsidianImport {
   final Map<String, String> documents;
 }
 
-/// A source conflict that should remain available for inspection and copying.
+/// Incompatible occurrences of one identity, available for inspection and copying.
 class ObsidianDuplicateIdException extends FormatException {
   const ObsidianDuplicateIdException(super.message);
+}
+
+class _Occurrence {
+  const _Occurrence(this.item, this.tags, this.position, {this.parentNote});
+  final Item item;
+  final List<String> tags;
+  final String position;
+  final String? parentNote;
+}
+
+List<String> _identityDifferences(_Occurrence left, _Occurrence right) {
+  final a = left.item;
+  final b = right.item;
+  final aTags = left.tags.map(caseFold).toSet();
+  final bTags = right.tags.map(caseFold).toSet();
+  return [
+    if (a.parentId != b.parentId) '父事项',
+    if (a.name != b.name) '名称',
+    if (a.objective != b.objective) '描述',
+    if (a.outcome != b.outcome) '结果',
+    if (a.status != b.status) '状态',
+    if (a.completedOn != b.completedOn) '完成日期',
+    if (aTags.length != bTags.length || !aTags.containsAll(bTags)) '自身标签',
+  ];
+}
+
+String _identityField(
+  String field,
+  _Occurrence occurrence,
+  Map<String, Item> items,
+) {
+  final item = occurrence.item;
+  final parent = items[item.parentId];
+  final value = switch (field) {
+    '父事项' =>
+      item.parentId == null
+          ? '最顶层事项'
+          : '「${parent?.name ?? '未知事项'}」（${item.parentId}）',
+    '名称' => item.name,
+    '描述' => item.objective,
+    '结果' => item.outcome,
+    '状态' => item.status.label,
+    '完成日期' => item.completedOn == null ? '' : dateText(item.completedOn!),
+    '自身标签' => occurrence.tags.join('、'),
+    _ => '',
+  };
+  return value.isEmpty ? '（空）' : value;
 }
 
 final _itemId = RegExp(
@@ -42,16 +89,16 @@ ObsidianImport parseObsidian(
   final tags = <String, List<String>>{};
   final updated = <String, String>{};
   final roots = <String, String>{};
-  final parents = <String, String>{};
-  final locations =
-      <String, List<({String name, String path, String position})>>{};
-  void add(Item item, String position) {
-    locations.putIfAbsent(item.id, () => []).add((
-      name: item.name,
-      path: item.source!.path,
-      position: position,
-    ));
-    items[item.id] = item;
+  final occurrences = <String, List<_Occurrence>>{};
+  void add(
+    Item item,
+    List<String> ownTags,
+    String position, {
+    String? parentNote,
+  }) {
+    occurrences
+        .putIfAbsent(item.id, () => [])
+        .add(_Occurrence(item, ownTags, position, parentNote: parentNote));
   }
 
   for (final entry in documents.entries) {
@@ -83,8 +130,7 @@ ObsidianImport parseObsidian(
     if (roots.containsKey(key)) throw FormatException('文件名重复：$name。');
     roots[key] = rootId;
     final parent = _parent(properties?['parent'], path);
-    if (parent != null) parents[rootId] = parent;
-    tags[rootId] = _tags(properties?['tags'], path);
+    final noteTags = _tags(properties?['tags'], path);
     final stack = <(int, String)>[];
     String? fence;
     var comment = false;
@@ -142,7 +188,6 @@ ObsidianImport parseObsidian(
       final annotatedLine = block == null ? '${line.trimRight()} $id' : line;
       lines[index] = annotatedLine;
       final (content, ownTags) = _inlineTags(match[3]!);
-      tags[id] = ownTags;
       final fields = _fields(_cleanTask(content));
       if (fields.first.trim().isEmpty || fields.length > 3) {
         throw FormatException(
@@ -168,6 +213,7 @@ ObsidianImport parseObsidian(
             raw: lines[index],
           ),
         ),
+        ownTags,
         '第 ${index + 1} 行',
       );
       stack.add((indent, id));
@@ -198,31 +244,72 @@ ObsidianImport parseObsidian(
           raw: annotated,
         ),
       ),
+      noteTags,
       propertyId == null
           ? '文件事项（将生成 daymark-id 属性）'
           : '第 ${properties!.nodes['daymark-id']!.span.start.line + 2} 行（daymark-id 属性）',
+      parentNote: parent,
     );
   }
-  final duplicates = locations.entries.where((entry) => entry.value.length > 1);
-  if (duplicates.isNotEmpty) {
-    final message = StringBuffer('发现重复事项 ID，本次同步未执行。\n');
+  // Resolve every occurrence's parent before comparing identities. A note's
+  // linked parent and a task's indentation can name the same logical parent.
+  for (final entry in occurrences.entries) {
+    final resolved = <_Occurrence>[];
+    for (final occurrence in entry.value) {
+      var item = occurrence.item;
+      final parentNote = occurrence.parentNote;
+      if (parentNote != null) {
+        final parentId = roots[caseFold(parentNote)];
+        if (parentId == null) throw FormatException('父事项文件不存在：$parentNote。');
+        item = item.copyWith(parentId: parentId);
+      }
+      resolved.add(_Occurrence(item, occurrence.tags, occurrence.position));
+    }
+    // A stable representative is enough for navigation and the existing JSON
+    // source format. All occurrences still contribute their children by ID.
+    resolved.sort((a, b) {
+      final kind = (a.item.source!.kind == 'file' ? 0 : 1).compareTo(
+        b.item.source!.kind == 'file' ? 0 : 1,
+      );
+      return kind != 0 ? kind : compareItemOrder(a.item, b.item);
+    });
+    entry.value
+      ..clear()
+      ..addAll(resolved);
+    items[entry.key] = resolved.first.item;
+    tags[entry.key] = resolved.first.tags;
+  }
+  final conflicts = <String, Set<String>>{};
+  for (final entry in occurrences.entries) {
+    final first = entry.value.first;
+    final differences = {
+      for (final other in entry.value.skip(1))
+        ..._identityDifferences(first, other),
+    };
+    if (differences.isNotEmpty) conflicts[entry.key] = differences;
+  }
+  if (conflicts.isNotEmpty) {
+    final message = StringBuffer('发现重复事项 ID 的父事项或解析结果不一致，本次同步未执行。\n');
     var group = 0;
-    for (final entry in duplicates) {
-      message.writeln('\n重复组 ${++group}：');
-      for (final location in entry.value) {
+    for (final entry in conflicts.entries) {
+      message.writeln('\n冲突组 ${++group}（差异：${entry.value.join('、')}）：');
+      for (final occurrence in occurrences[entry.key]!) {
+        final item = occurrence.item;
         message.writeln(
-          '• 事项「${location.name}」— ${location.path} ${location.position}',
+          '• 事项「${item.name}」— ${item.source!.path} ${occurrence.position}',
         );
+        for (final field in entry.value) {
+          message.writeln(
+            '  $field：${_identityField(field, occurrence, items)}',
+          );
+        }
       }
       message.writeln('ID：${entry.key}');
     }
-    message.write('请根据文件名和行号删除多余条目，或移除独立副本的 ID 后重试。原始文件和已保存数据均已保留。');
+    message.write(
+      '同 ID 的事项须保持父事项和解析字段一致，各处子事项会合并。请按位置修正差异；独立事项请移除副本 ID 后重试。原始文件和已保存数据均已保留。',
+    );
     throw ObsidianDuplicateIdException(message.toString());
-  }
-  for (final entry in parents.entries) {
-    final parentId = roots[caseFold(entry.value)];
-    if (parentId == null) throw FormatException('父事项文件不存在：${entry.value}。');
-    items[entry.key] = items[entry.key]!.copyWith(parentId: parentId);
   }
   validateItems(items);
   return ObsidianImport(

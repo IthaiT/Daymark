@@ -68,6 +68,7 @@ void main() {
   }
 
   void expectLocations() {
+    expect(find.text('Obsidian 同 ID 事项冲突'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('obsidian-duplicate-dialog')),
       findsOneWidget,
@@ -145,6 +146,41 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'compatible shared occurrences display one parent and all children',
+    (tester) async {
+      size(tester);
+      await store.importObsidian(
+        parseObsidian({
+          '计划.md':
+              '---\ndaymark-id: "${obsidianId(1)}"\n---\n'
+              '- [ ] 共享 ${obsidianId(2)}\n'
+              '  - [ ] 子事项甲 ${obsidianId(3)}\n'
+              '- [ ] 共享 ${obsidianId(2)}\n'
+              '  - [ ] 子事项乙 ${obsidianId(4)}\n',
+        }, directory: 'synthetic/Daymark'),
+        directory: 'synthetic/Daymark',
+      );
+      final journal = JournalController(store);
+      addTearDown(journal.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: daymarkTheme(),
+          home: Scaffold(body: ProjectScreen(journal: journal)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('共享'), findsOneWidget);
+      expect(find.text('子事项甲'), findsOneWidget);
+      expect(find.text('子事项乙'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('obsidian-duplicate-dialog')),
+        findsNothing,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('settings sync preserves directory input and allows retry', (
     tester,

@@ -278,6 +278,33 @@ $taskReopened = $taskReopenedTree.items | Where-Object { $_.id -eq $taskRetained
 if ($taskReopened.status -ne 'active' -or $taskReopened.completed_on) {
     throw 'Reopening a completed item did not clear the prior completion date.'
 }
+# A note and an inline occurrence can share one ID and contribute different children.
+$taskSharedOriginal = [IO.File]::ReadAllText($taskNotePath)
+$taskSharedContainer = Join-Path $taskObsidian '共享容器.md'
+$taskSharedContainerId = '^daymark-obsidian-' + [Guid]::NewGuid().ToString('D')
+$taskSharedChildId = '^daymark-obsidian-' + [Guid]::NewGuid().ToString('D')
+$taskSharedNote = $taskSharedOriginal.Replace("daymark-id: `"$taskFileId`"", "daymark-id: `"$taskFileId`"`nparent: `"[[共享容器]]`"")
+[IO.File]::WriteAllText($taskNotePath, $taskSharedNote, [Text.UTF8Encoding]::new($false))
+$taskSharedInline = "---`ndaymark-id: `"$taskSharedContainerId`"`n---`n- [ ] 合成事项 #主业 #副业 $taskFileId`n  - [ ] 额外子事项 $taskSharedChildId`n"
+[IO.File]::WriteAllText($taskSharedContainer, $taskSharedInline, [Text.UTF8Encoding]::new($false))
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+$taskSharedTree = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskSharedParent = @($taskSharedTree.items | Where-Object { $_.id -eq $taskFileId })
+$taskSharedChild = $taskSharedTree.items | Where-Object { $_.id -eq $taskSharedChildId }
+if (@($taskSharedTree.items).Count -ne 7 -or $taskSharedParent.Count -ne 1 -or $taskSharedParent[0].parent_id -ne $taskSharedContainerId -or $taskSharedParent[0].source.kind -ne 'file' -or $taskSharedChild.parent_id -ne $taskFileId) {
+    throw 'Compatible repeated identities did not merge their children under one logical node.'
+}
+if (@($taskSharedTree.items | Where-Object { $_.parent_id -eq $taskFileId }).Count -ne 5) {
+    throw 'The shared node lost children from one of its source locations.'
+}
+[IO.File]::WriteAllText($taskNotePath, $taskSharedOriginal, [Text.UTF8Encoding]::new($false))
+Remove-Item -LiteralPath $taskSharedContainer
+[DaymarkPrivateDesktop]::Run($taskExecutable, $taskDirectory, "${taskPreviousDay}T23:50:00", "${taskDay}T00:06:00")
+$taskAfterShared = Get-Content -Raw -LiteralPath (Join-Path $taskDirectory 'tree-backups/latest.json') | ConvertFrom-Json
+$taskSurvivingShared = $taskAfterShared.items | Where-Object { $_.id -eq $taskFileId }
+if (@($taskAfterShared.items).Count -ne 5 -or $taskSurvivingShared.parent_id -or $taskSurvivingShared.source.missing) {
+    throw 'Removing one shared location did not retain the surviving node correctly.'
+}
 # Merge a note into a task by copying its property value unchanged.
 $taskCsvPath = Join-Path $taskDirectory 'events.csv'
 $taskHeader = [IO.File]::ReadAllLines($taskCsvPath)[0]
@@ -311,4 +338,4 @@ if ($taskRemaining.Count -ne 2 -or @($taskRemaining | Where-Object { $_.source.m
 if (($taskAfterDeletion.events | Where-Object { $_.id -eq 'note-ref' }).item_id -ne $taskFileId -or ($taskAfterDeletion.events | Where-Object { $_.id -eq 'source-ref' }).item_id -ne $taskRetainedId) {
     throw 'Source deletion changed the saved record associations.'
 }
-Write-Output "Native smoke passed: plugin-free completion observation and reopening, unified note/task identities, note-to-task merge with unchanged record associations, four item states, source deletion and complete tree backup, Release fonts, isolated desktop, window bounds, BOM/cross-midnight gaps, archive backup, ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
+Write-Output "Native smoke passed: compatible repeated identities and child union, surviving shared source, plugin-free completion observation and reopening, unified note/task identities, note-to-task merge with unchanged record associations, four item states, source deletion and complete tree backup, Release fonts, isolated desktop, window bounds, BOM/cross-midnight gaps, archive backup, ledger preservation, single-instance rejection and lock release. Artifacts: $taskDirectory"
