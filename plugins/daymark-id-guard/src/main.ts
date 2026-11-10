@@ -101,7 +101,7 @@ export default class DaymarkIdGuard extends Plugin {
   }
 
   /** Unsaved open editors take precedence over disk when validating a cut. */
-  private async readSource(path: string): Promise<string | null> {
+  private openSource(path: string): string | undefined {
     const open = [...this.views].find((view) => filePath(view.state) === path);
     if (open) return open.state.doc.toString();
     let content: string | undefined;
@@ -110,9 +110,15 @@ export default class DaymarkIdGuard extends Plugin {
         content = leaf.view.editor.getValue();
       }
     });
-    if (content !== undefined) return content;
+    return content;
+  }
+
+  private async readSource(path: string): Promise<string | null> {
+    const open = this.openSource(path);
+    if (open !== undefined) return open;
     const file = this.app.vault.getAbstractFileByPath(path);
-    return file instanceof TFile ? await this.app.vault.read(file) : null;
+    const content = file instanceof TFile ? await this.app.vault.read(file) : null;
+    return this.openSource(path) ?? content;
   }
 
   async setFolder(value: string): Promise<void> {
@@ -121,15 +127,13 @@ export default class DaymarkIdGuard extends Plugin {
       new Notice("请输入仓库内相对路径，例如 工作/Daymark；仓库根目录填写 /。");
       return;
     }
-    const previous = this.settings.folder;
-    this.settings.folder = folder;
     try {
-      await this.saveData(this.settings);
+      await this.saveData({ folder });
     } catch {
-      this.settings.folder = previous;
       new Notice("设置保存失败，已保留原设置。");
       return;
     }
+    this.settings = { folder };
     this.unlocked = false;
     this.configure();
     new Notice(folder ? `已保护 ${folder} 直属的 Markdown 事项。` : "已关闭目录保护。");
@@ -146,9 +150,13 @@ class GuardSettingsTab extends PluginSettingTab {
       .setName("Daymark 事项文件夹")
       .setDesc("填写与 Daymark 同步目录对应的仓库内相对路径，例如 工作/Daymark。只保护直属 .md 文件；根目录填 /，留空关闭。")
       .addText((text) => text.setPlaceholder("工作/Daymark").setValue(folder).onChange((value) => { folder = value; }))
-      .addButton((button) => button.setButtonText("保存并启用").setCta().onClick(async () => { await this.guard.setFolder(folder); }));
+      .addButton((button) => button.setButtonText("保存并启用").setCta().onClick(async () => {
+        button.setDisabled(true);
+        try { await this.guard.setFolder(folder); }
+        finally { button.setDisabled(false); }
+      }));
     new Setting(this.containerEl)
       .setName("维护 ID")
-      .setDesc("命令面板中使用「显示并解锁 ID／恢复隐藏保护」。解锁仅在本次运行有效，重新启动插件后恢复保护。普通编辑及源码模式默认均隐藏任务行末 ID；文件属性不受此保护。 ");
+      .setDesc("命令面板中使用「显示并解锁 ID／恢复隐藏保护」。解锁仅在本次运行有效，重新启动插件后恢复保护。普通编辑及源码模式默认均隐藏任务行末 ID；文件属性不受此保护。");
   }
 }
