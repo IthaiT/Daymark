@@ -137,22 +137,75 @@ function isSimpleTaskBreak(tr: Transaction, before: readonly Identity[]): boolea
       !tr.startState.doc.slice(0, range.from).eq(tr.newDoc.slice(0, range.from)) ||
       !tr.startState.doc.slice(range.to).eq(tr.newDoc.slice(end))) return false;
   const inserted = tr.newDoc.sliceString(range.from, end);
-  return /^\n[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+(?:\[[ /xX-]\][ \t]*)?)?$/.test(inserted);
+  return /^[ \t]*\n[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+(?:\[[ /xX-]\][ \t]*)?)?$/.test(inserted);
 }
 
-/** Counting IDs is insufficient: a retained suffix must follow its retained body. */
-function detachedIdentity(tr: Transaction, before: readonly Identity[], after: readonly Identity[]): boolean {
+type IdentityEdit = Pick<Transaction, "startState" | "changes" | "newDoc">;
+
+/** A coarse rewrite is safe in place only if it preserves the row boundaries. */
+function sameRewrittenRow(tr: IdentityEdit, span: Identity, candidate: Identity): boolean {
+  let line = tr.startState.doc.lineAt(span.lineFrom).number;
+  let safe = true;
+  tr.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
+    const delta = inserted.lines - tr.startState.doc.slice(from, to).lines;
+    if (to <= span.lineFrom) line += delta;
+    else if (from <= span.lineTo && delta !== 0) safe = false;
+  });
+  return safe && tr.newDoc.lineAt(candidate.lineFrom).number === line;
+}
+
+/** Every old occurrence needs its own proof of ownership, including coarse rewrites. */
+function detachedIdentity(
+  tr: Transaction, before: readonly Identity[], after: readonly Identity[], edit: IdentityEdit,
+): boolean {
+  const gaps: { from: number; mapped: number; length: number }[] = [];
+  edit.changes.iterGaps((from, mapped, length) => { gaps.push({ from, mapped, length }); });
+  const claimed = new Set<Identity>();
+  const retained = new Map<Identity, Identity>();
+  // Reserve retained tokens first. Another occurrence with the same ID must
+  // never borrow this occurrence as proof that its own body is still attached.
   for (const span of before) {
-    if (span.bodyFrom >= span.from) continue;
-    const body = tr.changes.mapPos(span.bodyFrom, 1, MapMode.TrackAfter);
     const tokenFrom = span.from + tr.startState.doc.sliceString(span.from, span.to).indexOf(span.id);
-    const token = tr.changes.mapPos(tokenFrom, 1, MapMode.TrackAfter);
-    // Whole-row rewrites and moves replace these characters; the Enter path
-    // above handles recognizable rewrites without guessing other commands.
-    if (body === null || token === null) continue;
-    const retained = after.find((candidate) => candidate.id === span.id &&
-      candidate.from + tr.newDoc.sliceString(candidate.from, candidate.to).indexOf(candidate.id) === token);
-    if (retained && tr.newDoc.lineAt(body).from !== retained.lineFrom) return true;
+    const token = edit.changes.mapPos(tokenFrom, 1, MapMode.TrackAfter);
+    const candidate = token === null ? undefined : after.find((candidate) => candidate.id === span.id &&
+      candidate.from + edit.newDoc.sliceString(candidate.from, candidate.to).indexOf(candidate.id) === token);
+    if (candidate) {
+      retained.set(span, candidate);
+      claimed.add(candidate);
+    }
+  }
+  for (const span of before) {
+    const rows = new Set<number>();
+    // Check all retained visible fragments, including the checkbox. Looking at
+    // only bodyFrom loses the proof as soon as its first character is replaced.
+    for (const gap of gaps) {
+      const from = Math.max(span.lineFrom, gap.from);
+      if (from < Math.min(span.from, gap.from + gap.length)) {
+        rows.add(edit.newDoc.lineAt(gap.mapped + from - gap.from).from);
+      }
+    }
+    const candidates = retained.has(span) ? [retained.get(span)!]
+      : after.filter((candidate) => candidate.id === span.id && !claimed.has(candidate));
+    const owner = candidates.find((candidate) => {
+      if (rows.size) return rows.size === 1 && rows.has(candidate.lineFrom);
+      // With all anchors replaced, accept an unchanged complete row (native
+      // moves), or a rewrite that keeps the same row and newline boundaries.
+      return tr.startState.doc.sliceString(span.lineFrom, span.lineTo) ===
+        edit.newDoc.sliceString(candidate.lineFrom, candidate.lineTo) || sameRewrittenRow(edit, span, candidate);
+    });
+    if (owner) {
+      claimed.add(owner);
+      continue;
+    }
+    let deleted = false;
+    const fewerOccurrences = after.filter((item) => item.id === span.id).length <
+      before.filter((item) => item.id === span.id).length;
+    tr.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
+      if (from <= span.lineFrom && to >= span.lineTo &&
+          ((selectedWholeLine(tr, span) && (!inserted.length || fewerOccurrences)) ||
+            (tr.isUserEvent("delete.line") && !inserted.length))) deleted = true;
+    });
+    if (!deleted) return true;
   }
   return false;
 }
@@ -213,7 +266,9 @@ export function createIdGuard(options: GuardOptions): Extension {
       const correctedDoc = correction.empty ? tr.newDoc : correction.apply(tr.newDoc);
       const after = tr.docChanged ? scanIdentities(correctedDoc) : before;
       if (tr.docChanged && !trusted && (!protectsIdentities(tr, before, after) ||
-          detachedIdentity(tr, before, after))) {
+          detachedIdentity(tr, before, after, {
+            startState: tr.startState, changes: tr.changes.compose(correction), newDoc: correctedDoc,
+          }))) {
         options.blocked();
         return [];
       }
@@ -221,8 +276,16 @@ export function createIdGuard(options: GuardOptions): Extension {
       return correction.empty && selection.eq(tr.newSelection)
         ? tr : [tr, { changes: correction, selection, sequential: true }];
     })),
+    // Keymap priority alone cannot win against another host keymap. Handle
+    // ordinary Enter before CM's keymap dispatcher, using its public DOM API.
+    Prec.highest(EditorView.domEventHandlers({
+      keydown(event, view) {
+        if (event.key !== "Enter" || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey ||
+            event.isComposing || event.keyCode === 229) return false;
+        return splitTask(view, options);
+      },
+    })),
     Prec.highest(keymap.of([
-      { key: "Enter", run: (view) => splitTask(view, options) },
       {
         key: "ArrowRight",
         run(view) {

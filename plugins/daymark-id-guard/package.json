@@ -1,6 +1,6 @@
 {
   "name": "daymark-id-guard",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "在 Obsidian 中隐藏并保护 Daymark 事项身份",
   "type": "module",

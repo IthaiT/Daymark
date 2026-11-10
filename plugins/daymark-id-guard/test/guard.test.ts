@@ -88,6 +88,14 @@ describe("editor identity protection", () => {
     expect(view.state.doc.toString()).toBe(`- [ ] 中文 ${id(1)}`);
   });
 
+  it("keeps following task ownership when padding a formerly empty task", () => {
+    const view = editor(`- [ ] ${id(1)}\n- [ ] 保留事项 ${id(2)}`);
+    view.dispatch({ selection: { anchor: 6 } });
+    view.dispatch({ changes: { from: 6, insert: "新" }, selection: { anchor: 7 }, userEvent: "input.type.compose" });
+    expect(view.state.doc.toString()).toBe(`- [ ] 新 ${id(1)}\n- [ ] 保留事项 ${id(2)}`);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
   it("allows whole-row deletion, and history restores its original identity", () => {
     const source = `- [ ] 计划 ${id(1)}\n- [ ] 保留 ${id(2)}`;
     const view = editor(source);
@@ -104,6 +112,15 @@ describe("editor identity protection", () => {
     view.dispatch({ selection: EditorSelection.single(0, view.state.doc.length) });
     view.dispatch({ changes: { from: 0, to: view.state.doc.length }, userEvent: "delete.selection" });
     expect(view.state.doc.length).toBe(0);
+  });
+
+  it("allows replacing deliberately selected whole tasks with copied tasks", () => {
+    const view = editor(`- [ ] 原事项 ${id(1)}\n- [ ] 保留事项 ${id(2)}`);
+    const end = view.state.doc.line(1).to;
+    view.dispatch({ selection: EditorSelection.single(0, end) });
+    view.dispatch({ changes: { from: 0, to: end, insert: `- [ ] 粘贴事项 ${id(3)}` }, userEvent: "input.paste" });
+    expect(view.state.doc.toString()).toBe(`- [ ] 粘贴事项 ${id(3)}\n- [ ] 保留事项 ${id(2)}`);
+    expect(blocked).not.toHaveBeenCalled();
   });
 
   it("blocks a multiline edit that would erase a partially selected identity", () => {
@@ -128,6 +145,23 @@ describe("editor identity protection", () => {
     const view = editor(`- [ ] 计划 ${id(1)}`);
     view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `- [x] 计划 ✅ 2026-11-10 ${id(1)}` } });
     expect(view.state.doc.toString()).toContain("[x]");
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it("allows coarse multiline completion updates without changing task ownership", () => {
+    const view = editor(`- [ ] 第一条 ${id(1)}\n- [ ] 第二条 ${id(2)}`);
+    const updated = `- [x] 第一条 ✅ 2026-11-10 ${id(1)}\n- [ ] 修改第二条 ${id(2)}`;
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: updated } });
+    expect(view.state.doc.toString()).toBe(updated);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it("allows coarse native row moves while retaining a distinct owner for each ID", () => {
+    const first = `- [ ] 第一条 ${id(1)}`;
+    const second = `- [ ] 第二条 ${id(2)}`;
+    const view = editor(`${first}\n${second}`);
+    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: `${second}\n${first}` }, userEvent: "move.line" });
+    expect(view.state.doc.toString()).toBe(`${second}\n${first}`);
     expect(blocked).not.toHaveBeenCalled();
   });
 });

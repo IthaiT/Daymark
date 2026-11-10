@@ -12,9 +12,11 @@ const blocked = vi.fn();
 function fixture(hostFirst = true, sourceText?: string) {
   const compartment = new Compartment();
   const source = sourceText ?? `\t- [ ] 技术主管 ${id(1)}`;
-  const nativeEnter = Prec.highest(keymap.of([{
-    key: "Enter",
-    run(view) {
+  // A host DOM handler at the same highest precedence can still run first.
+  // This forces the transaction backstop instead of only our Enter shortcut.
+  const nativeEnter = Prec.highest(EditorView.domEventHandlers({
+    keydown(event, view) {
+      if (event.key !== "Enter") return false;
       const range = view.state.selection.main;
       view.dispatch({
         changes: { from: range.from, to: range.to, insert: "\n\t- [ ] " },
@@ -23,8 +25,9 @@ function fixture(hostFirst = true, sourceText?: string) {
       });
       return true;
     },
-  }]));
-  const guard = compartment.of(createIdGuard({ enabled: () => true, blocked, nextId: () => id(10) }));
+  }));
+  let next = 10;
+  const guard = compartment.of(createIdGuard({ enabled: () => true, blocked, nextId: () => id(next++) }));
   const view = new EditorView({
     parent: document.body,
     state: EditorState.create({ doc: source, extensions: [history(), ...(hostFirst ? [nativeEnter, guard] : [guard, nativeEnter])] }),
@@ -46,6 +49,16 @@ afterEach(() => {
 });
 
 describe("Enter dispatched by the host before the plugin shortcut", () => {
+  it("handles Enter before even a highest-priority host keymap can bypass filters", () => {
+    const { view, source } = fixture(false);
+    const host = vi.fn(() => true);
+    view.dispatch({ effects: StateEffect.appendConfig.of(Prec.highest(keymap.of([{ key: "Enter", run: host }]))) });
+    pressEnter(view);
+    expect(host).not.toHaveBeenCalled();
+    expect(view.state.doc.line(1).text).toBe(source);
+    expect(scanIdentities(view.state.doc)).toHaveLength(2);
+  });
+
   it.each([false, true])("keeps the old ID on the original row after disable (host first: %s)", (hostFirst) => {
     const { view, compartment, source } = fixture(hostFirst);
     pressEnter(view);
@@ -64,6 +77,83 @@ describe("Enter dispatched by the host before the plugin shortcut", () => {
     });
     expect(view.state.doc.line(1).text).toBe(source);
     expect(scanIdentities(view.state.doc)[1]!.id).toBe(id(10));
+  });
+
+  it.each(["", " ", "  ", "\t", " \t "])("handles repeated whole-row Enter rewrites with padding %j", (padding) => {
+    const { view, compartment, source } = fixture();
+    for (let n = 0; n < 30; n++) {
+      // End may be the physical source end, beyond the invisible suffix.
+      view.dispatch({ selection: { anchor: view.state.doc.line(1).to } });
+      view.dispatch({ changes: {
+        from: 0, to: view.state.doc.line(1).to,
+        insert: `\t- [ ] 技术主管${padding}\n\t- [ ]  ${id(1)}`,
+      }, userEvent: "input" });
+      expect(view.state.doc.line(1).text).toBe(source);
+      expect(scanIdentities(view.state.doc).filter((span) => span.id === id(1))).toHaveLength(1);
+      expect(scanIdentities(view.state.doc)).toHaveLength(n + 2);
+    }
+    view.dispatch({ effects: compartment.reconfigure([]) });
+    expect(view.state.doc.line(1).text).toBe(source);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("survives repeated End, typing and Enter key events (host first: %s)", (hostFirst) => {
+    const { view, compartment, source } = fixture(hostFirst);
+    for (let n = 0; n < 30; n++) {
+      const last = scanIdentities(view.state.doc).at(-1)!;
+      view.dispatch({ selection: { anchor: last.to } });
+      const head = view.state.selection.main.head;
+      view.dispatch({ changes: { from: head, insert: "补充" }, selection: { anchor: head + 2 }, userEvent: "input.type" });
+      pressEnter(view);
+      expect(view.state.doc.line(1).text).toBe(source.replace(` ${id(1)}`, `补充 ${id(1)}`));
+      const spans = scanIdentities(view.state.doc);
+      expect(spans).toHaveLength(n + 2);
+      expect(new Set(spans.map((span) => span.id)).size).toBe(spans.length);
+      expect(spans.slice(0, -1).every((span) => view.state.doc.sliceString(span.bodyFrom, span.from).trim())).toBe(true);
+    }
+    const result = view.state.doc.toString();
+    undo(view);
+    redo(view);
+    expect(view.state.doc.toString()).toBe(result);
+    view.dispatch({ effects: compartment.reconfigure([]) });
+    expect(view.state.doc.line(1).text).toContain(`补充 ${id(1)}`);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("keeps the original task intact when Enter repeatedly exits empty tasks (host first: %s)", (hostFirst) => {
+    const { view, source } = fixture(hostFirst);
+    for (let n = 0; n < 30; n++) {
+      pressEnter(view);
+      expect(view.state.doc.line(1).text).toBe(source);
+    }
+    expect(scanIdentities(view.state.doc).map((span) => span.id)).toEqual([id(1)]);
+    expect(blocked).not.toHaveBeenCalled();
+  });
+
+  it.each(["input", "input.type.compose", "input.paste", undefined])("rejects ambiguous complete rewrites with event %s", (userEvent) => {
+    const { view, source } = fixture();
+    view.dispatch({ changes: {
+      from: 0, to: view.state.doc.length,
+      insert: `\t- [ ] 技术主管\n\t- [ ]  ${id(1)}\n附带修改`,
+    }, userEvent });
+    expect(view.state.doc.toString()).toBe(source);
+    expect(blocked).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a deleted body anchor when the retained checkbox and title would lose their ID", () => {
+    const { view, source } = fixture();
+    const span = scanIdentities(view.state.doc)[0]!;
+    view.dispatch({ changes: { from: span.bodyFrom, to: span.bodyFrom + 1, insert: "技\n\t- [ ] " }, userEvent: "input.paste" });
+    expect(view.state.doc.toString()).toBe(source);
+    expect(blocked).toHaveBeenCalledOnce();
+  });
+
+  it("does not use an unchanged shared occurrence as proof for a detached occurrence", () => {
+    const row = `\t- [ ] 技术主管 ${id(1)}`;
+    const { view } = fixture(true, `${row}\n${row}`);
+    view.dispatch({ changes: { from: 0, to: row.length, insert: `\t- [ ] 技术主管\n\t- [ ]  ${id(1)}\n额外修改` } });
+    expect(view.state.doc.toString()).toBe(`${row}\n${row}`);
+    expect(blocked).toHaveBeenCalledOnce();
   });
 
   it("undoes and redoes the corrected host Enter without reallocating IDs", () => {
