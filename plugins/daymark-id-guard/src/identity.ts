@@ -77,16 +77,6 @@ export function newIdentity(): string {
   return `^daymark-obsidian-${crypto.randomUUID()}`;
 }
 
-export function freshenIdentities(text: string, nextId = newIdentity): string {
-  const doc = Text.of(text.replace(/\r\n?/g, "\n").split("\n"));
-  let result = doc.toString();
-  const replacements = scanIdentities(doc).map((span) => ({ ...span, replacement: ` ${nextId()}` }));
-  for (const span of replacements.reverse()) {
-    result = result.slice(0, span.from) + span.replacement + result.slice(span.to);
-  }
-  return result;
-}
-
 /** Folder scope mirrors Daymark: immediate Markdown children, not descendants. */
 export function normalizeFolder(input: string): string | null {
   const value = input.trim().replace(/\\/g, "/");

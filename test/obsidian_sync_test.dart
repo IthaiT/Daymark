@@ -138,6 +138,68 @@ void main() {
       expect((await Store.open(store.directory)).items, store.items);
     },
   );
+  for (final changeCopy in [false, true]) {
+    test(
+      'copying an ID across notes fails atomically (changed: $changeCopy), then deleting the source preserves history',
+      () async {
+        final a = File('${vault.path}/A.md');
+        final b = File('${vault.path}/B.md');
+        await a.writeAsString('- [ ] 任务 | 描述 | 结果\n');
+        await b.writeAsString('目标文件\n');
+        const sync = ObsidianSync();
+        await sync.synchronize(store, vault);
+        final task = store.items.values.singleWhere((n) => n.name == '任务');
+        final record = Event(
+          'copied-record',
+          '原有时间记录',
+          ['work'],
+          DateTime.utc(2026, 11, 10, 9),
+          DateTime.utc(2026, 11, 10, 10),
+          '保留原备注',
+          task.id,
+        );
+        await store.saveEvent(record);
+        final originalA = await a.readAsString();
+        final taskLine = originalA
+            .split('\n')
+            .singleWhere((line) => line.startsWith('- [ ]'));
+        final copiedLine = changeCopy
+            ? taskLine.replaceFirst('任务', '修改后的任务')
+            : taskLine;
+        final copiedB = '${await b.readAsString()}$copiedLine\n';
+        await b.writeAsString(copiedB);
+        final itemsFile = File('${store.directory.path}/items.json');
+        final persistedItems = await itemsFile.readAsBytes();
+        final priorItems = Map<String, Item>.of(store.items);
+        await expectLater(
+          sync.synchronize(store, vault),
+          throwsA(
+            isA<FormatException>().having(
+              (error) => error.message,
+              'duplicate identity message',
+              contains('重复事项 ID'),
+            ),
+          ),
+        );
+        expect(await a.readAsString(), originalA);
+        expect(await b.readAsString(), copiedB);
+        expect(await itemsFile.readAsBytes(), persistedItems);
+        expect(store.items, priorItems);
+        expect(store.events[record.id], record);
+        final unchanged = await Store.open(store.directory);
+        expect(unchanged.items, priorItems);
+        expect(unchanged.events[record.id], record);
+
+        // Copy + delete is a move with the same ID, independent of clipboard state.
+        await a.writeAsString(originalA.replaceFirst('$taskLine\n', ''));
+        await sync.synchronize(store, vault);
+        expect(store.items[task.id]!.source!.path, 'B.md');
+        expect(store.items[task.id]!.source!.missing, false);
+        expect(store.items[task.id]!.name, changeCopy ? '修改后的任务' : '任务');
+        expect(store.events[record.id], record);
+      },
+    );
+  }
   test(
     'a source write failure leaves the complete stored tree untouched',
     () async {

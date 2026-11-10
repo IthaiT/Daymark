@@ -115,13 +115,13 @@ describe("editor identity protection", () => {
     expect(view.state.doc.toString()).toBe(source);
   });
 
-  it("allows native line moves while preventing duplicate identities", () => {
+  it("allows native line moves and identity-preserving copies for Daymark to validate", () => {
     const view = editor(`- [ ] 一 ${id(1)}\n- [ ] 二 ${id(2)}`);
     moveLineDown(view);
     expect(scanIdentities(view.state.doc).map((span) => span.id)).toEqual([id(2), id(1)]);
     const before = view.state.doc.toString();
     view.dispatch({ changes: { from: 0, insert: `- [ ] 副本 ${id(1)}\n` } });
-    expect(view.state.doc.toString()).toBe(before);
+    expect(view.state.doc.toString()).toBe(`- [ ] 副本 ${id(1)}\n${before}`);
   });
 
   it("preserves the body and ID when a plugin replaces the complete document", () => {

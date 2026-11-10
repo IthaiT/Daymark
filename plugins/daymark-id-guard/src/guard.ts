@@ -12,7 +12,7 @@ import {
 import { Decoration, EditorView, keymap, type DecorationSet } from "@codemirror/view";
 import { indentation, newIdentity, scanIdentities, taskPrefix, type Identity } from "./identity";
 
-// Only commands in this plugin receive this annotation; normal typing is filtered.
+// Only structural edits in this plugin receive this annotation.
 export const structuralEdit = Annotation.define<boolean>();
 
 export interface GuardOptions {
@@ -44,11 +44,9 @@ function protectsIdentities(tr: Transaction, before: readonly Identity[], after:
   const afterCounts = new Map<string, number>();
   for (const span of before) beforeCounts.set(span.id, (beforeCounts.get(span.id) ?? 0) + 1);
   for (const span of after) afterCounts.set(span.id, (afterCounts.get(span.id) ?? 0) + 1);
-  for (const [id, count] of afterCounts) {
-    if (count > Math.max(1, beforeCounts.get(id) ?? 0)) return false;
-  }
+  const removedCounts = new Map<string, number>();
   for (const span of before) {
-    if (afterCounts.get(span.id) === beforeCounts.get(span.id)) continue;
+    if ((afterCounts.get(span.id) ?? 0) >= beforeCounts.get(span.id)!) continue;
     let wholeLineRemoved = false;
     tr.changes.iterChanges((from, to, _newFrom, _newTo, inserted) => {
       if (from <= span.lineFrom && to >= span.lineTo &&
@@ -56,7 +54,10 @@ function protectsIdentities(tr: Transaction, before: readonly Identity[], after:
         wholeLineRemoved = true;
       }
     });
-    if (!wholeLineRemoved) return false;
+    if (wholeLineRemoved) removedCounts.set(span.id, (removedCounts.get(span.id) ?? 0) + 1);
+  }
+  for (const [id, count] of beforeCounts) {
+    if ((afterCounts.get(id) ?? 0) + (removedCounts.get(id) ?? 0) < count) return false;
   }
   return true;
 }
@@ -141,7 +142,7 @@ export function createIdGuard(options: GuardOptions): Extension {
     EditorState.transactionFilter.of((tr) => {
       if (!options.enabled(tr.startState)) return tr;
       const before = tr.startState.field(identities);
-      // History must restore exact source text, including IDs generated on paste.
+      // History must restore exact source text and identities.
       const trusted = tr.annotation(structuralEdit) || tr.isUserEvent("undo") || tr.isUserEvent("redo");
       // A manually written empty task may have only the checkbox separator.
       // Typing before its ID needs a new separator, in the same undo transaction.

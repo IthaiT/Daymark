@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { freshenIdentities, isManagedPath, normalizeFolder, scanIdentities } from "../src/identity";
+import { isManagedPath, normalizeFolder, scanIdentities } from "../src/identity";
 
 export const id = (n: number) => `^daymark-obsidian-00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const scan = (text: string) => scanIdentities(Text.of(text.split("\n")));
@@ -35,13 +35,6 @@ describe("Daymark identity scanner", () => {
     expect(scan(`- [ ] broken ^daymark-obsidian-invalid\n- [ ] two ^other ${id(1)}\n- [?] bad ${id(2)}`)).toEqual([]);
   });
 
-  it("changes only task identities when making a copy", () => {
-    const text = `正文 [[文件#${id(1)}]]\n- [ ] 事项 ${id(1)}\n  - [ ] 子事项 ${id(2)}\n`;
-    let next = 10;
-    expect(freshenIdentities(text, () => id(next++))).toBe(
-      `正文 [[文件#${id(1)}]]\n- [ ] 事项 ${id(10)}\n  - [ ] 子事项 ${id(11)}\n`,
-    );
-  });
 });
 
 describe("vault-relative folder scope", () => {

@@ -89,9 +89,7 @@ afterEach(() => {
 describe("Obsidian plugin lifecycle", () => {
   it("loads stored scope, registers commands and protects only the configured folder", async () => {
     const { editor, registered } = await host();
-    expect(registered.commands.map((command) => command.id)).toEqual([
-      "toggle-unlock", "cut-subtree", "copy-subtree", "delete-subtree",
-    ]);
+    expect(registered.commands.map((command) => command.id)).toEqual(["toggle-unlock"]);
     expect(editor("Daymark/A.md").contentDOM.textContent).not.toContain(id);
     expect(editor("Other/A.md").contentDOM.textContent).toContain(id);
     expect(editor("Daymark/Nested/A.md").contentDOM.textContent).toContain(id);
