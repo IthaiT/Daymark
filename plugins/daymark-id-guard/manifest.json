@@ -1,7 +1,7 @@
 {
   "id": "daymark-id-guard",
   "name": "Daymark 事项保护",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minAppVersion": "1.6.0",
   "description": "隐藏并保护 Daymark 事项行末 ID，整行剪切、复制和粘贴保留原身份。",
   "author": "Daymark",

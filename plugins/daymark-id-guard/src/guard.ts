@@ -3,11 +3,13 @@ import {
   ChangeSet,
   EditorSelection,
   EditorState,
+  MapMode,
   Prec,
   StateField,
   Transaction,
   type ChangeSpec,
   type Extension,
+  type TransactionSpec,
 } from "@codemirror/state";
 import { Decoration, EditorView, keymap, type DecorationSet } from "@codemirror/view";
 import { indentation, newIdentity, scanIdentities, taskPrefix, type Identity } from "./identity";
@@ -62,27 +64,25 @@ function protectsIdentities(tr: Transaction, before: readonly Identity[], after:
   return true;
 }
 
-export function splitTask(view: EditorView, options: GuardOptions): boolean {
-  if (!options.enabled(view.state) || view.state.readOnly || view.composing ||
-      view.state.selection.ranges.length !== 1) return false;
-  const selection = view.state.selection.main;
-  const span = scanIdentities(view.state.doc).find(
+function taskSplit(state: EditorState, options: GuardOptions): TransactionSpec | undefined {
+  if (!options.enabled(state) || state.readOnly || state.selection.ranges.length !== 1) return undefined;
+  const selection = state.selection.main;
+  const span = scanIdentities(state.doc).find(
     (item) => selection.from >= item.bodyFrom && selection.to <= item.from,
   );
-  if (!span) return false;
-  const line = view.state.doc.lineAt(span.lineFrom);
+  if (!span) return undefined;
+  const line = state.doc.lineAt(span.lineFrom);
   const prefix = taskPrefix.exec(line.text)!;
-  const body = view.state.doc.sliceString(span.bodyFrom, span.from);
+  const body = state.doc.sliceString(span.bodyFrom, span.from);
   if (!body.trim()) {
-    view.dispatch({
+    return {
       changes: { from: line.from, to: line.to, insert: prefix[1]! },
       selection: { anchor: line.from + prefix[1]!.length },
       annotations: [structuralEdit.of(true), Transaction.userEvent.of("input")],
-    });
-    return true;
+    };
   }
-  const left = view.state.doc.sliceString(span.bodyFrom, selection.from).trimEnd();
-  const right = view.state.doc.sliceString(selection.to, span.from).trimStart();
+  const left = state.doc.sliceString(span.bodyFrom, selection.from).trimEnd();
+  const right = state.doc.sliceString(selection.to, span.from).trimStart();
   const nextId = (options.nextId ?? newIdentity)();
   const marker = /^\d/.test(prefix[2]!)
     ? `${Number.parseInt(prefix[2]!, 10) + 1}${prefix[2]!.slice(-1)}` : prefix[2]!;
@@ -95,8 +95,8 @@ export function splitTask(view: EditorView, options: GuardOptions): boolean {
   let subtreeTo = line.to;
   if (!originalOnRight) {
     const level = indentation(line.text);
-    for (let n = line.number + 1; n <= view.state.doc.lines; n++) {
-      const child = view.state.doc.line(n);
+    for (let n = line.number + 1; n <= state.doc.lines; n++) {
+      const child = state.doc.line(n);
       if (child.text.trim() && indentation(child.text) <= level) break;
       if (child.text.trim()) subtreeTo = child.to;
     }
@@ -109,12 +109,52 @@ export function splitTask(view: EditorView, options: GuardOptions): boolean {
         { from: line.from, to: line.to, insert: first },
         { from: subtreeTo, insert: `\n${second}` },
       ];
-  view.dispatch({
+  return {
     changes,
     selection: { anchor: subtreeTo + first.length - line.length + 1 + nextPrefix.length },
     annotations: [structuralEdit.of(true), Transaction.userEvent.of("input")],
-  });
+  };
+}
+
+export function splitTask(view: EditorView, options: GuardOptions): boolean {
+  if (view.composing) return false;
+  const split = taskSplit(view.state, options);
+  if (!split) return false;
+  view.dispatch(split);
   return true;
+}
+
+/** Recognize an Enter result even when the host replaces a complete row. */
+function isSimpleTaskBreak(tr: Transaction, before: readonly Identity[]): boolean {
+  if (!tr.docChanged || tr.startState.selection.ranges.length !== 1 ||
+      tr.isUserEvent("input.paste") || tr.isUserEvent("input.drop") ||
+      tr.isUserEvent("input.type.compose") || tr.isUserEvent("move") || tr.isUserEvent("delete")) return false;
+  const range = tr.startState.selection.main;
+  if (!before.some((span) => range.from >= span.bodyFrom && range.to <= span.from)) return false;
+  const suffixLength = tr.startState.doc.length - range.to;
+  const end = tr.newDoc.length - suffixLength;
+  if (end <= range.from ||
+      !tr.startState.doc.slice(0, range.from).eq(tr.newDoc.slice(0, range.from)) ||
+      !tr.startState.doc.slice(range.to).eq(tr.newDoc.slice(end))) return false;
+  const inserted = tr.newDoc.sliceString(range.from, end);
+  return /^\n[ \t]*(?:(?:[-+*]|\d+[.)])[ \t]+(?:\[[ /xX-]\][ \t]*)?)?$/.test(inserted);
+}
+
+/** Counting IDs is insufficient: a retained suffix must follow its retained body. */
+function detachedIdentity(tr: Transaction, before: readonly Identity[], after: readonly Identity[]): boolean {
+  for (const span of before) {
+    if (span.bodyFrom >= span.from) continue;
+    const body = tr.changes.mapPos(span.bodyFrom, 1, MapMode.TrackAfter);
+    const tokenFrom = span.from + tr.startState.doc.sliceString(span.from, span.to).indexOf(span.id);
+    const token = tr.changes.mapPos(tokenFrom, 1, MapMode.TrackAfter);
+    // Whole-row rewrites and moves replace these characters; the Enter path
+    // above handles recognizable rewrites without guessing other commands.
+    if (body === null || token === null) continue;
+    const retained = after.find((candidate) => candidate.id === span.id &&
+      candidate.from + tr.newDoc.sliceString(candidate.from, candidate.to).indexOf(candidate.id) === token);
+    if (retained && tr.newDoc.lineAt(body).from !== retained.lineFrom) return true;
+  }
+  return false;
 }
 
 export function createIdGuard(options: GuardOptions): Extension {
@@ -139,11 +179,26 @@ export function createIdGuard(options: GuardOptions): Extension {
   return [
     identities,
     hidden,
-    EditorState.transactionFilter.of((tr) => {
+    Prec.highest(EditorState.transactionFilter.of((tr) => {
       if (!options.enabled(tr.startState)) return tr;
       const before = tr.startState.field(identities);
       // History must restore exact source text and identities.
       const trusted = tr.annotation(structuralEdit) || tr.isUserEvent("undo") || tr.isUserEvent("redo");
+      if (!trusted && isSimpleTaskBreak(tr, before)) {
+        const split = taskSplit(tr.startState, options);
+        if (split) {
+          // Compose a correction before the transaction reaches the document.
+          // Keep host annotations/effects and make Enter one undoable change.
+          const safeChanges = tr.startState.changes(split.changes);
+          const correction = tr.changes.invert(tr.startState.doc).compose(safeChanges);
+          return [tr, {
+            changes: correction,
+            selection: split.selection,
+            annotations: split.annotations,
+            sequential: true,
+          }];
+        }
+      }
       // A manually written empty task may have only the checkbox separator.
       // Typing before its ID needs a new separator, in the same undo transaction.
       const padding: ChangeSpec[] = [];
@@ -157,14 +212,15 @@ export function createIdGuard(options: GuardOptions): Extension {
       const correction = ChangeSet.of(padding, tr.newDoc.length);
       const correctedDoc = correction.empty ? tr.newDoc : correction.apply(tr.newDoc);
       const after = tr.docChanged ? scanIdentities(correctedDoc) : before;
-      if (tr.docChanged && !trusted && !protectsIdentities(tr, before, after)) {
+      if (tr.docChanged && !trusted && (!protectsIdentities(tr, before, after) ||
+          detachedIdentity(tr, before, after))) {
         options.blocked();
         return [];
       }
       const selection = safeSelection(tr.newSelection.map(correction, -1), after);
       return correction.empty && selection.eq(tr.newSelection)
         ? tr : [tr, { changes: correction, selection, sequential: true }];
-    }),
+    })),
     Prec.highest(keymap.of([
       { key: "Enter", run: (view) => splitTask(view, options) },
       {
