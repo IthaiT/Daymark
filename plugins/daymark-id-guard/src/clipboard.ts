@@ -115,6 +115,10 @@ export class GuardClipboard {
 
   private prepare(view: EditorView, cut: boolean, subtree: boolean): ClipboardPlan | null {
     if (!this.options.enabled(view.state)) return null;
+    if (cut && view.state.readOnly) {
+      this.options.notify("当前编辑器为只读，未执行剪切。");
+      return null;
+    }
     const plan = clipboardPlan(view.state, subtree);
     if (!plan) {
       this.options.notify("请使用单个选区，或将光标放在一个事项行内。");
@@ -178,7 +182,8 @@ export class GuardClipboard {
     try {
       await write(plan.text);
       if (view.state.doc !== state.doc || !view.state.selection.eq(state.selection) ||
-          this.options.path(view.state) !== this.options.path(state) || !this.options.enabled(view.state)) {
+          this.options.path(view.state) !== this.options.path(state) || !this.options.enabled(view.state) ||
+          (cut && view.state.readOnly)) {
         this.options.notify("复制期间内容或选区已变化，未执行剪切，请重试。");
         return;
       }
@@ -189,7 +194,7 @@ export class GuardClipboard {
   }
 
   deleteSubtree(view: EditorView): void {
-    if (!this.options.enabled(view.state)) return;
+    if (!this.options.enabled(view.state) || view.state.readOnly) return;
     const plan = clipboardPlan(view.state, true);
     if (!plan) return;
     view.dispatch({
@@ -201,7 +206,7 @@ export class GuardClipboard {
 
   /** A cut may reuse IDs once, and only if they are still absent from its source. */
   async paste(view: EditorView, input: string, linewiseHint = false): Promise<void> {
-    if (!this.options.enabled(view.state)) return;
+    if (!this.options.enabled(view.state) || view.state.readOnly) return;
     if (view.state.selection.ranges.length !== 1) {
       this.options.notify("事项粘贴暂不支持多个光标，请保留一个选区后重试。");
       return;
@@ -220,7 +225,7 @@ export class GuardClipboard {
         ids.every((id) => !sourceIds.has(id) && !targetIds.has(id));
     }
     if (view.state.doc !== state.doc || !view.state.selection.eq(state.selection) ||
-        this.options.path(view.state) !== path || !this.options.enabled(view.state)) {
+        this.options.path(view.state) !== path || !this.options.enabled(view.state) || view.state.readOnly) {
       this.options.notify("粘贴期间内容或选区已变化，未写入，请重试。");
       return;
     }

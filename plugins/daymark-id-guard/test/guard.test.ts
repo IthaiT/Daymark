@@ -182,4 +182,14 @@ describe("task Enter semantics", () => {
     vi.spyOn(view, "composing", "get").mockReturnValue(true);
     expect(splitTask(view, options)).toBe(false);
   });
+
+  it("does not split a read-only editor", () => {
+    const source = `- [ ] 计划 ${id(1)}`;
+    const view = new EditorView({ state: EditorState.create({
+      doc: source, selection: { anchor: 8 }, extensions: EditorState.readOnly.of(true),
+    }) });
+    views.push(view);
+    expect(splitTask(view, options)).toBe(false);
+    expect(view.state.doc.toString()).toBe(source);
+  });
 });

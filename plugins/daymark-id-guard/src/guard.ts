@@ -62,7 +62,8 @@ function protectsIdentities(tr: Transaction, before: readonly Identity[], after:
 }
 
 export function splitTask(view: EditorView, options: GuardOptions): boolean {
-  if (!options.enabled(view.state) || view.composing || view.state.selection.ranges.length !== 1) return false;
+  if (!options.enabled(view.state) || view.state.readOnly || view.composing ||
+      view.state.selection.ranges.length !== 1) return false;
   const selection = view.state.selection.main;
   const span = scanIdentities(view.state.doc).find(
     (item) => selection.from >= item.bodyFrom && selection.to <= item.from,

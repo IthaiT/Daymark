@@ -245,6 +245,23 @@ describe("cut identity lifetime", () => {
 });
 
 describe("paste and subtree editing", () => {
+  it("keeps read-only editors unchanged for cut, delete and paste", async () => {
+    const { clipboard } = fixture();
+    const original = `- [ ] 计划 ${id(1)}`;
+    const view = new EditorView({ state: EditorState.create({
+      doc: original, extensions: EditorState.readOnly.of(true),
+    }) });
+    views.push(view);
+    const write = vi.fn(async () => {});
+    await clipboard.copySubtree(view, true, write);
+    clipboard.deleteSubtree(view);
+    await clipboard.paste(view, `- [ ] 新事项 ${id(2)}`);
+    expect(view.state.doc.toString()).toBe(original);
+    expect(write).not.toHaveBeenCalled();
+    await clipboard.copySubtree(view, false, write);
+    expect(write).toHaveBeenCalled();
+  });
+
   it("rekeys external task IDs and preserves the same generated IDs through undo/redo", async () => {
     const { editor, clipboard } = fixture();
     const target = editor("Daymark/B.md", "");
