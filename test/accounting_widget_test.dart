@@ -13,7 +13,9 @@ void main() {
       '${mode.name} uses saved-event shares even with drafts and filtering',
       (tester) async {
         final directory = (await tester.runAsync(
-          () => Directory('.test-artifacts').createTemp('accounting-'),
+          () async => (await Directory(
+            '.test-artifacts',
+          ).create()).createTemp('accounting-'),
         ))!;
         final store = (await tester.runAsync(
           () => Store.open(directory, writer: (_, _) async {}),

@@ -25,7 +25,9 @@ void main() {
 
   setUp(() async {
     failWrites = false;
-    directory = await Directory('.test-artifacts').createTemp('organizer-');
+    directory = await (await Directory(
+      '.test-artifacts',
+    ).create()).createTemp('organizer-');
     store = await Store.open(
       directory,
       writer: (file, bytes) async {

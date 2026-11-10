@@ -21,9 +21,9 @@ void main() {
 
   setUp(() async {
     failWrites = false;
-    directory = await Directory(
+    directory = await (await Directory(
       '.test-artifacts',
-    ).createTemp('organizer-widget-');
+    ).create()).createTemp('organizer-widget-');
     final store = await Store.open(
       directory,
       writer: (_, _) async {
